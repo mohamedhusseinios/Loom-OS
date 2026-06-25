@@ -9,7 +9,7 @@ from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
 from daemon.models import (
     RegisterPayload, HeartbeatPayload, FindingFrontmatter,
-    AgentInfo, AgentStatus, FindingType, WsEvent,
+    AgentInfo, AgentStatus, FindingType, WsEvent, TaskPayload,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,8 @@ class Router:
                 await self._handle_finding(project, path)
             elif filename.startswith("decision-") and filename.endswith(".md"):
                 await self._handle_decision(project, path)
+            elif filename.startswith("task-") and filename.endswith(".json"):
+                await self._handle_task(project, path)
             else:
                 logger.debug(f"Ignoring unknown file: {filename}")
                 return
@@ -120,6 +122,18 @@ class Router:
         await self._emit_event("finding:ingested", project, {
             "file": path.name,
             "type": "architecture-decision",
+        })
+
+    async def _handle_task(self, project: str, path: Path):
+        payload = TaskPayload(**json.loads(path.read_text()))
+        await self.registry.create_task(
+            payload.task_id, project, payload.target_agent,
+            payload.instruction, payload.priority,
+        )
+        await self._emit_event("agent:dispatched", project, {
+            "task_id": payload.task_id,
+            "target_agent": payload.target_agent,
+            "instruction": payload.instruction,
         })
 
     def _parse_frontmatter(self, content: str) -> FindingFrontmatter:

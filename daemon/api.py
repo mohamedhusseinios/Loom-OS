@@ -11,7 +11,7 @@ from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
 from daemon.watcher import InboxWatcher
-from daemon.models import WsEvent, ProjectCreatePayload
+from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,45 @@ async def query_graph(project_id: str, q: str = ""):
         raise HTTPException(status_code=404, detail="Project not found")
     result = await graph_engine.query(project.project_path, q)
     return result.model_dump()
+
+@app.post("/api/projects/{project_id}/dispatch")
+async def dispatch_task(project_id: str, payload: DispatchRequest):
+    """Dispatch a task to an agent."""
+    import uuid, os
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    task_id = str(uuid.uuid4())
+    task_payload = TaskPayload(
+        task_id=task_id,
+        target_agent=payload.target_agent,
+        instruction=payload.instruction,
+        priority=payload.priority,
+    )
+
+    inbox_dir = os.path.expanduser(f"~/.agentic-os/inbox/{project_id}")
+    os.makedirs(inbox_dir, exist_ok=True)
+    task_path = os.path.join(inbox_dir, f"task-{task_id}.json")
+    with open(task_path, "w") as f:
+        f.write(task_payload.model_dump_json())
+
+    await registry.create_task(task_id, project_id, payload.target_agent, payload.instruction, payload.priority)
+
+    if router:
+        await router._emit_event("agent:dispatched", project_id, {
+            "task_id": task_id,
+            "target_agent": payload.target_agent,
+            "instruction": payload.instruction,
+        })
+
+    return {"task_id": task_id, "status": "dispatched"}
+
+@app.get("/api/projects/{project_id}/dispatches")
+async def list_dispatches(project_id: str):
+    """List task dispatches for a project."""
+    tasks = await registry.list_tasks(project_id)
+    return {"dispatches": tasks}
 
 
 @app.get("/api/projects/{project_id}/agents")

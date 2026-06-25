@@ -120,6 +120,29 @@ class DiscoverResult(BaseModel):
     directories: list[dict] = Field(default_factory=list)
     parent: Optional[str] = None
 
+# --- Agent Dispatch Schemas ---
+
+class TaskPayload(BaseModel):
+    type: str = "task"
+    task_id: str
+    target_agent: str
+    instruction: str
+    priority: str = "medium"
+    dispatched_by: str = "dashboard"
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DispatchRequest(BaseModel):
+    target_agent: str
+    instruction: str
+    priority: str = "medium"
+
+class DispatchResult(BaseModel):
+    task_id: str
+    status: str  # "dispatched"
+
+class AgentDetail(AgentInfo):
+    finding_count: int = 0
+
 # --- WebSocket Events ---
 
 class WsEvent(BaseModel):

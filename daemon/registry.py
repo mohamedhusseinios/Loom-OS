@@ -42,6 +42,18 @@ class AgentRegistry:
                 total_findings INTEGER DEFAULT 0
             )
         """)
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                target_agent TEXT NOT NULL,
+                instruction TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'medium',
+                status TEXT NOT NULL DEFAULT 'pending',
+                dispatched_at TEXT NOT NULL DEFAULT (datetime('now')),
+                completed_at TEXT
+            )
+        """)
         await self.db.commit()
 
     async def close(self):
@@ -139,6 +151,30 @@ class AgentRegistry:
         )
         await self.db.commit()
         return cursor.rowcount > 0
+
+    # --- Task CRUD ---
+
+    async def create_task(self, task_id: str, project: str, target_agent: str, instruction: str, priority: str):
+        await self.db.execute(
+            "INSERT INTO tasks (task_id, project, target_agent, instruction, priority) VALUES (?, ?, ?, ?, ?)",
+            (task_id, project, target_agent, instruction, priority),
+        )
+        await self.db.commit()
+
+    async def list_tasks(self, project: str) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM tasks WHERE project = ? ORDER BY dispatched_at DESC LIMIT 50",
+            (project,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def complete_task(self, task_id: str):
+        await self.db.execute(
+            "UPDATE tasks SET status = 'completed', completed_at = ? WHERE task_id = ?",
+            (datetime.now(timezone.utc).isoformat(), task_id),
+        )
+        await self.db.commit()
 
     async def get_project(self, project_id: str) -> Optional[ProjectInfo]:
         cursor = await self.db.execute(
