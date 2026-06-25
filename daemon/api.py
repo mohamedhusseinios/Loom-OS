@@ -104,6 +104,33 @@ async def get_graph_stats(project_id: str):
     stats = await graph_engine.get_stats(project.project_path)
     return stats.model_dump()
 
+@app.get("/api/projects/{project_id}/graph/topology")
+async def get_graph_topology(project_id: str):
+    """Get full graph topology for visualization."""
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    topology = await graph_engine.get_topology(project.project_path)
+    return topology
+
+@app.get("/api/projects/{project_id}/graph/communities")
+async def get_graph_communities(project_id: str):
+    """Get community list for graph filter."""
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    communities = await graph_engine.get_communities(project.project_path)
+    return {"communities": communities}
+
+@app.get("/api/projects/{project_id}/graph/flows")
+async def get_graph_flows(project_id: str):
+    """Get execution flows for graph highlighting."""
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    flows = await graph_engine.get_flows(project.project_path)
+    return {"flows": flows}
+
 
 @app.get("/api/projects/{project_id}/query")
 async def query_graph(project_id: str, q: str = ""):

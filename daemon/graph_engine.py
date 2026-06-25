@@ -132,6 +132,71 @@ class GraphEngine:
         with open(path) as f:
             return json.load(f)
 
+    async def get_topology(self, project_path: str) -> dict:
+        """Return full graph topology (nodes + edges) for visualization."""
+        graph_path = Path(project_path) / "graphify-out" / "graph.json"
+        if not graph_path.exists():
+            return {"nodes": [], "edges": []}
+
+        data = await asyncio.to_thread(self._read_graph_json, graph_path)
+        nodes = data.get("nodes", [])
+        edges = data.get("edges", [])
+
+        result_nodes = []
+        for n in nodes:
+            result_nodes.append({
+                "id": n.get("id", ""),
+                "label": n.get("name", n.get("id", "")),
+                "kind": n.get("kind", "Unknown"),
+                "community": n.get("community_id", 0),
+                "file": n.get("file", ""),
+            })
+
+        result_edges = []
+        for e in edges:
+            result_edges.append({
+                "source": e.get("source", ""),
+                "target": e.get("target", ""),
+                "kind": e.get("kind", "references"),
+            })
+
+        return {"nodes": result_nodes, "edges": result_edges}
+
+    async def get_communities(self, project_path: str) -> list[dict]:
+        """Return community list with sizes."""
+        graph_path = Path(project_path) / "graphify-out" / "graph.json"
+        if not graph_path.exists():
+            return []
+
+        data = await asyncio.to_thread(self._read_graph_json, graph_path)
+        communities = data.get("communities", {})
+        result = []
+        for cid, cdata in communities.items():
+            result.append({
+                "id": cid,
+                "name": cdata.get("name", f"Community {cid}"),
+                "size": len(cdata.get("members", [])),
+            })
+        return sorted(result, key=lambda c: c["size"], reverse=True)
+
+    async def get_flows(self, project_path: str) -> list[dict]:
+        """Return execution flows."""
+        graph_path = Path(project_path) / "graphify-out" / "graph.json"
+        if not graph_path.exists():
+            return []
+
+        data = await asyncio.to_thread(self._read_graph_json, graph_path)
+        flows = data.get("flows", [])
+        result = []
+        for f in flows:
+            result.append({
+                "id": f.get("id", ""),
+                "name": f.get("name", ""),
+                "criticality": f.get("criticality", 0),
+                "node_ids": [s.get("node_id", "") for s in f.get("steps", [])],
+            })
+        return sorted(result, key=lambda f: f["criticality"], reverse=True)
+
     async def query(self, project_path: str, question: str) -> QueryResult:
         """Query the project graph."""
         if not self.available:

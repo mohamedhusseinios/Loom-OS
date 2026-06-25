@@ -161,3 +161,13 @@ def test_discover_invalid_path(client):
     """GET /api/discover with invalid path returns 400."""
     res = client.get("/api/discover?path=/nonexistent")
     assert res.status_code == 400
+
+def test_get_graph_topology_404(client):
+    """Graph topology for unknown project returns 404."""
+    res = client.get("/api/projects/nonexistent/graph/topology")
+    assert res.status_code == 404
+
+def test_get_graph_communities_404(client):
+    """Graph communities for unknown project returns 404."""
+    res = client.get("/api/projects/nonexistent/graph/communities")
+    assert res.status_code == 404
