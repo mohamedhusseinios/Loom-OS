@@ -69,3 +69,33 @@ export async function rebuildGraph(id: string): Promise<{ status: string }> {
   const res = await fetch(`${BASE_URL}/api/projects/${id}/rebuild`, { method: "POST" });
   return res.json();
 }
+
+// --- Project CRUD ---
+
+export interface CreateProjectPayload {
+  name: string;
+  path: string;
+}
+
+export async function createProject(payload: CreateProjectPayload): Promise<ProjectSummary["project"]> {
+  const res = await fetch(`${BASE_URL}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteProject(id: string): Promise<{ deleted: boolean }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function discoverDirs(path: string = "~"): Promise<{
+  directories: { name: string; path: string; has_git: boolean }[];
+  parent: string;
+}> {
+  return fetchApi(`/api/discover?path=${encodeURIComponent(path)}`);
+}
