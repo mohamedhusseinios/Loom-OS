@@ -1,0 +1,159 @@
+"""FastAPI application for the Agentic OS daemon."""
+
+from typing import Optional
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from daemon.registry import AgentRegistry
+from daemon.graph_engine import GraphEngine
+from daemon.router import Router
+from daemon.watcher import InboxWatcher
+from daemon.models import WsEvent
+
+logger = logging.getLogger(__name__)
+
+# Global state
+registry: Optional[AgentRegistry] = None
+graph_engine: Optional[GraphEngine] = None
+router: Optional[Router] = None
+watcher: Optional[InboxWatcher] = None
+connected_clients: list[WebSocket] = []
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start watcher on startup, clean up on shutdown."""
+    global registry, graph_engine, router, watcher
+
+    registry = AgentRegistry()
+    await registry.initialize()
+
+    graph_engine = GraphEngine()
+    router = Router(registry, graph_engine)
+
+    watcher = InboxWatcher()
+    loop = asyncio.get_running_loop()
+    watcher.start(router.handle_file, loop)
+
+    # Background task: broadcast events to WebSocket clients
+    asyncio.create_task(_broadcast_events())
+
+    logger.info("Agentic OS daemon started")
+    yield
+    watcher.stop()
+    await registry.close()
+    logger.info("Agentic OS daemon stopped")
+
+
+app = FastAPI(title="Agentic OS", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/projects")
+async def list_projects():
+    """List all tracked projects."""
+    projects = await registry.list_projects()
+    return {"projects": [p.model_dump() for p in projects]}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str):
+    """Get project details with graph stats and agents."""
+    project = await registry.get_project(project_id)
+    if not project:
+        return {"error": "Project not found"}, 404
+
+    stats = await graph_engine.get_stats(project.project_path)
+    agents = await registry.list_agents(project_id)
+
+    return {
+        "project": project.model_dump(),
+        "graph": stats.model_dump(),
+        "agents": [a.model_dump() for a in agents],
+    }
+
+
+@app.get("/api/projects/{project_id}/graph")
+async def get_graph_stats(project_id: str):
+    """Get graph statistics for a project."""
+    project = await registry.get_project(project_id)
+    if not project:
+        return {"error": "Project not found"}, 404
+    stats = await graph_engine.get_stats(project.project_path)
+    return stats.model_dump()
+
+
+@app.get("/api/projects/{project_id}/query")
+async def query_graph(project_id: str, q: str = ""):
+    """Query the project knowledge graph."""
+    if not q:
+        return {"error": "Missing query parameter 'q'"}, 400
+    project = await registry.get_project(project_id)
+    if not project:
+        return {"error": "Project not found"}, 404
+    result = await graph_engine.query(project.project_path, q)
+    return result.model_dump()
+
+
+@app.get("/api/projects/{project_id}/agents")
+async def list_agents(project_id: str):
+    """List agents for a project."""
+    agents = await registry.list_agents(project_id)
+    return {"agents": [a.model_dump() for a in agents]}
+
+
+@app.post("/api/projects/{project_id}/rebuild")
+async def rebuild_graph(project_id: str):
+    """Force a full graph rebuild."""
+    project = await registry.get_project(project_id)
+    if not project:
+        return {"error": "Project not found"}, 404
+    result = await graph_engine.build_project(project.project_path)
+    return result.model_dump()
+
+
+@app.get("/api/health")
+async def health():
+    """Health check."""
+    return {
+        "status": "ok",
+        "graphify_available": graph_engine.available if graph_engine else False,
+        "watcher_running": watcher.is_running if watcher else False,
+    }
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket for live event streaming."""
+    await websocket.accept()
+    connected_clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connected_clients.remove(websocket)
+
+
+async def _broadcast_events():
+    """Broadcast router events to all connected WebSocket clients."""
+    while True:
+        event: WsEvent = await router.events.get()
+        disconnected = []
+        for client in connected_clients:
+            try:
+                await client.send_text(event.model_dump_json())
+            except Exception:
+                disconnected.append(client)
+        for client in disconnected:
+            if client in connected_clients:
+                connected_clients.remove(client)
