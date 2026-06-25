@@ -124,3 +124,40 @@ def test_health(client):
     assert data["status"] == "ok"
     assert "graphify_available" in data
     assert "watcher_running" in data
+
+def test_create_project(client):
+    """POST /api/projects creates a new tracked project."""
+    res = client.post("/api/projects", json={"name": "test-proj", "path": "/tmp"})
+    assert res.status_code == 201
+    data = res.json()
+    assert data["project_id"] == "test-proj"
+
+def test_create_project_invalid_path(client):
+    """POST /api/projects with non-existent path returns 400."""
+    res = client.post("/api/projects", json={"name": "bad", "path": "/nonexistent/path"})
+    assert res.status_code == 400
+
+def test_delete_project(client):
+    """DELETE /api/projects/:id removes a project."""
+    client.post("/api/projects", json={"name": "del-me", "path": "/tmp"})
+    res = client.delete("/api/projects/del-me")
+    assert res.status_code == 200
+    assert res.json()["deleted"] is True
+
+def test_delete_project_not_found(client):
+    """DELETE /api/projects/:id with unknown id returns 404."""
+    res = client.delete("/api/projects/nonexistent")
+    assert res.status_code == 404
+
+def test_discover_directories(client):
+    """GET /api/discover returns subdirectories."""
+    res = client.get("/api/discover?path=/tmp")
+    assert res.status_code == 200
+    data = res.json()
+    assert "directories" in data
+    assert "parent" in data
+
+def test_discover_invalid_path(client):
+    """GET /api/discover with invalid path returns 400."""
+    res = client.get("/api/discover?path=/nonexistent")
+    assert res.status_code == 400

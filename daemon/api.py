@@ -11,7 +11,7 @@ from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
 from daemon.watcher import InboxWatcher
-from daemon.models import WsEvent
+from daemon.models import WsEvent, ProjectCreatePayload
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,48 @@ async def rebuild_graph(project_id: str):
     result = await graph_engine.build_project(project.project_path)
     return result.model_dump()
 
+@app.post("/api/projects", status_code=201)
+async def create_project(payload: ProjectCreatePayload):
+    """Create a new tracked project."""
+    import os
+    path = os.path.expanduser(payload.path)
+    if not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
+    project = await registry.create_project(payload.name, payload.name, path)
+    if router:
+        await router._emit_event("project:created", payload.name, {
+            "project_id": payload.name,
+            "project_name": payload.name,
+        })
+    return project.model_dump()
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Remove a project from tracking."""
+    deleted = await registry.delete_project(project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if router:
+        await router._emit_event("project:deleted", project_id, {"project_id": project_id})
+    return {"deleted": True}
+
+@app.get("/api/discover")
+async def discover_directories(path: str = "~"):
+    """Browse filesystem directories for project discovery."""
+    import os
+    expanded = os.path.expanduser(path)
+    if not os.path.isdir(expanded):
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    dirs = []
+    try:
+        for entry in sorted(os.listdir(expanded)):
+            full = os.path.join(expanded, entry)
+            if os.path.isdir(full) and not entry.startswith("."):
+                has_git = os.path.isdir(os.path.join(full, ".git"))
+                dirs.append({"name": entry, "path": full, "has_git": has_git})
+    except PermissionError:
+        pass
+    return {"directories": dirs, "parent": os.path.dirname(expanded)}
 
 @app.get("/api/health")
 async def health():
