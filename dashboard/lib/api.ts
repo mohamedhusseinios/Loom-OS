@@ -99,3 +99,35 @@ export async function discoverDirs(path: string = "~"): Promise<{
 }> {
   return fetchApi(`/api/discover?path=${encodeURIComponent(path)}`);
 }
+
+// --- Graph Topology ---
+
+export interface GraphTopology {
+  nodes: { id: string; label: string; kind: string; community: number; file: string }[];
+  edges: { source: string; target: string; kind: string }[];
+}
+
+export interface CommunityInfo {
+  id: string;
+  name: string;
+  size: number;
+}
+
+export interface FlowInfo {
+  id: string;
+  name: string;
+  criticality: number;
+  node_ids: string[];
+}
+
+export async function getGraphTopology(id: string): Promise<GraphTopology> {
+  return fetchApi(`/api/projects/${id}/graph/topology`);
+}
+
+export async function getGraphCommunities(id: string): Promise<{ communities: CommunityInfo[] }> {
+  return fetchApi(`/api/projects/${id}/graph/communities`);
+}
+
+export async function getGraphFlows(id: string): Promise<{ flows: FlowInfo[] }> {
+  return fetchApi(`/api/projects/${id}/graph/flows`);
+}
