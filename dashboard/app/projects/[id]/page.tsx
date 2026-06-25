@@ -8,7 +8,7 @@ import { GraphStats } from "@/components/graph-stats";
 import { AgentBadge } from "@/components/agent-badge";
 import { ActivityFeed } from "@/components/activity-feed";
 import { Button } from "@/components/ui/button";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Users } from "lucide-react";
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,11 +33,18 @@ export default function ProjectDetailPage() {
           <h2 className="text-2xl font-bold">{project.project_name}</h2>
           <p className="text-sm text-zinc-500">{project.project_path}</p>
         </div>
-        <Link href={`/projects/${id}/graph`}>
-          <Button variant="outline" size="sm">
-            Graph Explorer <ArrowRight className="w-3 h-3 ml-2" />
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href={`/projects/${id}/agents`}>
+            <Button variant="outline" size="sm">
+              <Users className="w-3 h-3 mr-1" /> Agents
+            </Button>
+          </Link>
+          <Link href={`/projects/${id}/graph`}>
+            <Button variant="outline" size="sm">
+              Graph Explorer <ArrowRight className="w-3 h-3 ml-2" />
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Home, Plus } from "lucide-react";
+import { Home, Plus, Activity, GitGraph, Users } from "lucide-react";
 import { listProjects } from "@/lib/api";
 import { AddProjectModal } from "@/components/add-project-modal";
 
@@ -16,9 +16,11 @@ export function Sidebar() {
     listProjects().then((data) => setProjects(data.projects || []));
   }
 
-  useEffect(() => {
-    refreshProjects();
-  }, []);
+  useEffect(() => { refreshProjects(); }, []);
+
+  // Detect active project from pathname
+  const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
+  const activeProjectId = projectMatch ? projectMatch[1] : null;
 
   return (
     <>
@@ -48,22 +50,58 @@ export function Sidebar() {
               {projects.map((p) => {
                 const active = pathname.startsWith(`/projects/${p.project_id}`);
                 return (
-                  <Link
-                    key={p.project_id}
-                    href={`/projects/${p.project_id}`}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                      active
-                        ? "bg-zinc-800 text-zinc-100"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
-                    }`}
-                  >
-                    <span className="flex-1 truncate">{p.project_name}</span>
-                    {p.active_agents > 0 && (
-                      <span className="text-[10px] bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded-full font-mono">
-                        {p.active_agents}
-                      </span>
+                  <div key={p.project_id}>
+                    <Link
+                      href={`/projects/${p.project_id}`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                        active
+                          ? "bg-zinc-800 text-zinc-100"
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+                      }`}
+                    >
+                      <span className="flex-1 truncate">{p.project_name}</span>
+                      {p.active_agents > 0 && (
+                        <span className="text-[10px] bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded-full font-mono">
+                          {p.active_agents}
+                        </span>
+                      )}
+                    </Link>
+                    {/* Sub-navigation when this project is active */}
+                    {active && (
+                      <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+                        <Link
+                          href={`/projects/${p.project_id}`}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] transition-colors ${
+                            pathname === `/projects/${p.project_id}`
+                              ? "text-zinc-200 bg-zinc-800/50"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          <Activity className="w-3 h-3" /> Overview
+                        </Link>
+                        <Link
+                          href={`/projects/${p.project_id}/graph`}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] transition-colors ${
+                            pathname.includes("/graph")
+                              ? "text-zinc-200 bg-zinc-800/50"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          <GitGraph className="w-3 h-3" /> Graph
+                        </Link>
+                        <Link
+                          href={`/projects/${p.project_id}/agents`}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] transition-colors ${
+                            pathname.includes("/agents")
+                              ? "text-zinc-200 bg-zinc-800/50"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          <Users className="w-3 h-3" /> Agents
+                        </Link>
+                      </div>
                     )}
-                  </Link>
+                  </div>
                 );
               })}
             </>
