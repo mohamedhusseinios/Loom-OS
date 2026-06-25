@@ -64,3 +64,22 @@ async def test_list_agents_by_project(registry):
 async def test_get_agent_not_found(registry):
     result = await registry.get_agent("nonexistent")
     assert result is None
+
+@pytest.mark.asyncio
+async def test_create_and_delete_project(registry):
+    project = await registry.create_project("test-proj", "Test Project", "/tmp/test")
+    assert project is not None
+    assert project.project_id == "test-proj"
+    assert project.project_name == "Test Project"
+    assert project.project_path == "/tmp/test"
+
+    deleted = await registry.delete_project("test-proj")
+    assert deleted is True
+
+    gone = await registry.get_project("test-proj")
+    assert gone is None
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_project(registry):
+    deleted = await registry.delete_project("nonexistent")
+    assert deleted is False

@@ -123,6 +123,23 @@ class AgentRegistry:
         )
         await self.db.commit()
 
+    async def create_project(self, project_id: str, project_name: str, project_path: str) -> ProjectInfo:
+        await self.db.execute(
+            "INSERT INTO projects (project_id, project_name, project_path) VALUES (?, ?, ?)",
+            (project_id, project_name, project_path),
+        )
+        await self.db.commit()
+        project = await self.get_project(project_id)
+        assert project is not None
+        return project
+
+    async def delete_project(self, project_id: str) -> bool:
+        cursor = await self.db.execute(
+            "DELETE FROM projects WHERE project_id = ?", (project_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
     async def get_project(self, project_id: str) -> Optional[ProjectInfo]:
         cursor = await self.db.execute(
             "SELECT * FROM projects WHERE project_id = ?", (project_id,)
