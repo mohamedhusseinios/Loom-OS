@@ -142,17 +142,38 @@ class Router:
 
     async def _build_project(self, project: str, project_path: str):
         result = await self.graph.build_project(project_path)
+        # Persist stats so the dashboard's project list reflects the build.
+        # Communities aren't in BuildResult; read them from the graph output.
+        communities = 0
+        if result.status == "completed":
+            stats = await self.graph.get_stats(project_path)
+            communities = stats.communities
+            await self.registry.update_graph_stats(
+                project, result.nodes, result.edges, communities
+            )
         await self._emit_event("graph:updated", project, {
             "nodes_added": result.nodes,
             "edges_added": result.edges,
+            "communities": communities,
             "status": result.status,
+            "error": result.error,
         })
 
     async def _update_project(self, project: str, project_path: str, finding: FindingFrontmatter):
         result = await self.graph.update_project(project_path, finding.files)
+        communities = 0
+        if result.status == "completed":
+            stats = await self.graph.get_stats(project_path)
+            communities = stats.communities
+            await self.registry.update_graph_stats(
+                project, result.nodes, result.edges, communities
+            )
         await self._emit_event("graph:updated", project, {
             "nodes_added": result.nodes,
             "edges_added": result.edges,
+            "communities": communities,
+            "status": result.status,
+            "error": result.error,
             "agent": finding.agent,
         })
 

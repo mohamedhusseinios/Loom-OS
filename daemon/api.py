@@ -5,7 +5,7 @@ from typing import Optional
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
@@ -25,25 +25,37 @@ connected_clients: list[WebSocket] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start watcher on startup, clean up on shutdown."""
+    """Start watcher on startup, clean up on shutdown.
+
+    Honors globals pre-set by tests: if a registry/graph_engine has been
+    injected, the lifespan reuses it and skips the filesystem watcher /
+    broadcast task (which depend on real ``~/.agentic-os`` state).
+    """
     global registry, graph_engine, router, watcher
 
-    registry = AgentRegistry()
-    await registry.initialize()
+    # Tests may inject a temp-backed registry/graph_engine beforehand.
+    test_mode = registry is not None
 
-    graph_engine = GraphEngine()
-    router = Router(registry, graph_engine)
+    if registry is None:
+        registry = AgentRegistry()
+    if graph_engine is None:
+        graph_engine = GraphEngine()
+    if not getattr(registry, "db", None):
+        await registry.initialize()
+    if router is None:
+        router = Router(registry, graph_engine)
 
-    watcher = InboxWatcher()
-    loop = asyncio.get_running_loop()
-    watcher.start(router.handle_file, loop)
-
-    # Background task: broadcast events to WebSocket clients
-    asyncio.create_task(_broadcast_events())
+    if not test_mode:
+        watcher = InboxWatcher()
+        loop = asyncio.get_running_loop()
+        watcher.start(router.handle_file, loop)
+        # Background task: broadcast events to WebSocket clients
+        asyncio.create_task(_broadcast_events())
 
     logger.info("Agentic OS daemon started")
     yield
-    watcher.stop()
+    if watcher is not None:
+        watcher.stop()
     await registry.close()
     logger.info("Agentic OS daemon stopped")
 
@@ -71,7 +83,7 @@ async def get_project(project_id: str):
     """Get project details with graph stats and agents."""
     project = await registry.get_project(project_id)
     if not project:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
 
     stats = await graph_engine.get_stats(project.project_path)
     agents = await registry.list_agents(project_id)
@@ -88,7 +100,7 @@ async def get_graph_stats(project_id: str):
     """Get graph statistics for a project."""
     project = await registry.get_project(project_id)
     if not project:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     stats = await graph_engine.get_stats(project.project_path)
     return stats.model_dump()
 
@@ -97,10 +109,10 @@ async def get_graph_stats(project_id: str):
 async def query_graph(project_id: str, q: str = ""):
     """Query the project knowledge graph."""
     if not q:
-        return {"error": "Missing query parameter 'q'"}, 400
+        raise HTTPException(status_code=400, detail="Missing query parameter 'q'")
     project = await registry.get_project(project_id)
     if not project:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     result = await graph_engine.query(project.project_path, q)
     return result.model_dump()
 
@@ -117,7 +129,7 @@ async def rebuild_graph(project_id: str):
     """Force a full graph rebuild."""
     project = await registry.get_project(project_id)
     if not project:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     result = await graph_engine.build_project(project.project_path)
     return result.model_dump()
 

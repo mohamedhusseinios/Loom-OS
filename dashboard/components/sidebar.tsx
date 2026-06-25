@@ -2,15 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Activity } from "lucide-react";
+import { Home } from "lucide-react";
 
 export function Sidebar() {
   const pathname = usePathname();
 
-  const links = [
-    { href: "/", label: "Projects", icon: Home },
-    { href: "/activity", label: "Activity", icon: Activity },
-  ];
+  const links = [{ href: "/", label: "Projects", icon: Home }];
 
   return (
     <aside className="w-64 border-r border-zinc-800 bg-zinc-950 min-h-screen p-4">

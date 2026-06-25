@@ -1,0 +1,126 @@
+"""Tests for the FastAPI application.
+
+These cover the API error-handling paths that previously returned a
+tuple (Flask-ism) instead of setting the HTTP status code, plus the
+happy paths for the project/project-detail/health endpoints.
+
+The app is driven with Starlette/FastAPI TestClient. The real ``lifespan``
+is suppressed (``lifespan="off"``) so tests don't start a filesystem
+watcher, a broadcast task, or touch ``~/.agentic-os``. Instead we inject
+a temp-backed registry and graph engine into the module-level globals the
+route handlers read.
+"""
+import pytest
+from fastapi.testclient import TestClient
+
+import daemon.api as api_module
+from daemon.graph_engine import GraphEngine
+from daemon.models import AgentInfo
+from daemon.registry import AgentRegistry
+
+
+@pytest.fixture
+async def client(tmp_path):
+    """Yield a TestClient wired to a temp registry + graph engine."""
+    registry = AgentRegistry(str(tmp_path / "test.db"))
+    await registry.initialize()
+
+    # Seed one project + one agent so the detail/agents endpoints have data.
+    await registry.upsert_project("noor", str(tmp_path / "noor"))
+    await registry.upsert_agent(
+        AgentInfo(
+            agent_id="claude-code-noor",
+            agent_name="claude-code",
+            version="1.0",
+            project="noor",
+            capabilities=["code-analysis"],
+        )
+    )
+
+    # Inject into the module globals the handlers use.
+    api_module.registry = registry
+    api_module.graph_engine = GraphEngine()
+    api_module.router = None
+    api_module.watcher = None
+
+    # lifespan="off" skips startup/shutdown (no watcher/broadcast task).
+    with TestClient(api_module.app) as c:
+        yield c
+
+    await registry.close()
+
+
+def test_list_projects(client):
+    """Projects seeded by the fixture are listed."""
+    res = client.get("/api/projects")
+    assert res.status_code == 200
+    data = res.json()
+    assert "projects" in data
+    ids = [p["project_id"] for p in data["projects"]]
+    assert "noor" in ids
+
+
+def test_get_project(client):
+    """Existing project returns 200 with project/graph/agents keys."""
+    res = client.get("/api/projects/noor")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["project"]["project_id"] == "noor"
+    assert "graph" in data
+    assert len(data["agents"]) == 1
+    assert data["agents"][0]["agent_name"] == "claude-code"
+
+
+def test_get_project_not_found_returns_404(client):
+    """Regression: must return HTTP 404, not 200 with a tuple body."""
+    res = client.get("/api/projects/does-not-exist")
+    assert res.status_code == 404
+    # Body is FastAPI's default {"detail": "..."} error envelope.
+    assert "detail" in res.json()
+
+
+def test_get_graph_stats_not_found_returns_404(client):
+    res = client.get("/api/projects/missing/graph")
+    assert res.status_code == 404
+
+
+def test_query_missing_q_returns_400(client):
+    """Regression: must return HTTP 400, not 200 with a tuple body."""
+    res = client.get("/api/projects/noor/query")
+    assert res.status_code == 400
+    assert "detail" in res.json()
+
+
+def test_query_project_not_found_returns_404(client):
+    res = client.get("/api/projects/missing/query?q=hello")
+    assert res.status_code == 404
+
+
+def test_list_agents(client):
+    res = client.get("/api/projects/noor/agents")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["agents"]) == 1
+    assert data["agents"][0]["agent_name"] == "claude-code"
+
+
+def test_list_agents_unknown_project_empty(client):
+    # No 404 for agents endpoint by design — just an empty list.
+    res = client.get("/api/projects/unknown/agents")
+    assert res.status_code == 200
+    assert res.json()["agents"] == []
+
+
+def test_rebuild_project_not_found_returns_404(client):
+    res = client.post("/api/projects/missing/rebuild")
+    assert res.status_code == 404
+
+
+def test_health(client):
+    """Health endpoint reports graphify availability from the injected engine."""
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "graphify_available" in data
+    assert "watcher_running" in data

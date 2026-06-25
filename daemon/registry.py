@@ -111,10 +111,14 @@ class AgentRegistry:
 
     async def upsert_project(self, project_id: str, project_path: str):
         project_name = project_id  # use project_id as display name by default
+        # ON CONFLICT preserves graph stats (node_count, edge_count, etc.)
+        # on re-register; INSERT OR REPLACE would reset them to defaults.
         await self.db.execute(
-            """INSERT OR REPLACE INTO projects
-               (project_id, project_name, project_path)
-               VALUES (?, ?, ?)""",
+            """INSERT INTO projects (project_id, project_name, project_path)
+               VALUES (?, ?, ?)
+               ON CONFLICT(project_id) DO UPDATE SET
+                   project_name = excluded.project_name,
+                   project_path = excluded.project_path""",
             (project_id, project_name, project_path),
         )
         await self.db.commit()

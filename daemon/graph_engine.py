@@ -2,8 +2,18 @@
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from daemon.models import BuildResult, GraphStats, QueryResult
+
+
+def _decode_subprocess_error(e: subprocess.CalledProcessError) -> str:
+    """Extract a useful message from a failed graphify subprocess call."""
+    if e.stderr:
+        msg = e.stderr.decode(errors="replace").strip()
+        if msg:
+            return msg
+    return str(e)
 
 
 class GraphEngine:
@@ -50,13 +60,16 @@ class GraphEngine:
 
     def _run_graphify_build(self, project_path: str):
         """Run graphify CLI build (blocking)."""
-        import subprocess
-        subprocess.run(
-            ["graphify", project_path],
-            capture_output=True,
-            timeout=300,
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["graphify", project_path],
+                capture_output=True,
+                timeout=300,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            # Preserve graphify's stderr so failures are debuggable.
+            raise RuntimeError(_decode_subprocess_error(e)) from e
 
     async def update_project(self, project_path: str, files: list[str]) -> BuildResult:
         """Incremental update for changed files."""
@@ -87,13 +100,15 @@ class GraphEngine:
 
     def _run_graphify_update(self, project_path: str):
         """Run graphify --update (blocking)."""
-        import subprocess
-        subprocess.run(
-            ["graphify", project_path, "--update"],
-            capture_output=True,
-            timeout=300,
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["graphify", project_path, "--update"],
+                capture_output=True,
+                timeout=300,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(_decode_subprocess_error(e)) from e
 
     async def get_stats(self, project_path: str) -> GraphStats:
         """Read graph stats from graphify-out/graph.json."""
