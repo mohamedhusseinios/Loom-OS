@@ -131,3 +131,24 @@ export async function getGraphCommunities(id: string): Promise<{ communities: Co
 export async function getGraphFlows(id: string): Promise<{ flows: FlowInfo[] }> {
   return fetchApi(`/api/projects/${id}/graph/flows`);
 }
+
+// --- Agent Dispatch ---
+
+export async function dispatchTask(
+  projectId: string,
+  payload: { target_agent: string; instruction: string; priority?: string }
+): Promise<{ task_id: string; status: string }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/dispatch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function listDispatches(projectId: string): Promise<{
+  dispatches: { task_id: string; target_agent: string; instruction: string; status: string; dispatched_at: string }[];
+}> {
+  return fetchApi(`/api/projects/${projectId}/dispatches`);
+}
