@@ -32,6 +32,10 @@ class Router:
         path = Path(filepath)
         filename = path.name.lower()
 
+        # Skip if file was already moved/processed
+        if not path.exists():
+            return
+
         try:
             if filename == "register.json":
                 await self._handle_register(project, path)
@@ -45,10 +49,13 @@ class Router:
                 logger.debug(f"Ignoring unknown file: {filename}")
                 return
 
-            # Move to processed
-            processed_dir = path.parent / ".processed"
-            processed_dir.mkdir(exist_ok=True)
-            path.rename(processed_dir / path.name)
+            # Move to processed (ignore if already moved)
+            try:
+                processed_dir = path.parent / ".processed"
+                processed_dir.mkdir(exist_ok=True)
+                path.rename(processed_dir / path.name)
+            except FileNotFoundError:
+                pass  # file already moved by previous event
 
         except Exception as e:
             logger.error(f"Error handling {filepath}: {e}")
