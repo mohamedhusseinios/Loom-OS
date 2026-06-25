@@ -107,6 +107,18 @@ class BuildResult(BaseModel):
     edges: int = 0
     error: Optional[str] = None
 
+# --- Project CRUD Schemas ---
+
+class ProjectCreatePayload(BaseModel):
+    name: str
+    path: str
+
+class ProjectDeleteResult(BaseModel):
+    deleted: bool
+
+class DiscoverResult(BaseModel):
+    directories: list[dict] = Field(default_factory=list)
+    parent: Optional[str] = None
 
 # --- WebSocket Events ---
 
