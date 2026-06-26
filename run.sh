@@ -82,5 +82,5 @@ if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
 fi
 echo -e "${GREEN}[dashboard]${NC} started (pid=$DASHBOARD_PID)"
 
-# Wait for either to exit
-wait -n "$DAEMON_PID" "$DASHBOARD_PID" 2>/dev/null || true
+# Block until either process exits (bash 3.2 compat — no wait -n)
+wait "$DAEMON_PID" "$DASHBOARD_PID" 2>/dev/null || true
