@@ -43,6 +43,7 @@ export default function GraphCanvasReagraph({
   highlightedNodes,
   visibleCommunities,
   showEdges = true,
+  layout = "forceDirected2d",
 }: GraphCanvasProps) {
   const ref = useRef<GraphCanvasRef | null>(null);
 
@@ -95,10 +96,14 @@ export default function GraphCanvasReagraph({
       edges={reaEdges}
       actives={actives}
       theme={loomTheme}
-      layoutType="forceDirected2d"
+      layoutType={layout}
       labelType="nodes"
       draggable
-      clusterAttribute="community"
+      // Reagraph only renders cluster hulls on force-directed layouts; enabling
+      // it elsewhere is ignored, so scope it to avoid surprising behavior.
+      clusterAttribute={
+        layout.startsWith("forceDirected") ? "community" : undefined
+      }
       sizingType="centrality"
       onNodeClick={(node) => {
         const data = (node.data ?? {}) as {

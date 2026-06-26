@@ -114,7 +114,15 @@
     "flows": "التدفقات",
     "showAll": "عرض الكل",
     "view": "العرض",
-    "showEdges": "إظهار الحواف"
+    "showEdges": "إظهار الحواف",
+    "layout": "التخطيط",
+    "layoutForce2d": "قوة ثنائية الأبعاد",
+    "layoutForce3d": "قوة ثلاثية الأبعاد",
+    "layoutCircular": "دائري",
+    "layoutConcentric": "متحد المركز",
+    "layoutTree": "شجري",
+    "layoutRadial": "شعاعي",
+    "layoutHierarchical": "هرمي"
   },
   "ActivityFeed": {
     "waiting": "في انتظار النشاط...",

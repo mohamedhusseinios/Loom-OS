@@ -3,6 +3,18 @@
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
+import type { GraphLayout } from "@/components/graph-canvas";
+
+// value -> i18n key for the layouts we surface in the dropdown.
+const LAYOUTS: { value: GraphLayout; labelKey: string }[] = [
+  { value: "forceDirected2d", labelKey: "layoutForce2d" },
+  { value: "forceDirected3d", labelKey: "layoutForce3d" },
+  { value: "circular2d", labelKey: "layoutCircular" },
+  { value: "concentric2d", labelKey: "layoutConcentric" },
+  { value: "treeTd2d", labelKey: "layoutTree" },
+  { value: "radialOut2d", labelKey: "layoutRadial" },
+  { value: "hierarchicalTd", labelKey: "layoutHierarchical" },
+];
 
 interface CommunityInfo {
   id: string;
@@ -28,6 +40,8 @@ interface GraphControlsProps {
   onToggleEdges: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  selectedLayout: GraphLayout;
+  onSelectLayout: (layout: GraphLayout) => void;
 }
 
 const COMMUNITY_COLORS = [
@@ -49,6 +63,8 @@ export function GraphControls({
   onToggleEdges,
   searchQuery,
   onSearchChange,
+  selectedLayout,
+  onSelectLayout,
 }: GraphControlsProps) {
   const t = useTranslations("GraphControls");
   return (
@@ -110,6 +126,21 @@ export function GraphControls({
           </div>
         </div>
       )}
+
+      <div className="mb-4">
+        <h4 className="text-[10px] font-semibold text-zinc-500 uppercase mb-2">{t("layout")}</h4>
+        <select
+          value={selectedLayout}
+          onChange={(e) => onSelectLayout(e.target.value as GraphLayout)}
+          className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded h-8 px-2"
+        >
+          {LAYOUTS.map((l) => (
+            <option key={l.value} value={l.value}>
+              {t(l.labelKey)}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div>
         <h4 className="text-[10px] font-semibold text-zinc-500 uppercase mb-2">{t("view")}</h4>

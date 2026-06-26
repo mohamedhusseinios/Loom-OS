@@ -16,6 +16,17 @@ export interface GraphEdge {
   kind: string;
 }
 
+// Curated subset of reagraph's LayoutTypes that we surface in the UI. Every
+// value here is assignable to reagraph's `layoutType` prop.
+export type GraphLayout =
+  | "forceDirected2d"
+  | "forceDirected3d"
+  | "circular2d"
+  | "concentric2d"
+  | "treeTd2d"
+  | "radialOut2d"
+  | "hierarchicalTd";
+
 export interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -23,6 +34,7 @@ export interface GraphCanvasProps {
   highlightedNodes?: Set<string>;
   visibleCommunities?: Set<string>;
   showEdges?: boolean;
+  layout?: GraphLayout;
 }
 
 // Reagraph renders with Three.js/WebGL, which has no server-side equivalent and

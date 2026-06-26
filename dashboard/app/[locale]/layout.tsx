@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist_Mono, IBM_Plex_Sans_Arabic } from "next/font/google";
+import { Cairo } from "next/font/google";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -9,13 +9,13 @@ import { Sidebar } from "@/components/sidebar";
 import { WebSocketProvider } from "@/lib/use-websocket";
 import { routing, isRtl, type Locale } from "@/i18n/routing";
 
-// Latin font — used for LTR (English). Geist Mono has no Arabic glyphs.
-const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-latin" });
-// Arabic-capable font — applied when dir=rtl. Falls back to latin vars.
-const arabicSans = IBM_Plex_Sans_Arabic({
-  subsets: ["arabic", "latin"],
+// Cairo covers both Latin and Arabic glyphs, so a single family serves both
+// the LTR (English) and RTL (Arabic) locales. Exposed as --font-sans so the
+// Tailwind `font-sans`/`font-heading` utilities (see globals.css) resolve to it.
+const cairo = Cairo({
+  subsets: ["latin", "arabic"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-arabic",
+  variable: "--font-sans",
 });
 
 // Pre-render both locales.
@@ -59,13 +59,12 @@ export default async function LocaleLayout({
   setRequestLocale(locale);
 
   const rtl = isRtl(locale);
-  const fontClass = rtl ? arabicSans.className : geistMono.className;
 
   return (
     <html
       lang={locale}
       dir={rtl ? "rtl" : "ltr"}
-      className={`dark ${geistMono.variable} ${arabicSans.variable}`}
+      className={`dark ${cairo.variable}`}
       // Suppression is intentional: next/font injects its generated class
       // names on the client during hydration, which can briefly differ from
       // the server-rendered markup. All attributes here (lang/dir/className)
@@ -75,7 +74,7 @@ export default async function LocaleLayout({
       suppressHydrationWarning
     >
       <body
-        className={`${fontClass} bg-zinc-950 text-zinc-100 antialiased`}
+        className={`${cairo.className} bg-zinc-950 text-zinc-100 antialiased`}
         suppressHydrationWarning
       >
         <NextIntlClientProvider>

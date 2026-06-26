@@ -207,6 +207,12 @@
       "type": "file"
     },
     {
+      "path": "dashboard/app/[locale]/layout.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1782499811106,
+      "type": "file"
+    },
+    {
       "path": "pyproject.toml",
       "accessCount": 1,
       "lastAccessed": 1782479234380,
@@ -282,12 +288,6 @@
       "path": "dashboard/lib/use-websocket.tsx",
       "accessCount": 1,
       "lastAccessed": 1782479303799,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/app/[locale]/layout.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1782479304327,
       "type": "file"
     },
     {

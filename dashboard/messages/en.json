@@ -114,7 +114,15 @@
     "flows": "Flows",
     "showAll": "Show all",
     "view": "View",
-    "showEdges": "Show edges"
+    "showEdges": "Show edges",
+    "layout": "Layout",
+    "layoutForce2d": "Force 2D",
+    "layoutForce3d": "Force 3D",
+    "layoutCircular": "Circular",
+    "layoutConcentric": "Concentric",
+    "layoutTree": "Tree",
+    "layoutRadial": "Radial",
+    "layoutHierarchical": "Hierarchical"
   },
   "ActivityFeed": {
     "waiting": "Waiting for activity...",

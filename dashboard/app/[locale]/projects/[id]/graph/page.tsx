@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph, rebuildGraph, getProject } from "@/lib/api";
 import type { GraphTopology, CommunityInfo, FlowInfo } from "@/lib/api";
-import { GraphCanvas } from "@/components/graph-canvas";
+import { GraphCanvas, type GraphLayout } from "@/components/graph-canvas";
 import { GraphControls } from "@/components/graph-controls";
 import { NodeDetail } from "@/components/node-detail";
 import { useWebSocket } from "@/lib/use-websocket";
@@ -33,6 +33,7 @@ export default function GraphExplorerPage() {
   const [selectedFlow, setSelectedFlow] = useState<string | null>(null);
   const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(new Set());
   const [showEdges, setShowEdges] = useState(true);
+  const [layout, setLayout] = useState<GraphLayout>("forceDirected2d");
   const [searchQuery, setSearchQuery] = useState("");
   const [nlQuery, setNlQuery] = useState("");
   const [nlLoading, setNlLoading] = useState(false);
@@ -253,6 +254,8 @@ export default function GraphExplorerPage() {
               onToggleEdges={() => setShowEdges(!showEdges)}
               searchQuery={searchQuery}
               onSearchChange={handleSearchChange}
+              selectedLayout={layout}
+              onSelectLayout={setLayout}
             />
             <div className="flex-1 relative">
               <GraphCanvas
@@ -262,6 +265,7 @@ export default function GraphExplorerPage() {
                 highlightedNodes={highlightedNodes}
                 visibleCommunities={visibleCommunities}
                 showEdges={showEdges}
+                layout={layout}
               />
               <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
             </div>
