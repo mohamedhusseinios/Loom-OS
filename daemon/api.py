@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     injected, the lifespan reuses it and skips the filesystem watcher /
     broadcast task (which depend on real ``~/.loom`` state).
     """
-    global registry, graph_engine, router, watcher, trace_capture
+    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager
 
     # Tests may inject a temp-backed registry/graph_engine beforehand.
     test_mode = registry is not None
