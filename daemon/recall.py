@@ -49,32 +49,54 @@ class RecallEngine:
             empty string when no graph or no matches exist.
         """
         graph_path = Path(project_path) / "graphify-out" / "graph.json" if project_path else None
-        if graph_path is None or not graph_path.exists():
-            return ""
-
-        try:
-            with open(graph_path) as f:
-                graph = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("RecallEngine: cannot read graph %s: %s", graph_path, exc)
-            return ""
-
         entities: list[str] = []
         keywords = task_hint.lower().split() if task_hint else []
 
-        for node in graph.get("nodes", []):
-            name = (node.get("name") or node.get("label") or "").strip()
-            kind = (node.get("kind") or "").strip()
-            if not name:
-                continue
+        # 1. Query graph.json for structural entities
+        if graph_path and graph_path.exists():
+            try:
+                with open(graph_path) as f:
+                    graph = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("RecallEngine: cannot read graph %s: %s", graph_path, exc)
+            else:
+                for node in graph.get("nodes", []):
+                    name = (node.get("name") or node.get("label") or "").strip()
+                    kind = (node.get("kind") or "").strip()
+                    if not name:
+                        continue
+                    if keywords:
+                        name_lower = name.lower()
+                        if not any(kw in name_lower for kw in keywords):
+                            continue
+                    label = f"[{kind}] {name}" if kind else name
+                    entities.append(label[:200])
 
-            if keywords:
-                name_lower = name.lower()
-                if not any(kw in name_lower for kw in keywords):
+        # 2. Also scan inbox findings from all agents (cross-agent synthesis)
+        inbox = self.loom_dir / "inbox" / project
+        if inbox.exists() and keywords:
+            for f_path in sorted(
+                inbox.glob("finding-*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            ):
+                try:
+                    content = f_path.read_text()
+                except OSError:
                     continue
-
-            label = f"[{kind}] {name}" if kind else name
-            entities.append(label[:200])
+                content_lower = content.lower()
+                if any(kw in content_lower for kw in keywords):
+                    # Extract body (skip YAML frontmatter)
+                    lines = content.split("\n")
+                    body_start = 0
+                    if lines and lines[0].strip() == "---":
+                        for i, line in enumerate(lines[1:], 1):
+                            if line.strip() == "---":
+                                body_start = i + 1
+                                break
+                    finding_body = "\n".join(lines[body_start:]).strip()
+                    if finding_body:
+                        entities.append(f"[finding] {finding_body}"[:300])
 
         return "\n".join(entities[:20])
 

@@ -112,3 +112,50 @@ async def test_retain_no_structured_output_writes_nothing(engine, tmp_path):
         inbox_dir=project_inbox,
     )
     assert not list(project_inbox.glob("finding-*.md"))
+
+
+@pytest.mark.asyncio
+async def test_cross_agent_synthesis_inherits_patterns(engine, tmp_path):
+    """Agent B's recall() discovers findings that Agent A retained."""
+    project_dir = tmp_path / "test-proj"
+    inbox = tmp_path / "inbox" / "test-proj"
+
+    # Agent A discovers a pattern and retains it
+    await engine.retain(
+        agent_id="agent-a",
+        project="test-proj",
+        agent_output="PATTERN: auth.py always uses bcrypt for password hashing",
+        inbox_dir=inbox,
+    )
+
+    # Agent B works on auth — should get Agent A's pattern via recall
+    context = await engine.recall(
+        agent_id="agent-b",
+        project="test-proj",
+        project_path=str(project_dir),
+        task_hint="auth password hashing",
+    )
+    assert "bcrypt" in context
+    assert "PATTERN" in context
+
+
+@pytest.mark.asyncio
+async def test_cross_agent_synthesis_no_match_if_irrelevant(engine, tmp_path):
+    """Recall only returns findings whose content matches the task hint."""
+    inbox = tmp_path / "inbox" / "test-proj"
+
+    await engine.retain(
+        agent_id="agent-a",
+        project="test-proj",
+        agent_output="PATTERN: auth.py always uses bcrypt for password hashing",
+        inbox_dir=inbox,
+    )
+
+    # Agent B works on unrelated task — should NOT get auth findings
+    context = await engine.recall(
+        agent_id="agent-b",
+        project="test-proj",
+        project_path=str(tmp_path / "test-proj"),
+        task_hint="database migration",
+    )
+    assert "bcrypt" not in context
