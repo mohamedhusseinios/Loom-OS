@@ -413,3 +413,10 @@ def test_get_eval_pass_rate(client):
     assert "pass" in data
     assert "total" in data
     assert "pass_rate" in data
+
+
+def test_get_snapshots_returns_empty(client):
+    """GET /snapshots returns empty list when no snapshots exist."""
+    res = client.get("/api/projects/noor/snapshots")
+    assert res.status_code == 200
+    assert res.json()["snapshots"] == []
