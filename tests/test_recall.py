@@ -71,3 +71,44 @@ async def test_recall_no_matching_entities_returns_empty(engine, tmp_path):
         task_hint="database migration",
     )
     assert context == ""
+
+
+@pytest.mark.asyncio
+async def test_retain_extracts_learnings_to_inbox(engine, tmp_path):
+    """retain() writes FOUND/PATTERN/DECISION lines as finding-*.md in the inbox."""
+    project_inbox = tmp_path / "inbox" / "test-proj"
+
+    agent_output = """
+    FOUND: auth.py has a hardcoded secret on line 42
+    PATTERN: Circular dependency between auth.py and middleware.py
+    DECISION: Extract auth config to env vars, split middleware into auth_middleware.py
+    """
+    await engine.retain(
+        agent_id="agent-1",
+        project="test-proj",
+        agent_output=agent_output,
+        inbox_dir=project_inbox,
+    )
+
+    findings_files = sorted(project_inbox.glob("finding-*.md"))
+    assert len(findings_files) == 3
+
+    # Each file should contain one of the extracted lines
+    all_content = "".join(f.read_text() for f in findings_files)
+    assert "hardcoded secret" in all_content
+    assert "Circular dependency" in all_content
+    assert "Extract auth config" in all_content
+
+
+@pytest.mark.asyncio
+async def test_retain_no_structured_output_writes_nothing(engine, tmp_path):
+    """retain() is a no-op when agent output has no structured findings."""
+    project_inbox = tmp_path / "inbox" / "test-proj"
+
+    await engine.retain(
+        agent_id="agent-2",
+        project="test-proj",
+        agent_output="Just some random text without any markers.",
+        inbox_dir=project_inbox,
+    )
+    assert not list(project_inbox.glob("finding-*.md"))
