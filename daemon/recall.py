@@ -9,6 +9,8 @@ Design:
 
 import json
 import logging
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -75,3 +77,65 @@ class RecallEngine:
             entities.append(label[:200])
 
         return "\n".join(entities[:20])
+
+    # ------------------------------------------------------------------
+    # Retain (auto-learn from agent output)
+    # ------------------------------------------------------------------
+
+    async def retain(
+        self,
+        agent_id: str,
+        project: str,
+        agent_output: str,
+        inbox_dir: Path | None = None,
+    ) -> int:
+        """Parse agent output for structured findings and write them to the inbox.
+
+        Looking for lines prefixed with ``FOUND:``, ``PATTERN:``, or ``DECISION:``.
+        Each becomes a standalone ``finding-<id>.md`` file with YAML frontmatter.
+
+        Args:
+            agent_id: The agent that produced the output.
+            project: The project name.
+            agent_output: The raw text output from an agent run.
+            inbox_dir: Where to write findings. Defaults to
+                ``<loom_dir>/inbox/<project>``.
+
+        Returns:
+            Number of finding files written.
+        """
+        if inbox_dir is None:
+            inbox_dir = self.loom_dir / "inbox" / project
+
+        inbox_dir.mkdir(parents=True, exist_ok=True)
+
+        findings = self._extract_findings(agent_output)
+        written = 0
+        for finding in findings:
+            finding_id = str(uuid.uuid4())[:8]
+            finding_path = inbox_dir / f"finding-{finding_id}.md"
+            finding_path.write_text(
+                f"""---
+agent: {agent_id}
+project: {project}
+timestamp: {datetime.now(timezone.utc).isoformat()}
+confidence: medium
+---
+{finding}
+"""
+            )
+            written += 1
+
+        return written
+
+    @staticmethod
+    def _extract_findings(text: str) -> list[str]:
+        """Extract FOUND:/PATTERN:/DECISION: lines from agent output."""
+        findings: list[str] = []
+        for line in text.split("\n"):
+            stripped = line.strip()
+            for prefix in ("FOUND:", "PATTERN:", "DECISION:"):
+                if stripped.startswith(prefix):
+                    findings.append(stripped)
+                    break
+        return findings
