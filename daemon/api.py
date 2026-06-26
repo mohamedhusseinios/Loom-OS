@@ -29,6 +29,8 @@ router: Optional[Router] = None
 watcher: Optional[InboxWatcher] = None
 trace_capture: Optional[TraceCapture] = None
 snapshot_manager: Optional[SnapshotManager] = None
+pattern_repo: Optional = None  # PatternRepository (lazy)
+audit_trail: Optional = None     # AuditTrail (lazy)
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
@@ -391,6 +393,100 @@ async def get_eval_pass_rate(project_id: str):
         from daemon.evals import EvalEngine
         eval_engine = EvalEngine()
     return await eval_engine.get_pass_rate(project=project_id)
+
+
+@app.get("/api/patterns")
+async def list_patterns(project: str = None, status: str = None):
+    """Return evolved patterns, optionally filtered."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository, PatternStatus
+        pattern_repo = PatternRepository()
+    if status:
+        try:
+            ps = PatternStatus(status)
+        except ValueError:
+            ps = None
+    else:
+        ps = None
+    patterns = await pattern_repo.list_patterns(project=project, status=ps)
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.get("/api/patterns/top")
+async def top_patterns(limit: int = 10):
+    """Return highest-confidence patterns."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    patterns = await pattern_repo.top_patterns(limit=limit)
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.get("/api/patterns/cross-project")
+async def cross_project_patterns():
+    """Return patterns seen across multiple projects."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    patterns = await pattern_repo.cross_project_patterns()
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.post("/api/projects/{project_id}/patterns/observe")
+async def observe_pattern(project_id: str, payload: dict):
+    """Record a pattern observation from an agent."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    pattern = await pattern_repo.observe(
+        pattern_text=payload.get("pattern_text", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "unknown"),
+        kind=payload.get("kind", "PATTERN"),
+    )
+    return pattern.to_dict()
+
+
+@app.patch("/api/patterns/{pattern_id}/deprecate")
+async def deprecate_pattern(pattern_id: str, payload: dict = None):
+    """Mark a pattern as deprecated."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    p = await pattern_repo.deprecate(pattern_id, reason=(payload or {}).get("reason", ""))
+    if p is None:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    return p.to_dict()
+
+
+@app.get("/api/projects/{project_id}/audit")
+async def get_audit_log(project_id: str, agent_id: str = None, action: str = None, limit: int = 100):
+    """Return audit events for a project, optionally filtered."""
+    global audit_trail
+    if audit_trail is None:
+        from daemon.audit import AuditTrail
+        audit_trail = AuditTrail()
+        await audit_trail.initialize()
+    events = await audit_trail.query(
+        project=project_id, agent_id=agent_id, action=action, limit=limit,
+    )
+    return {"events": events}
+
+
+@app.get("/api/projects/{project_id}/audit/summary")
+async def get_audit_summary(project_id: str):
+    """Return daily audit summary for a project."""
+    global audit_trail
+    if audit_trail is None:
+        from daemon.audit import AuditTrail
+        audit_trail = AuditTrail()
+        await audit_trail.initialize()
+    return {"summary": await audit_trail.summary(project=project_id)}
 
 
 @app.websocket("/ws")
