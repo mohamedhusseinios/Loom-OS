@@ -40,9 +40,18 @@ export function Sidebar() {
     <>
       <aside className="w-64 border-e border-zinc-800 bg-zinc-950 min-h-screen p-4 flex flex-col">
         <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-zinc-100">{t("brand")}</h1>
-            <p className="text-xs text-zinc-500">{t("subtitle")}</p>
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/loom-mark.svg"
+              alt=""
+              aria-hidden="true"
+              className="h-8 w-8 shrink-0"
+            />
+            <div>
+              <h1 className="text-lg font-bold text-zinc-100 leading-tight">{t("brand")}</h1>
+              <p className="text-xs text-zinc-500">{t("subtitle")}</p>
+            </div>
           </div>
           {/* Locale switcher: EN / ع */}
           <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden text-[11px]">

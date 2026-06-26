@@ -1,6 +1,14 @@
+<div align="center">
+
+<img src="docs/branding/loom-icon-warp-256.png" alt="Loom" width="120" height="120" />
+
 # Loom
 
-Unified agent memory fabric. Weaves all your AI coding agents into a shared Graphify-powered knowledge graph. Agents communicate via filesystem hooks — no SDK, no API client, no auth required. A Next.js dashboard provides the control plane.
+**Unified agent memory fabric**
+
+</div>
+
+Weaves all your AI coding agents into a shared Graphify-powered knowledge graph. Agents communicate via filesystem hooks — no SDK, no API client, no auth required. A Next.js dashboard provides the control plane.
 
 **Status:** v0.1.0 — daemon + dashboard working, 38 tests passing, smoke-tested end-to-end. Includes project CRUD + discovery, an interactive (Cytoscape) graph explorer, agent management with task dispatch, and a bilingual (en/ar) dashboard.
 
@@ -453,3 +461,17 @@ Dev: `pytest`, `pytest-asyncio`, `httpx`. No Python linter is configured.
 - Implementation plan: [`docs/plans/2026-06-25-agentic-os-implementation.md`](docs/plans/2026-06-25-agentic-os-implementation.md)
 - Dashboard features plan: [`docs/plans/2026-06-26-dashboard-features-implementation.md`](docs/plans/2026-06-26-dashboard-features-implementation.md)
 - Competitor gap-closure plan: [`docs/plans/2026-06-26-competitor-gap-closure-implementation.md`](docs/plans/2026-06-26-competitor-gap-closure-implementation.md)
+
+---
+
+## Brand
+
+Monochrome, geometric. **Warp** (an L woven on a loom) is the primary mark; **Lattice** (an L traced through a knowledge graph) is the alternate. Full asset kit — logos, lockups, favicons, PWA icons, and usage specs — lives in [`docs/branding/`](docs/branding/README.md).
+
+| | Warp (primary) | Lattice (alternate) |
+|---|---|---|
+| Icon | <img src="docs/branding/loom-icon-warp-256.png" width="64" /> | <img src="docs/branding/loom-icon-lattice-512.png" width="64" /> |
+
+- **Ink** `#141414` · **Paper** `#FFFFFF` · greys `#6F6F6F`, `#E5E5E5`
+- **Wordmark** Space Grotesk 600, tracking −3.5%
+- The dashboard favicon, PWA manifest, and sidebar logo are wired from this kit.

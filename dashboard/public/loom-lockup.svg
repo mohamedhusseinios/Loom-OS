@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 150" width="520" height="150" role="img" aria-label="Loom">
+  <svg x="0" y="10" width="130" height="130" viewBox="9 0 130 130">
+  <g fill="none" stroke="#141414" stroke-width="11" stroke-linecap="round">
+    <line x1="40" y1="20" x2="40" y2="110"></line>
+    <line x1="60" y1="20" x2="60" y2="110"></line>
+    <line x1="30" y1="84" x2="118" y2="84"></line>
+    <line x1="30" y1="104" x2="118" y2="104"></line>
+    <line x1="40" y1="75" x2="40" y2="93"></line>
+    <line x1="60" y1="95" x2="60" y2="110"></line>
+  </g></svg>
+  <text x="150" y="98" font-family="&#39;Space Grotesk&#39;,&#39;Helvetica Neue&#39;,Arial,sans-serif" font-weight="600" font-size="92" letter-spacing="-3" fill="#141414">Loom</text>
+</svg>
