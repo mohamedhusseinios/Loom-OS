@@ -1,5 +1,7 @@
-"""FastAPI application for the Agentic OS daemon."""
+"""FastAPI application for the Loom daemon."""
 
+import os
+import uuid
 from typing import Optional
 
 import asyncio
@@ -7,11 +9,14 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from daemon.registry import AgentRegistry
+from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
 from daemon.watcher import InboxWatcher
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload
+from daemon.models import (
+    AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +34,7 @@ async def lifespan(app: FastAPI):
 
     Honors globals pre-set by tests: if a registry/graph_engine has been
     injected, the lifespan reuses it and skips the filesystem watcher /
-    broadcast task (which depend on real ``~/.agentic-os`` state).
+    broadcast task (which depend on real ``~/.loom`` state).
     """
     global registry, graph_engine, router, watcher
 
@@ -52,15 +57,15 @@ async def lifespan(app: FastAPI):
         # Background task: broadcast events to WebSocket clients
         asyncio.create_task(_broadcast_events())
 
-    logger.info("Agentic OS daemon started")
+    logger.info("Loom daemon started")
     yield
     if watcher is not None:
         watcher.stop()
     await registry.close()
-    logger.info("Agentic OS daemon stopped")
+    logger.info("Loom daemon stopped")
 
 
-app = FastAPI(title="Agentic OS", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Loom", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,8 +150,13 @@ async def query_graph(project_id: str, q: str = ""):
 
 @app.post("/api/projects/{project_id}/dispatch")
 async def dispatch_task(project_id: str, payload: DispatchRequest):
-    """Dispatch a task to an agent."""
-    import uuid, os
+    """Dispatch a task to an agent.
+
+    Persistence is owned here: we write the inbox file (so an offline agent /
+    the watcher can pick it up) AND insert the registry row atomically. The
+    watcher's ``_handle_task`` is idempotent, so reprocessing the dropped file
+    is a no-op rather than a duplicate insert / duplicate broadcast.
+    """
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -159,15 +169,19 @@ async def dispatch_task(project_id: str, payload: DispatchRequest):
         priority=payload.priority,
     )
 
-    inbox_dir = os.path.expanduser(f"~/.agentic-os/inbox/{project_id}")
+    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
     os.makedirs(inbox_dir, exist_ok=True)
     task_path = os.path.join(inbox_dir, f"task-{task_id}.json")
     with open(task_path, "w") as f:
         f.write(task_payload.model_dump_json())
 
-    await registry.create_task(task_id, project_id, payload.target_agent, payload.instruction, payload.priority)
+    created = await registry.create_task(
+        task_id, project_id, payload.target_agent, payload.instruction, payload.priority
+    )
 
-    if router:
+    # Only emit on the first creation — the watcher path (and any retry)
+    # returns False from create_task and stays silent.
+    if created and router:
         await router._emit_event("agent:dispatched", project_id, {
             "task_id": task_id,
             "target_agent": payload.target_agent,
@@ -202,11 +216,13 @@ async def rebuild_graph(project_id: str):
 @app.post("/api/projects", status_code=201)
 async def create_project(payload: ProjectCreatePayload):
     """Create a new tracked project."""
-    import os
     path = os.path.expanduser(payload.path)
     if not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
-    project = await registry.create_project(payload.name, payload.name, path)
+    try:
+        project = await registry.create_project(payload.name, payload.name, path)
+    except ProjectExistsError:
+        raise HTTPException(status_code=409, detail=f"Project '{payload.name}' is already tracked")
     if router:
         await router._emit_event("project:created", payload.name, {
             "project_id": payload.name,
@@ -226,20 +242,28 @@ async def delete_project(project_id: str):
 
 @app.get("/api/discover")
 async def discover_directories(path: str = "~"):
-    """Browse filesystem directories for project discovery."""
-    import os
+    """Browse filesystem directories for project discovery.
+
+    Does not follow symlinks (so a malicious link can't redirect browsing
+    outside the intended tree) and skips dot-directories.
+    """
     expanded = os.path.expanduser(path)
     if not os.path.isdir(expanded):
         raise HTTPException(status_code=400, detail="Path does not exist")
     dirs = []
     try:
-        for entry in sorted(os.listdir(expanded)):
-            full = os.path.join(expanded, entry)
-            if os.path.isdir(full) and not entry.startswith("."):
-                has_git = os.path.isdir(os.path.join(full, ".git"))
-                dirs.append({"name": entry, "path": full, "has_git": has_git})
+        with os.scandir(expanded) as it:
+            for entry in it:
+                if entry.name.startswith("."):
+                    continue
+                # is_dir(follow_symlinks=False) avoids descending into a
+                # symlink that points elsewhere on the filesystem.
+                if entry.is_dir(follow_symlinks=False):
+                    has_git = os.path.isdir(os.path.join(entry.path, ".git"))
+                    dirs.append({"name": entry.name, "path": entry.path, "has_git": has_git})
     except PermissionError:
         pass
+    dirs.sort(key=lambda d: d["name"])
     return {"directories": dirs, "parent": os.path.dirname(expanded)}
 
 @app.get("/api/health")
@@ -250,6 +274,47 @@ async def health():
         "graphify_available": graph_engine.available if graph_engine else False,
         "watcher_running": watcher.is_running if watcher else False,
     }
+
+
+# ------------------------------------------------------------------
+# Agent task board (Kanban — Feature 2)
+# ------------------------------------------------------------------
+
+@app.post("/api/projects/{project_id}/tasks", status_code=201)
+async def create_agent_task(project_id: str, payload: AgentTaskCreatePayload):
+    """Create a new agent coordination task."""
+    if payload.project != project_id:
+        payload.project = project_id
+    task_id = await registry.create_agent_task(payload)
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=500, detail="Task creation failed")
+    return record.model_dump()
+
+
+@app.get("/api/projects/{project_id}/tasks")
+async def list_agent_tasks(project_id: str, status: str = None):
+    """List agent tasks for a project, optionally filtered by status."""
+    tasks = await registry.list_agent_tasks(project_id, status_filter=status)
+    return [t.model_dump() for t in tasks]
+
+
+@app.patch("/api/projects/{project_id}/tasks/{task_id}")
+async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpdatePayload):
+    """Update an agent task's status, assignee, or result."""
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    await registry.update_agent_task(
+        task_id,
+        status=payload.status,
+        assignee=payload.assignee,
+        result=payload.result,
+    )
+    updated = await registry.get_agent_task(task_id)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="Task update failed")
+    return updated.model_dump()
 
 
 @app.websocket("/ws")
@@ -266,6 +331,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def _broadcast_events():
     """Broadcast router events to all connected WebSocket clients."""
+    if router is None:
+        # Defensive: the lifespan only starts this task outside test mode,
+        # where router is always set. Guard anyway so a future code path
+        # can't AttributeError the startup.
+        return
     while True:
         event: WsEvent = await router.events.get()
         disconnected = []
