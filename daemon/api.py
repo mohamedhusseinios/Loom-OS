@@ -14,6 +14,7 @@ from daemon.graph_engine import GraphEngine
 from daemon.router import Router
 from daemon.watcher import InboxWatcher
 from daemon.traces import TraceCapture
+from daemon.snapshots import SnapshotManager
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord,
@@ -27,6 +28,7 @@ graph_engine: Optional[GraphEngine] = None
 router: Optional[Router] = None
 watcher: Optional[InboxWatcher] = None
 trace_capture: Optional[TraceCapture] = None
+snapshot_manager: Optional[SnapshotManager] = None
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
@@ -54,6 +56,8 @@ async def lifespan(app: FastAPI):
         router = Router(registry, graph_engine)
     if trace_capture is None:
         trace_capture = TraceCapture()
+    if snapshot_manager is None:
+        snapshot_manager = SnapshotManager()
 
     if not test_mode:
         watcher = InboxWatcher()
@@ -270,6 +274,15 @@ async def discover_directories(path: str = "~"):
         pass
     dirs.sort(key=lambda d: d["name"])
     return {"directories": dirs, "parent": os.path.dirname(expanded)}
+
+@app.get("/api/projects/{project_id}/snapshots")
+async def get_snapshots(project_id: str, agent_id: str = None):
+    """Return agent state snapshots for time-travel debugging."""
+    if snapshot_manager is None:
+        return {"snapshots": []}
+    snaps = await snapshot_manager.replay(project=project_id, agent_id=agent_id)
+    return {"snapshots": [s.to_dict() for s in snaps]}
+
 
 @app.get("/api/traces")
 async def get_traces(project: str = None, agent_id: str = None, limit: int = 50):
