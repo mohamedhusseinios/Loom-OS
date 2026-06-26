@@ -1,16 +1,23 @@
 """Event router — processes inbox files and dispatches actions."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
 from daemon.models import (
     RegisterPayload, HeartbeatPayload, FindingFrontmatter,
     AgentInfo, AgentStatus, FindingType, WsEvent, TaskPayload,
 )
+
+if TYPE_CHECKING:
+    from daemon.recall import RecallEngine
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +28,15 @@ MIN_UPDATE_INTERVAL = 30
 class Router:
     """Processes inbox events and dispatches to registry + graph engine."""
 
-    def __init__(self, registry: AgentRegistry, graph_engine: GraphEngine):
+    def __init__(
+        self,
+        registry: AgentRegistry,
+        graph_engine: GraphEngine,
+        recall: RecallEngine | None = None,
+    ):
         self.registry = registry
         self.graph = graph_engine
+        self.recall = recall
         self._last_update: dict[str, float] = {}  # project -> timestamp
         self._event_queue: asyncio.Queue[WsEvent] = asyncio.Queue()
 
@@ -126,15 +139,18 @@ class Router:
 
     async def _handle_task(self, project: str, path: Path):
         payload = TaskPayload(**json.loads(path.read_text()))
-        await self.registry.create_task(
+        # Idempotent: if the API already persisted this task, don't
+        # re-insert or re-broadcast. create_task returns False on collision.
+        created = await self.registry.create_task(
             payload.task_id, project, payload.target_agent,
             payload.instruction, payload.priority,
         )
-        await self._emit_event("agent:dispatched", project, {
-            "task_id": payload.task_id,
-            "target_agent": payload.target_agent,
-            "instruction": payload.instruction,
-        })
+        if created:
+            await self._emit_event("agent:dispatched", project, {
+                "task_id": payload.task_id,
+                "target_agent": payload.target_agent,
+                "instruction": payload.instruction,
+            })
 
     def _parse_frontmatter(self, content: str) -> FindingFrontmatter:
         """Parse YAML frontmatter from markdown."""
