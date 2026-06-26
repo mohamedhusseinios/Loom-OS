@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation";
 import { getProject } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/api";
 import { GraphStats } from "@/components/graph-stats";
+import { KnowledgeSources } from "@/components/knowledge-sources";
 import { AgentBadge } from "@/components/agent-badge";
 import { ActivityFeed } from "@/components/activity-feed";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,10 @@ export default function ProjectDetailPage() {
           )}
         </div>
         <div className="lg:col-span-2">
-          <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3">{t("liveActivity")}</h3>
+          <KnowledgeSources projectId={id} />
+        </div>
+        <div className="lg:col-span-2">
+          <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3 mt-4">{t("liveActivity")}</h3>
           <ActivityFeed projectId={id} />
         </div>
       </div>

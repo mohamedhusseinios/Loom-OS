@@ -135,6 +135,14 @@ class AgentRegistry:
         rows = await cursor.fetchall()
         return [self._row_to_agent(r) for r in rows]
 
+    async def delete_agent(self, agent_id: str) -> bool:
+        """Remove an agent from the registry. Returns True if a row was deleted."""
+        cursor = await self.db.execute(
+            "DELETE FROM agents WHERE agent_id = ?", (agent_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
     @staticmethod
     def _row_to_agent(row) -> AgentInfo:
         return AgentInfo(
@@ -227,6 +235,13 @@ class AgentRegistry:
     async def complete_task(self, task_id: str):
         await self.db.execute(
             "UPDATE tasks SET status = 'completed', completed_at = ? WHERE task_id = ?",
+            (datetime.now(timezone.utc).isoformat(), task_id),
+        )
+        await self.db.commit()
+
+    async def fail_task(self, task_id: str, error: str | None = None):
+        await self.db.execute(
+            "UPDATE tasks SET status = 'failed', completed_at = ? WHERE task_id = ?",
             (datetime.now(timezone.utc).isoformat(), task_id),
         )
         await self.db.commit()

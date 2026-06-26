@@ -113,6 +113,13 @@ class ProjectCreatePayload(BaseModel):
     name: str
     path: str
 
+class RegisterAgentPayload(BaseModel):
+    """Payload for registering an agent via API/dashboard."""
+    agent: str
+    version: str = "1.0"
+    project_path: str
+    capabilities: list[str] = Field(default_factory=list)
+
 class ProjectDeleteResult(BaseModel):
     deleted: bool
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph } from "@/lib/api";
+import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph, rebuildGraph, getProject } from "@/lib/api";
 import type { GraphTopology, CommunityInfo, FlowInfo } from "@/lib/api";
 import { GraphCanvas } from "@/components/graph-canvas";
 import { GraphControls } from "@/components/graph-controls";
@@ -11,7 +11,7 @@ import { NodeDetail } from "@/components/node-detail";
 import { useWebSocket } from "@/lib/use-websocket";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Hammer, CheckCircle2, XCircle } from "lucide-react";
 
 type GraphNode = GraphTopology["nodes"][number];
 
@@ -23,6 +23,11 @@ export default function GraphExplorerPage() {
   const [communities, setCommunities] = useState<CommunityInfo[]>([]);
   const [flows, setFlows] = useState<FlowInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [building, setBuilding] = useState(false);
+  const [hasAgents, setHasAgents] = useState(false);
+  const [buildTaskId, setBuildTaskId] = useState<string | null>(null);
+  const [buildAgent, setBuildAgent] = useState<string | null>(null);
+  const [buildStatus, setBuildStatus] = useState<"building" | "completed" | "failed" | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [visibleCommunities, setVisibleCommunities] = useState<Set<string>>(new Set());
   const [selectedFlow, setSelectedFlow] = useState<string | null>(null);
@@ -36,16 +41,18 @@ export default function GraphExplorerPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [topo, comms, flws] = await Promise.all([
+      const [topo, comms, flws, project] = await Promise.all([
         getGraphTopology(id),
         getGraphCommunities(id),
         getGraphFlows(id),
+        getProject(id),
       ]);
       setNodes(topo.nodes || []);
       setEdges(topo.edges || []);
       setCommunities(comms.communities || []);
       setFlows(flws.flows || []);
       setVisibleCommunities(new Set((comms.communities || []).map((c) => String(c.id))));
+      setHasAgents((project.agents || []).length > 0);
     } catch {
       // graph not built yet
     } finally {
@@ -55,13 +62,49 @@ export default function GraphExplorerPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Listen for graph:updated (direct mode) and task:completed / task:failed (agent mode).
   useEffect(() => {
     return subscribe(`project:${id}`, (event) => {
       if (event.event === "graph:updated") {
         loadData();
+        setBuilding(false);
+        // A failed build still emits graph:updated (with status="failed") so
+        // the dashboard refreshes — don't report it as a successful build.
+        setBuildStatus(event.data?.status === "failed" ? "failed" : "completed");
+      }
+      if (event.event === "task:completed" && event.data?.task_id === buildTaskId) {
+        setBuildStatus("completed");
+        // graph:updated will follow and trigger loadData.
+      }
+      if (event.event === "task:failed" && event.data?.task_id === buildTaskId) {
+        setBuildStatus("failed");
+        setBuilding(false);
       }
     });
-  }, [id, subscribe, loadData]);
+  }, [id, subscribe, loadData, buildTaskId]);
+
+  async function handleBuildGraph() {
+    setBuilding(true);
+    setBuildStatus("building");
+    setBuildTaskId(null);
+    setBuildAgent(null);
+    try {
+      const result = await rebuildGraph(id);
+      if (result.mode === "agent" && result.task_id) {
+        setBuildTaskId(result.task_id);
+        setBuildAgent(result.agent || null);
+      }
+      // Fallback: if no WebSocket event arrives within 30 s, reload anyway.
+      setTimeout(() => {
+        loadData();
+        setBuilding((prev) => { if (prev) return false; return prev; });
+        setBuildStatus((prev) => prev === "building" ? null : prev);
+      }, 30000);
+    } catch {
+      setBuilding(false);
+      setBuildStatus("failed");
+    }
+  }
 
   function handleToggleCommunity(communityId: string) {
     setVisibleCommunities((prev) => {
@@ -119,51 +162,111 @@ export default function GraphExplorerPage() {
           <p className="text-xs text-zinc-500">
             {t("stats", { nodes: nodes.length, edges: edges.length, communities: communities.length })}
           </p>
+          {/* Task dispatch feedback banner */}
+          {buildStatus === "building" && buildAgent && (
+            <p className="text-xs text-amber-400 mt-1">
+              {t("buildingVia", { agent: buildAgent })}
+            </p>
+          )}
+          {buildStatus === "completed" && buildTaskId && (
+            <p className="text-xs text-emerald-400 mt-1 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              {t("buildComplete")}
+            </p>
+          )}
+          {buildStatus === "failed" && (
+            <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+              <XCircle className="w-3 h-3" />
+              {t("buildFailed")}
+            </p>
+          )}
         </div>
-        <form onSubmit={handleNLQuery} className="flex gap-2">
-          <Input
-            value={nlQuery}
-            onChange={(e) => setNlQuery(e.target.value)}
-            placeholder={t("searchPlaceholder")}
-            className="bg-zinc-900 border-zinc-700 text-zinc-200 text-sm w-64"
-          />
-          <Button type="submit" size="sm" disabled={nlLoading}>
-            {nlLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleBuildGraph}
+            disabled={building || !hasAgents}
+            title={!hasAgents ? t("buildDisabledNoAgents") : undefined}
+          >
+            {building ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 me-1 animate-spin" />
+                {t("building")}
+              </>
+            ) : (
+              <>
+                <Hammer className="w-3.5 h-3.5 me-1" />
+                {t("buildGraph")}
+              </>
+            )}
           </Button>
-        </form>
+          <form onSubmit={handleNLQuery} className="flex gap-2">
+            <Input
+              value={nlQuery}
+              onChange={(e) => setNlQuery(e.target.value)}
+              placeholder={t("searchPlaceholder")}
+              className="bg-zinc-900 border-zinc-700 text-zinc-200 text-sm w-64"
+            />
+            <Button type="submit" size="sm" disabled={nlLoading}>
+              {nlLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            </Button>
+          </form>
+        </div>
       </div>
 
       <div className="flex flex-1 gap-0 border border-zinc-800 rounded-lg overflow-hidden">
-        <GraphControls
-          communities={communities}
-          flows={flows}
-          visibleCommunities={visibleCommunities}
-          onToggleCommunity={handleToggleCommunity}
-          selectedFlow={selectedFlow}
-          onSelectFlow={handleSelectFlow}
-          showEdges={showEdges}
-          onToggleEdges={() => setShowEdges(!showEdges)}
-          searchQuery={searchQuery}
-          onSearchChange={handleSearchChange}
-        />
-
-        <div className="flex-1 relative">
-          {nodes.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm text-zinc-600">
-              {t("empty")}
-            </div>
-          ) : (
-            <GraphCanvas
-              nodes={nodes}
-              edges={edges}
-              onNodeSelect={setSelectedNode}
-              highlightedNodes={highlightedNodes}
+        {nodes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center flex-1 gap-3 text-sm text-zinc-600">
+            <p>{t("empty")}</p>
+            {hasAgents && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBuildGraph}
+                disabled={building}
+              >
+                {building ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 me-1 animate-spin" />
+                    {t("building")}
+                  </>
+                ) : (
+                  <>
+                    <Hammer className="w-3.5 h-3.5 me-1" />
+                    {t("buildGraph")}
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            <GraphControls
+              communities={communities}
+              flows={flows}
               visibleCommunities={visibleCommunities}
+              onToggleCommunity={handleToggleCommunity}
+              selectedFlow={selectedFlow}
+              onSelectFlow={handleSelectFlow}
               showEdges={showEdges}
+              onToggleEdges={() => setShowEdges(!showEdges)}
+              searchQuery={searchQuery}
+              onSearchChange={handleSearchChange}
             />
-          )}
-          <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
-        </div>
+            <div className="flex-1 relative">
+              <GraphCanvas
+                nodes={nodes}
+                edges={edges}
+                onNodeSelect={setSelectedNode}
+                highlightedNodes={highlightedNodes}
+                visibleCommunities={visibleCommunities}
+                showEdges={showEdges}
+              />
+              <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

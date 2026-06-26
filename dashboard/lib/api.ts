@@ -65,7 +65,16 @@ export async function queryGraph(id: string, q: string): Promise<QueryResult> {
   return fetchApi(`/api/projects/${id}/query?q=${encodeURIComponent(q)}`);
 }
 
-export async function rebuildGraph(id: string): Promise<{ status: string }> {
+export async function rebuildGraph(id: string): Promise<{
+  mode: "direct" | "agent";
+  status: string;
+  task_id?: string;
+  agent?: string;
+  project?: string;
+  nodes?: number;
+  edges?: number;
+  error?: string;
+}> {
   const res = await fetch(`${BASE_URL}/api/projects/${id}/rebuild`, { method: "POST" });
   return res.json();
 }
@@ -151,4 +160,79 @@ export async function listDispatches(projectId: string): Promise<{
   dispatches: { task_id: string; target_agent: string; instruction: string; status: string; dispatched_at: string }[];
 }> {
   return fetchApi(`/api/projects/${projectId}/dispatches`);
+}
+
+// --- Agent Registration ---
+export async function registerAgent(
+  projectId: string,
+  payload: { agent: string; version?: string; project_path: string; capabilities?: string[] }
+): Promise<{ status: string; agent: string; project: string }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/register-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// --- Agent Unregistration ---
+export async function unregisterAgent(
+  projectId: string,
+  agentId: string
+): Promise<{ deleted: boolean; agent_id: string }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agents/${agentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// --- Known Agents ---
+export interface KnownAgent {
+  name: string;
+  display: string;
+  description: string;
+  detect_cmd: string | null;
+  default_version: string;
+  default_capabilities: string[];
+  installed: boolean;
+}
+
+export async function listKnownAgents(): Promise<{ agents: KnownAgent[] }> {
+  return fetchApi("/api/agents/known");
+}
+
+// --- Knowledge Sources ---
+export interface KnowledgeSourceResult {
+  source_type: string;
+  display_name: string;
+  description: string;
+  used_by: string[];
+  found: boolean;
+  path: string | null;
+  size_bytes: number;
+}
+
+export async function getProjectKnowledge(projectId: string): Promise<{
+  project_id: string;
+  sources: KnowledgeSourceResult[];
+}> {
+  return fetchApi(`/api/projects/${projectId}/knowledge`);
+}
+
+export async function scanProjectKnowledge(projectId: string): Promise<{
+  project_id: string;
+  results: {
+    source_type: string;
+    display_name: string;
+    found: boolean;
+    status: string;
+  }[];
+}> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/knowledge/scan`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
 }

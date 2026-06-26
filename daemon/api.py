@@ -15,9 +15,9 @@ from daemon.router import Router
 from daemon.watcher import InboxWatcher
 from daemon.traces import TraceCapture
 from daemon.snapshots import SnapshotManager
-from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload
+from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
-    AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord,
+    AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -210,6 +210,50 @@ async def list_dispatches(project_id: str):
     return {"dispatches": tasks}
 
 
+@app.post("/api/projects/{project_id}/register-agent")
+async def register_agent(project_id: str, payload: RegisterAgentPayload):
+    """Register a coding agent for a project.
+
+    Dual-write pattern (same as dispatch): writes ``register.json`` to the
+    inbox so the watcher can reprocess it on restart, AND calls the router
+    directly so the agent appears and the graph build starts *immediately*.
+    Idempotent — re-registering the same agent is a no-op.
+    """
+    from pathlib import Path
+
+    # Validate the project path exists
+    expanded = os.path.expanduser(payload.project_path)
+    if not os.path.isdir(expanded):
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+
+    # Write register.json to the inbox
+    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
+    os.makedirs(inbox_dir, exist_ok=True)
+    register_path = os.path.join(inbox_dir, "register.json")
+
+    import json
+    register_doc = {
+        "agent": payload.agent,
+        "version": payload.version,
+        "project": project_id,
+        "project_path": payload.project_path,
+        "capabilities": payload.capabilities,
+    }
+    with open(register_path, "w") as f:
+        json.dump(register_doc, f)
+
+    # Process immediately through the router — the agent is registered and
+    # the graph build starts right now, not on the next watcher tick.
+    if router:
+        await router.handle_file(project_id, register_path)
+
+    return {
+        "status": "registered",
+        "agent": payload.agent,
+        "project": project_id,
+    }
+
+
 @app.get("/api/projects/{project_id}/agents")
 async def list_agents(project_id: str):
     """List agents for a project."""
@@ -217,14 +261,264 @@ async def list_agents(project_id: str):
     return {"agents": [a.model_dump() for a in agents]}
 
 
-@app.post("/api/projects/{project_id}/rebuild")
-async def rebuild_graph(project_id: str):
-    """Force a full graph rebuild."""
+@app.delete("/api/projects/{project_id}/agents/{agent_id}")
+async def delete_agent(project_id: str, agent_id: str):
+    """Remove an agent from a project."""
+    deleted = await registry.delete_agent(agent_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if router:
+        await router._emit_event("agent:offline", project_id, {
+            "agent_id": agent_id,
+        })
+    return {"deleted": True, "agent_id": agent_id}
+
+
+@app.get("/api/agents/known")
+async def list_known_agents():
+    """Return known agent types and which are detected on this machine."""
+    from daemon.known_agents import get_known_agents, detect_installed
+    known = get_known_agents()
+    installed = detect_installed()
+    # Merge: mark each known agent as installed if detected
+    for agent in known:
+        agent["installed"] = agent["name"] in installed
+    return {"agents": known}
+
+
+@app.get("/api/projects/{project_id}/knowledge")
+async def get_project_knowledge(project_id: str):
+    """List knowledge sources discovered in a project."""
+    from daemon.project_knowledge import discover_knowledge_sources
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    result = await graph_engine.build_project(project.project_path)
-    return result.model_dump()
+    sources = discover_knowledge_sources(project.project_path)
+    return {
+        "project_id": project_id,
+        "sources": [
+            {
+                "source_type": s.source_type,
+                "display_name": s.display_name,
+                "description": s.description,
+                "used_by": s.used_by,
+                "found": s.found,
+                "path": s.path,
+                "size_bytes": s.size_bytes,
+            }
+            for s in sources
+        ],
+    }
+
+
+@app.post("/api/projects/{project_id}/knowledge/scan")
+async def scan_project_knowledge(project_id: str):
+    """Scan and ingest all knowledge sources in a project."""
+    from daemon.project_knowledge import ingest_all_sources
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    results = await ingest_all_sources(project_id, project.project_path)
+    if router:
+        await router._emit_event("knowledge:scanned", project_id, {
+            "sources_found": sum(1 for r in results if r.get("found", True)),
+            "sources_ingested": sum(1 for r in results if r.get("status") == "ingested"),
+        })
+    return {"project_id": project_id, "results": results}
+
+
+@app.get("/api/projects/{project_id}/context")
+async def get_shared_context(project_id: str):
+    """Return the shared agent context as Markdown.
+
+    Agents read this at session start to understand the project graph
+    structure, knowledge sources, recent findings, and the agent roster.
+    Stored on disk at ``<project>/.loom/SHARED_CONTEXT.md`` so agents
+    can also read it directly from the filesystem.
+    """
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from daemon.shared_context import generate_shared_context
+    path = await generate_shared_context(
+        project_id, project.project_path, graph_engine, registry
+    )
+
+    try:
+        content = open(path).read()
+    except FileNotFoundError:
+        content = ""
+
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content, media_type="text/markdown")
+
+
+@app.post("/api/projects/{project_id}/rebuild")
+async def rebuild_graph(project_id: str):
+    """Build or rebuild the project knowledge graph.
+
+    If the project has at least one online agent, the build is dispatched as
+    a tracked task to that agent: the daemon runs graphify in the background
+    and marks the task as completed when the build finishes.  The task (and
+    its status) appear in the project's dispatch history.
+
+    When no agent is online the daemon runs the build synchronously (direct
+    mode) and returns the result immediately — no task is created.
+    """
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find the first online agent to "own" this build.
+    agents = await registry.list_agents(project_id)
+    online_agent = next(
+        (a for a in agents if a.status == AgentStatus.ONLINE), None
+    )
+
+    if online_agent is None:
+        # --- Direct mode (no agent available) ---
+        result = await graph_engine.build_project(project.project_path)
+        communities = 0
+        if result.status == "completed":
+            stats = await graph_engine.get_stats(project.project_path)
+            communities = stats.communities
+            await registry.update_graph_stats(
+                project_id, result.nodes, result.edges, communities
+            )
+        if router:
+            await router._emit_event("graph:updated", project_id, {
+                "nodes_added": result.nodes,
+                "edges_added": result.edges,
+                "communities": communities,
+                "status": result.status,
+                "error": result.error,
+            })
+        # Best-effort knowledge scan
+        try:
+            from daemon.project_knowledge import ingest_all_sources
+            await ingest_all_sources(project_id, project.project_path)
+        except Exception:
+            pass
+        return {**result.model_dump(), "mode": "direct"}
+
+    # --- Agent-driven mode ---
+    task_id = str(uuid.uuid4())
+    instruction = (
+        f"Build the knowledge graph for this project by running: "
+        f"graphify {project.project_path}"
+    )
+
+    # Dual-write: inbox file (so the agent can see it) + registry row.
+    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
+    os.makedirs(inbox_dir, exist_ok=True)
+    task_payload = TaskPayload(
+        task_id=task_id,
+        target_agent=online_agent.agent_name,
+        instruction=instruction,
+        priority="high",
+    )
+    with open(os.path.join(inbox_dir, f"task-{task_id}.json"), "w") as f:
+        f.write(task_payload.model_dump_json())
+
+    await registry.create_task(
+        task_id, project_id, online_agent.agent_name, instruction, "high"
+    )
+
+    if router:
+        await router._emit_event("agent:dispatched", project_id, {
+            "task_id": task_id,
+            "target_agent": online_agent.agent_name,
+            "instruction": instruction,
+        })
+
+    # Kick off the build in the background — the agent "owns" the task
+    # but the daemon executes graphify so the build actually happens.
+    asyncio.create_task(
+        _build_graph_background(project_id, project.project_path, task_id)
+    )
+
+    return {
+        "task_id": task_id,
+        "agent": online_agent.agent_name,
+        "status": "building",
+        "mode": "agent",
+    }
+
+
+async def _build_graph_background(
+    project_id: str, project_path: str, task_id: str
+):
+    """Run graphify in the background and wire up task + graph events.
+
+    This is the execution half of an agent-dispatched build.  When the
+    daemon finishes the build it marks the dispatch task as completed and
+    emits ``task:completed`` / ``graph:updated`` so every connected
+    dashboard reloads live.
+    """
+    try:
+        result = await graph_engine.build_project(project_path)
+        communities = 0
+
+        # build_project swallows graphify errors and returns status="failed"
+        # rather than raising — so a failed build must be surfaced here as a
+        # failed task, otherwise the dashboard reports "build complete" over an
+        # empty graph.
+        if result.status != "completed":
+            await registry.fail_task(task_id, result.error)
+            if router:
+                await router._emit_event("task:failed", project_id, {
+                    "task_id": task_id,
+                    "error": result.error,
+                })
+            return
+
+        stats = await graph_engine.get_stats(project_path)
+        communities = stats.communities
+        await registry.update_graph_stats(
+            project_id, result.nodes, result.edges, communities
+        )
+
+        await registry.complete_task(task_id)
+
+        if router:
+            await router._emit_event("task:completed", project_id, {
+                "task_id": task_id,
+                "status": result.status,
+                "nodes": result.nodes,
+                "edges": result.edges,
+            })
+            await router._emit_event("graph:updated", project_id, {
+                "nodes_added": result.nodes,
+                "edges_added": result.edges,
+                "communities": communities,
+                "status": result.status,
+                "error": result.error,
+            })
+
+        # Best-effort knowledge scan
+        try:
+            from daemon.project_knowledge import ingest_all_sources
+            await ingest_all_sources(project_id, project_path)
+        except Exception:
+            pass
+
+        # Regenerate shared agent context
+        try:
+            from daemon.shared_context import generate_shared_context
+            await generate_shared_context(
+                project_id, project_path, graph_engine, registry
+            )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        logger.error("Background graph build failed for %s: %s", project_id, exc)
+        if router:
+            await router._emit_event("task:failed", project_id, {
+                "task_id": task_id,
+                "error": str(exc),
+            })
 
 @app.post("/api/projects", status_code=201)
 async def create_project(payload: ProjectCreatePayload):

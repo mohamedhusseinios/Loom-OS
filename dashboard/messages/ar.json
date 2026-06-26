@@ -37,6 +37,7 @@
     "heading": "الوكلاء",
     "agentCount": "{count, plural, =0 {لا وكلاء} one {وكيل واحد} two {وكيلان} few {# وكلاء} many {# وكيلًا} other {# وكيل}} مسجَّل",
     "dispatchTask": "إرسال مهمة",
+    "registerAgent": "تسجيل وكيل",
     "empty": "لا يوجد وكلاء مسجَّلون بعد. يظهر الوكلاء عند كتابة register.json إلى {path}",
     "agentWiring": "توصيلات الوكلاء",
     "dispatchHistory": "سجل الإرسالات"
@@ -46,7 +47,13 @@
     "heading": "مستكشف الرسم البياني",
     "stats": "{nodes} عقدة · {edges} حافة · {communities} مجتمع",
     "searchPlaceholder": "اسأل عن قاعدة الشيفرة...",
-    "empty": "لا توجد بيانات رسم بياني بعد. يحتاج الوكلاء إلى التسجيل وبناء الرسم البياني."
+    "empty": "لا توجد بيانات رسم بياني بعد. يحتاج الوكلاء إلى التسجيل وبناء الرسم البياني.",
+    "buildGraph": "بناء الرسم البياني",
+    "building": "جارٍ البناء...",
+    "buildDisabledNoAgents": "سجِّل وكيلًا أولاً لبناء الرسم البياني",
+    "buildingVia": "جارٍ البناء عبر {agent} — تابع التقدم في سجل الإرسالات",
+    "buildComplete": "اكتمل بناء الرسم البياني!",
+    "buildFailed": "فشل بناء الرسم البياني — راجع سجلات الخادم"
   },
   "AddProjectModal": {
     "heading": "إضافة مشروع",
@@ -83,7 +90,12 @@
     "registeredAt": "سُجِّل {timeAgo}",
     "capabilities": "{count, plural, =0 {لا قدرات} one {قدرة واحدة} two {قدرتان} few {# قدرات} many {# قدرة} other {# قدرة}}",
     "findings": "{count, plural, =0 {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}}",
-    "lastHeartbeat": "آخر نبضة: {time}"
+    "lastHeartbeat": "آخر نبضة: {time}",
+    "remove": "إزالة الوكيل",
+    "confirmRemove": "إزالة هذا الوكيل؟",
+    "yesRemove": "نعم، أزل",
+    "removing": "جارٍ الإزالة...",
+    "cancel": "إلغاء"
   },
   "AgentWiring": {
     "empty": "لا يوجد وكلاء مسجَّلون بعد",
@@ -145,5 +157,27 @@
       "never": "أبدًا",
       "justNow": "الآن"
     }
+  },
+  "RegisterAgentModal": {
+    "heading": "تسجيل وكيل",
+    "agentName": "اسم الوكيل",
+    "agentNamePlaceholder": "مثال: claude-code, codex",
+    "projectPath": "مسار المشروع",
+    "pathPlaceholder": "/المسار/المطلق/للمشروع",
+    "version": "الإصدار",
+    "capabilities": "القدرات",
+    "capabilitiesPlaceholder": "code-analysis, bug-finding",
+    "register": "تسجيل الوكيل",
+    "cancel": "إلغاء",
+    "registerError": "فشل تسجيل الوكيل",
+    "detectedOnMachine": "تم اكتشافه على جهازك — انقر للتعبئة التلقائية:",
+    "otherAgents": "وكلاء معروفون آخرون:"
+  },
+  "KnowledgeSources": {
+    "heading": "مصادر المعرفة",
+    "loading": "جارٍ البحث عن مصادر المعرفة...",
+    "found": "تم العثور",
+    "usedBy": "يستخدمه",
+    "scan": "البحث عن مصادر المعرفة"
   }
 }

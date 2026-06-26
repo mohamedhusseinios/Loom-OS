@@ -61,7 +61,7 @@ echo "Press Ctrl+C to stop."
 echo ""
 
 # Start daemon
-loom --host 127.0.0.1 --port 8472 &
+loom start --host 127.0.0.1 --port 8472 &
 DAEMON_PID=$!
 sleep 1
 if ! kill -0 "$DAEMON_PID" 2>/dev/null; then

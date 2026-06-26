@@ -159,15 +159,51 @@
   },
   "hotPaths": [
     {
+      "path": "daemon/router.py",
+      "accessCount": 7,
+      "lastAccessed": 1782498156146,
+      "type": "file"
+    },
+    {
+      "path": "daemon/api.py",
+      "accessCount": 5,
+      "lastAccessed": 1782498665309,
+      "type": "file"
+    },
+    {
       "path": "CLAUDE.md",
       "accessCount": 4,
       "lastAccessed": 1782479446842,
       "type": "file"
     },
     {
+      "path": "daemon/graph_engine.py",
+      "accessCount": 3,
+      "lastAccessed": 1782498641466,
+      "type": "file"
+    },
+    {
+      "path": "daemon/registry.py",
+      "accessCount": 3,
+      "lastAccessed": 1782498687745,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/app/[locale]/projects/[id]/graph/page.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1782498700960,
+      "type": "file"
+    },
+    {
       "path": "README.md",
       "accessCount": 2,
       "lastAccessed": 1782479732917,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_graph_engine.py",
+      "accessCount": 2,
+      "lastAccessed": 1782498627924,
       "type": "file"
     },
     {
@@ -195,33 +231,9 @@
       "type": "file"
     },
     {
-      "path": "daemon/api.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479274815,
-      "type": "file"
-    },
-    {
-      "path": "daemon/router.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479275475,
-      "type": "file"
-    },
-    {
       "path": "daemon/models.py",
       "accessCount": 1,
       "lastAccessed": 1782479276001,
-      "type": "file"
-    },
-    {
-      "path": "daemon/registry.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479286424,
-      "type": "file"
-    },
-    {
-      "path": "daemon/graph_engine.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479287010,
       "type": "file"
     },
     {
@@ -276,6 +288,48 @@
       "path": "dashboard/app/[locale]/layout.tsx",
       "accessCount": 1,
       "lastAccessed": 1782479304327,
+      "type": "file"
+    },
+    {
+      "path": "daemon/shared_context.py",
+      "accessCount": 1,
+      "lastAccessed": 1782497961202,
+      "type": "file"
+    },
+    {
+      "path": "daemon/project_knowledge.py",
+      "accessCount": 1,
+      "lastAccessed": 1782497961598,
+      "type": "file"
+    },
+    {
+      "path": "daemon/known_agents.py",
+      "accessCount": 1,
+      "lastAccessed": 1782497962244,
+      "type": "file"
+    },
+    {
+      "path": "daemon/ingest.py",
+      "accessCount": 1,
+      "lastAccessed": 1782497993704,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/components/knowledge-sources.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782497994755,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/components/register-agent-modal.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782498002609,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/components/graph-canvas.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782498523623,
       "type": "file"
     }
   ],

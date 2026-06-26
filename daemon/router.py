@@ -92,9 +92,16 @@ class Router:
         await self.registry.upsert_agent(agent)
         await self.registry.upsert_project(project, payload.project_path)
 
-        # Trigger initial graph build
+        # Trigger initial graph build (which also scans knowledge sources and
+        # regenerates the shared context). When graphify isn't available we
+        # still scan knowledge sources and publish the shared context so the
+        # agent joins the fabric — knowledge sharing doesn't need the graph.
         if self.graph.available:
             asyncio.create_task(self._build_project(project, payload.project_path))
+        else:
+            asyncio.create_task(
+                self._scan_and_share(project, payload.project_path)
+            )
 
         await self._emit_event("agent:online", project, {
             "agent": payload.agent,
@@ -127,6 +134,13 @@ class Router:
             "type": frontmatter.type.value,
         })
 
+        # Regenerate shared context so agents see the new finding.
+        project_info = await self.registry.get_project(project)
+        if project_info:
+            asyncio.create_task(
+                self._regenerate_shared_context(project, project_info.project_path)
+            )
+
     async def _handle_decision(self, project: str, path: Path):
         content = path.read_text()
         frontmatter = self._parse_frontmatter(content)
@@ -136,6 +150,13 @@ class Router:
             "file": path.name,
             "type": "architecture-decision",
         })
+
+        # Regenerate shared context so agents see the new decision record.
+        project_info = await self.registry.get_project(project)
+        if project_info:
+            asyncio.create_task(
+                self._regenerate_shared_context(project, project_info.project_path)
+            )
 
     async def _handle_task(self, project: str, path: Path):
         payload = TaskPayload(**json.loads(path.read_text()))
@@ -189,6 +210,33 @@ class Router:
             "error": result.error,
         })
 
+        # After graph build, scan other knowledge sources and publish the
+        # shared context so all agents benefit.
+        await self._scan_and_share(project, project_path)
+
+    async def _scan_and_share(self, project: str, project_path: str):
+        """Ingest project knowledge sources and (re)publish the shared context.
+
+        Scans for code-review-graph, CLAUDE.md, AGENTS.md, README, etc.,
+        ingests them into the shared fabric, then regenerates
+        ``.loom/SHARED_CONTEXT.md`` so every agent sees the same knowledge.
+        Independent of graphify availability — knowledge sharing always runs.
+        """
+        try:
+            from daemon.project_knowledge import ingest_all_sources
+            results = await ingest_all_sources(project, project_path)
+            found = sum(1 for r in results if r.get("found", True))
+            ingested = sum(1 for r in results if r.get("status") == "ingested")
+            logger.info(
+                "Knowledge scan complete for %s: %d sources found, %d ingested",
+                project, found, ingested,
+            )
+        except Exception as exc:
+            logger.warning("Knowledge scan failed for %s: %s", project, exc)
+
+        # Regenerate the shared agent context so all agents see the latest.
+        await self._regenerate_shared_context(project, project_path)
+
     async def _update_project(self, project: str, project_path: str, finding: FindingFrontmatter):
         result = await self.graph.update_project(project_path, finding.files)
         communities = 0
@@ -206,6 +254,19 @@ class Router:
             "error": result.error,
             "agent": finding.agent,
         })
+
+        # Regenerate shared context so agents see the updated graph + findings.
+        await self._regenerate_shared_context(project, project_path)
+
+    async def _regenerate_shared_context(self, project: str, project_path: str):
+        """Regenerate the shared agent context file (best-effort)."""
+        try:
+            from daemon.shared_context import generate_shared_context
+            await generate_shared_context(
+                project, project_path, self.graph, self.registry
+            )
+        except Exception as exc:
+            logger.warning("Failed to regenerate shared context for %s: %s", project, exc)
 
     async def _emit_event(self, event: str, project: str, data: dict):
         ws_event = WsEvent(event=event, project=project, data=data)

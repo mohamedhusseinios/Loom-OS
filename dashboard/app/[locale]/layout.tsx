@@ -76,6 +76,7 @@ export default async function LocaleLayout({
     >
       <body
         className={`${fontClass} bg-zinc-950 text-zinc-100 antialiased`}
+        suppressHydrationWarning
       >
         <NextIntlClientProvider>
           <WebSocketProvider>

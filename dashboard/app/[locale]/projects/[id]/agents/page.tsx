@@ -9,9 +9,10 @@ import { AgentCard } from "@/components/agent-card";
 import { AgentWiring } from "@/components/agent-wiring";
 import { DispatchModal } from "@/components/dispatch-modal";
 import { DispatchHistory } from "@/components/dispatch-history";
+import { RegisterAgentModal } from "@/components/register-agent-modal";
 import { Button } from "@/components/ui/button";
 import { useWebSocket } from "@/lib/use-websocket";
-import { Send } from "lucide-react";
+import { Send, UserPlus } from "lucide-react";
 
 export default function AgentManagementPage() {
   const t = useTranslations("AgentsPage");
@@ -22,6 +23,7 @@ export default function AgentManagementPage() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [showDispatch, setShowDispatch] = useState(false);
+  const [showRegister, setShowRegister] = useState(false);
   const { subscribe } = useWebSocket();
 
   const loadData = useCallback(async () => {
@@ -61,18 +63,23 @@ export default function AgentManagementPage() {
             {t("agentCount", { count: agents.length })}
           </p>
         </div>
-        {agents.length > 0 && (
-          <Button onClick={() => setShowDispatch(true)} size="sm">
-            <Send className="w-3.5 h-3.5 me-2" /> {t("dispatchTask")}
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowRegister(true)} size="sm" variant="outline">
+            <UserPlus className="w-3.5 h-3.5 me-2" /> {t("registerAgent")}
           </Button>
-        )}
+          {agents.length > 0 && (
+            <Button onClick={() => setShowDispatch(true)} size="sm">
+              <Send className="w-3.5 h-3.5 me-2" /> {t("dispatchTask")}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="space-y-3 mb-8">
         {agents.length === 0 ? (
           <p className="text-sm text-zinc-600">{t("empty", { path: "~/.agentic-os/inbox/" })}</p>
         ) : (
-          agents.map((a) => <AgentCard key={a.agent_id} agent={a} />)
+          agents.map((a) => <AgentCard key={a.agent_id} agent={a} projectId={id} onRemoved={loadData} />)
         )}
       </div>
 
@@ -90,6 +97,14 @@ export default function AgentManagementPage() {
         projectId={id}
         agents={agents}
         onDispatched={loadData}
+      />
+
+      <RegisterAgentModal
+        open={showRegister}
+        onClose={() => setShowRegister(false)}
+        projectId={id}
+        projectPath={data.project.project_path}
+        onRegistered={loadData}
       />
     </div>
   );

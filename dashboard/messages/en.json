@@ -37,6 +37,7 @@
     "heading": "Agents",
     "agentCount": "{count, plural, one {# agent} other {# agents}} registered",
     "dispatchTask": "Dispatch Task",
+    "registerAgent": "Register Agent",
     "empty": "No agents registered yet. Agents appear when they write register.json to {path}",
     "agentWiring": "Agent Wiring",
     "dispatchHistory": "Dispatch History"
@@ -46,7 +47,13 @@
     "heading": "Graph Explorer",
     "stats": "{nodes} nodes · {edges} edges · {communities} communities",
     "searchPlaceholder": "Ask about the codebase...",
-    "empty": "No graph data yet. Agents need to register and build the graph."
+    "empty": "No graph data yet. Agents need to register and build the graph.",
+    "buildGraph": "Build Graph",
+    "building": "Building...",
+    "buildDisabledNoAgents": "Register an agent first to build the graph",
+    "buildingVia": "Building via {agent} — check Dispatch History for progress",
+    "buildComplete": "Graph build complete!",
+    "buildFailed": "Graph build failed — check daemon logs"
   },
   "AddProjectModal": {
     "heading": "Add Project",
@@ -83,7 +90,12 @@
     "registeredAt": "Registered {timeAgo}",
     "capabilities": "{count, plural, =0 {No capabilities} one {# capability} other {# capabilities}}",
     "findings": "{count, plural, =0 {No findings} one {# finding} other {# findings}}",
-    "lastHeartbeat": "Last heartbeat: {time}"
+    "lastHeartbeat": "Last heartbeat: {time}",
+    "remove": "Remove agent",
+    "confirmRemove": "Remove this agent?",
+    "yesRemove": "Yes, remove",
+    "removing": "Removing...",
+    "cancel": "Cancel"
   },
   "AgentWiring": {
     "empty": "No agents registered yet",
@@ -145,5 +157,27 @@
       "never": "never",
       "justNow": "just now"
     }
+  },
+  "RegisterAgentModal": {
+    "heading": "Register Agent",
+    "agentName": "Agent Name",
+    "agentNamePlaceholder": "e.g. claude-code, codex",
+    "projectPath": "Project Path",
+    "pathPlaceholder": "/absolute/path/to/project",
+    "version": "Version",
+    "capabilities": "Capabilities",
+    "capabilitiesPlaceholder": "code-analysis, bug-finding",
+    "register": "Register Agent",
+    "cancel": "Cancel",
+    "registerError": "Failed to register agent",
+    "detectedOnMachine": "Detected on your machine — click to auto-fill:",
+    "otherAgents": "Other known agents:"
+  },
+  "KnowledgeSources": {
+    "heading": "Knowledge Sources",
+    "loading": "Scanning for knowledge sources...",
+    "found": "found",
+    "usedBy": "Used by",
+    "scan": "Scan for knowledge sources"
   }
 }

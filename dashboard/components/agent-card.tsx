@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useTranslations, useFormatter } from "next-intl";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Trash2, Loader2 } from "lucide-react";
 import { timeAgo } from "@/lib/time-ago";
+import { unregisterAgent } from "@/lib/api";
 
 interface AgentCardProps {
   agent: {
@@ -16,14 +17,18 @@ interface AgentCardProps {
     registered_at: string;
     finding_count?: number;
   };
+  projectId: string;
+  onRemoved: () => void;
 }
 
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
   const t = useTranslations("AgentCard");
   const tStatus = useTranslations("Common.status");
   const tTime = useTranslations("Common.timeAgo");
   const format = useFormatter();
   const [expanded, setExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const initials = agent.agent_name
     .split("-")
@@ -51,12 +56,27 @@ export function AgentCard({ agent }: AgentCardProps) {
 
   const registered = timeAgo(agent.last_heartbeat, tTime);
 
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await unregisterAgent(projectId, agent.agent_id);
+      onRemoved();
+    } catch {
+      // silently fail, parent will refresh
+    } finally {
+      setDeleting(false);
+      setShowConfirm(false);
+    }
+  }
+
   return (
     <div
-      className={`border rounded-xl p-4 cursor-pointer transition-colors ${statusBorder[agent.status]}`}
-      onClick={() => setExpanded(!expanded)}
+      className={`border rounded-xl p-4 transition-colors ${statusBorder[agent.status]}`}
     >
-      <div className="flex items-center gap-3">
+      <div
+        className="flex items-center gap-3 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
         <div
           className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatarBg[agent.status]}`}
         >
@@ -83,7 +103,50 @@ export function AgentCard({ agent }: AgentCardProps) {
             <ChevronDown className="w-3.5 h-3.5 rtl:-scale-x-100" />
           )}
         </div>
+
+        {/* Delete button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (showConfirm) {
+              handleDelete();
+            } else {
+              setShowConfirm(true);
+            }
+          }}
+          disabled={deleting}
+          className="p-1.5 rounded-md hover:bg-red-900/30 text-zinc-500 hover:text-red-400 transition-colors"
+          title={t("remove")}
+        >
+          {deleting ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="w-3.5 h-3.5" />
+          )}
+        </button>
       </div>
+
+      {showConfirm && (
+        <div
+          className="mt-2 pt-2 border-t border-zinc-700/50 flex items-center gap-2 text-xs"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="text-zinc-400">{t("confirmRemove")}</span>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="text-red-400 hover:text-red-300 font-medium"
+          >
+            {deleting ? t("removing") : t("yesRemove")}
+          </button>
+          <button
+            onClick={() => setShowConfirm(false)}
+            className="text-zinc-500 hover:text-zinc-300"
+          >
+            {t("cancel")}
+          </button>
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-3 pt-3 border-t border-zinc-700/50">

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /Users/mohamedabdulrahman/Mohamed-Hussien/my-projects/agentic-os/dashboard; echo '== Theme =='; sed -n '/interface Theme/,/^}/p' node_modules/reagraph/dist/themes/theme.d.ts 2>/dev/null...",
+  "error": "Exit code 2\n== Theme ==\nexport interface Theme {\n    canvas?: {\n        background?: ColorRepresentation;\n        fog?: ColorRepresentation | null;\n    };\n    node: {\n        fill: ColorRepresentation;\n        activeFill: ColorRepresentation;\n        opacity: number;\n        selectedOpacity: number;\n        inactiveOpacity: number;\n        label: {\n            color: ColorRepresentation;\n            stroke?: ColorRepresentation;\n            activeColor: ColorRepresentation;\n            backgroun...",
+  "timestamp": "2026-06-26T18:33:49.637Z",
+  "retry_count": 1
+}
