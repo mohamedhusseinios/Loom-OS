@@ -295,6 +295,63 @@ class AgentRegistry:
         )
         await self.db.commit()
 
+    async def hybrid_search(self, project: str, query: str) -> list[dict]:
+        """Hybrid search combining text matching with vector cosine similarity.
+
+        Searches inbox finding-*.md files for the project.  If no embeddings
+        model is available returns text-only results.
+        """
+        from daemon.embeddings import EmbeddingStore, EmbeddingGenerator
+        from pathlib import Path
+
+        store = EmbeddingStore()
+        await store.initialize()
+        gen = EmbeddingGenerator()
+
+        # Look for finding files in the inbox
+        import os
+        loom_dir = os.path.expanduser("~/.loom")
+        inbox = Path(loom_dir) / "inbox" / project
+        results: list[dict] = []
+
+        if inbox.exists():
+            for f_path in inbox.glob("finding-*.md"):
+                try:
+                    content = f_path.read_text()
+                except OSError:
+                    continue
+
+                # Text match (substring)
+                if query.lower() in content.lower():
+                    # Also compute vector similarity
+                    doc_vec = await gen.embed(content[:500])
+                    query_vec = await gen.embed(query)
+                    import numpy as np
+                    nq = np.linalg.norm(query_vec)
+                    nd = np.linalg.norm(doc_vec)
+                    sim = float(np.dot(query_vec, doc_vec) / (nq * nd + 1e-8)) if nq and nd else 0.0
+
+                    # Extract body (skip YAML frontmatter)
+                    lines = content.split("\n")
+                    body_start = 0
+                    if lines and lines[0].strip() == "---":
+                        for i, line in enumerate(lines[1:], 1):
+                            if line.strip() == "---":
+                                body_start = i + 1
+                                break
+                    body = "\n".join(lines[body_start:]).strip()[:300]
+
+                    results.append({
+                        "id": f_path.stem,
+                        "text": body,
+                        "score": sim,
+                        "source": "finding",
+                    })
+
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[:10]
+
+
     async def list_agent_tasks(
         self, project: str, status_filter: str | None = None
     ) -> list[AgentTaskRecord]:
