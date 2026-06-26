@@ -1,4 +1,4 @@
-"""Pydantic models for the Agentic OS daemon."""
+"""Pydantic models for the Loom daemon."""
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -150,3 +150,47 @@ class WsEvent(BaseModel):
     project: str
     data: dict = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# --- Kanban Task Board Models (Feature 2: Durable Multi-Agent Task Board) ---
+
+class AgentTaskStatus(str, Enum):
+    """Seven-state lifecycle for agent coordination tasks."""
+    TRIAGE = "triage"
+    TODO = "todo"
+    READY = "ready"
+    RUNNING = "running"
+    BLOCKED = "blocked"
+    DONE = "done"
+    ARCHIVED = "archived"
+
+
+class AgentTaskCreatePayload(BaseModel):
+    project: str
+    title: str
+    instruction: str
+    assignee: Optional[str] = None  # agent_id or None for auto-assign
+    priority: int = 0
+    dependencies: list[str] = Field(default_factory=list)  # task_ids
+    acceptance_criteria: str = ""
+
+
+class AgentTaskRecord(BaseModel):
+    id: str
+    project: str
+    title: str
+    instruction: str
+    status: AgentTaskStatus = AgentTaskStatus.TODO
+    assignee: Optional[str] = None
+    priority: int = 0
+    dependencies: list[str] = Field(default_factory=list)
+    acceptance_criteria: str = ""
+    created_at: str
+    updated_at: str
+    workspace_path: Optional[str] = None
+
+
+class AgentTaskUpdatePayload(BaseModel):
+    status: Optional[AgentTaskStatus] = None
+    assignee: Optional[str] = None
+    result: Optional[str] = None
