@@ -57,6 +57,7 @@
     "pathPlaceholder": "المسار المطلق (مثال: /Users/.../my-project)",
     "create": "إنشاء المشروع",
     "cancel": "إلغاء",
+    "selectThisFolder": "استخدم هذا المجلد",
     "browseError": "فشل تصفّح المجلد",
     "createError": "فشل إنشاء المشروع"
   },

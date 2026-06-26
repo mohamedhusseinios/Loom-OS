@@ -57,6 +57,7 @@
     "pathPlaceholder": "Absolute path (e.g. /Users/.../my-project)",
     "create": "Create Project",
     "cancel": "Cancel",
+    "selectThisFolder": "Use This Folder",
     "browseError": "Failed to browse directory",
     "createError": "Failed to create project"
   },
