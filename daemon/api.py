@@ -29,6 +29,10 @@ router: Optional[Router] = None
 watcher: Optional[InboxWatcher] = None
 trace_capture: Optional[TraceCapture] = None
 snapshot_manager: Optional[SnapshotManager] = None
+pattern_repo: Optional = None  # PatternRepository (lazy)
+audit_trail: Optional = None     # AuditTrail (lazy)
+temporal_tracker: Optional = None  # TemporalTracker
+doc_ingestor: Optional = None      # DocumentIngestor
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
@@ -391,6 +395,190 @@ async def get_eval_pass_rate(project_id: str):
         from daemon.evals import EvalEngine
         eval_engine = EvalEngine()
     return await eval_engine.get_pass_rate(project=project_id)
+
+
+@app.get("/api/patterns")
+async def list_patterns(project: str = None, status: str = None):
+    """Return evolved patterns, optionally filtered."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository, PatternStatus
+        pattern_repo = PatternRepository()
+    if status:
+        try:
+            ps = PatternStatus(status)
+        except ValueError:
+            ps = None
+    else:
+        ps = None
+    patterns = await pattern_repo.list_patterns(project=project, status=ps)
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.get("/api/patterns/top")
+async def top_patterns(limit: int = 10):
+    """Return highest-confidence patterns."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    patterns = await pattern_repo.top_patterns(limit=limit)
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.get("/api/patterns/cross-project")
+async def cross_project_patterns():
+    """Return patterns seen across multiple projects."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    patterns = await pattern_repo.cross_project_patterns()
+    return {"patterns": [p.to_dict() for p in patterns]}
+
+
+@app.post("/api/projects/{project_id}/patterns/observe")
+async def observe_pattern(project_id: str, payload: dict):
+    """Record a pattern observation from an agent."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    pattern = await pattern_repo.observe(
+        pattern_text=payload.get("pattern_text", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "unknown"),
+        kind=payload.get("kind", "PATTERN"),
+    )
+    return pattern.to_dict()
+
+
+@app.patch("/api/patterns/{pattern_id}/deprecate")
+async def deprecate_pattern(pattern_id: str, payload: dict = None):
+    """Mark a pattern as deprecated."""
+    global pattern_repo
+    if pattern_repo is None:
+        from daemon.patterns import PatternRepository
+        pattern_repo = PatternRepository()
+    p = await pattern_repo.deprecate(pattern_id, reason=(payload or {}).get("reason", ""))
+    if p is None:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    return p.to_dict()
+
+
+@app.get("/api/projects/{project_id}/audit")
+async def get_audit_log(project_id: str, agent_id: str = None, action: str = None, limit: int = 100):
+    """Return audit events for a project, optionally filtered."""
+    global audit_trail
+    if audit_trail is None:
+        from daemon.audit import AuditTrail
+        audit_trail = AuditTrail()
+        await audit_trail.initialize()
+    events = await audit_trail.query(
+        project=project_id, agent_id=agent_id, action=action, limit=limit,
+    )
+    return {"events": events}
+
+
+@app.get("/api/projects/{project_id}/audit/summary")
+async def get_audit_summary(project_id: str):
+    """Return daily audit summary for a project."""
+    global audit_trail
+    if audit_trail is None:
+        from daemon.audit import AuditTrail
+        audit_trail = AuditTrail()
+        await audit_trail.initialize()
+    return {"summary": await audit_trail.summary(project=project_id)}
+
+
+# --- Temporal facts ---
+
+@app.post("/api/projects/{project_id}/facts")
+async def record_fact(project_id: str, payload: dict):
+    """Record a temporal fact."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    fact = await temporal_tracker.record(
+        fact_text=payload.get("fact_text", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "unknown"),
+    )
+    return fact.to_dict()
+
+
+@app.get("/api/projects/{project_id}/facts")
+async def list_facts(project_id: str, active_only: bool = True):
+    """List temporal facts for a project."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    facts = (
+        await temporal_tracker.active_facts(project=project_id)
+        if active_only
+        else await temporal_tracker.list_facts(project=project_id)
+    )
+    return {"facts": [f.to_dict() for f in facts]}
+
+
+@app.get("/api/projects/{project_id}/facts/timeline")
+async def facts_timeline(project_id: str):
+    """Return facts in chronological order."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    facts = await temporal_tracker.timeline(project=project_id)
+    return {"facts": [f.to_dict() for f in facts]}
+
+
+@app.patch("/api/facts/{fact_id}/expire")
+async def expire_fact(fact_id: str, payload: dict = None):
+    """Expire a temporal fact."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    fact = await temporal_tracker.expire(
+        fact_id, reason=(payload or {}).get("reason", "")
+    )
+    if fact is None:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    return fact.to_dict()
+
+
+# --- Document ingestion ---
+
+@app.post("/api/projects/{project_id}/ingest")
+async def ingest_document(project_id: str, payload: dict):
+    """Ingest a document into the project knowledge base."""
+    global doc_ingestor
+    if doc_ingestor is None:
+        from daemon.ingest import DocumentIngestor
+        doc_ingestor = DocumentIngestor()
+    result = await doc_ingestor.ingest_file(
+        file_path=payload.get("file_path", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "ingestor"),
+    )
+    return result
+
+
+@app.post("/api/projects/{project_id}/ingest/directory")
+async def ingest_directory(project_id: str, payload: dict):
+    """Ingest all files in a directory."""
+    global doc_ingestor
+    if doc_ingestor is None:
+        from daemon.ingest import DocumentIngestor
+        doc_ingestor = DocumentIngestor()
+    results = await doc_ingestor.ingest_directory(
+        dir_path=payload.get("dir_path", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "ingestor"),
+    )
+    return {"results": results}
 
 
 @app.websocket("/ws")
