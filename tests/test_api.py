@@ -6,7 +6,7 @@ happy paths for the project/project-detail/health endpoints.
 
 The app is driven with Starlette/FastAPI TestClient. The real ``lifespan``
 is suppressed (``lifespan="off"``) so tests don't start a filesystem
-watcher, a broadcast task, or touch ``~/.agentic-os``. Instead we inject
+watcher, a broadcast task, or touch ``~/.loom``. Instead we inject
 a temp-backed registry and graph engine into the module-level globals the
 route handlers read.
 """
@@ -170,4 +170,96 @@ def test_get_graph_topology_404(client):
 def test_get_graph_communities_404(client):
     """Graph communities for unknown project returns 404."""
     res = client.get("/api/projects/nonexistent/graph/communities")
+    assert res.status_code == 404
+
+
+def test_create_project_duplicate_returns_409(client):
+    """Re-creating an already-tracked project returns 409, not 500."""
+    client.post("/api/projects", json={"name": "dupe", "path": "/tmp"})
+    res = client.post("/api/projects", json={"name": "dupe", "path": "/tmp"})
+    assert res.status_code == 409
+    assert "detail" in res.json()
+
+
+def test_dispatch_task(client):
+    """POST /dispatch persists a task and returns its id."""
+    res = client.post(
+        "/api/projects/noor/dispatch",
+        json={"target_agent": "claude-code", "instruction": "review auth", "priority": "high"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "dispatched"
+    assert "task_id" in data
+
+
+def test_dispatch_task_unknown_project_404(client):
+    res = client.post(
+        "/api/projects/missing/dispatch",
+        json={"target_agent": "claude-code", "instruction": "x"},
+    )
+    assert res.status_code == 404
+
+
+def test_list_dispatches(client):
+    """GET /dispatches returns tasks created via the dispatch endpoint."""
+    client.post(
+        "/api/projects/noor/dispatch",
+        json={"target_agent": "claude-code", "instruction": "do A"},
+    )
+    client.post(
+        "/api/projects/noor/dispatch",
+        json={"target_agent": "claude-code", "instruction": "do B"},
+    )
+    res = client.get("/api/projects/noor/dispatches")
+    assert res.status_code == 200
+    dispatches = res.json()["dispatches"]
+    assert len(dispatches) == 2
+    # Ordered newest-first (dispatched_at DESC).
+    instructions = [d["instruction"] for d in dispatches]
+    assert instructions == ["do B", "do A"]
+
+
+def test_agent_task_lifecycle_api(client):
+    """Full lifecycle: POST → GET → PATCH → verify."""
+    # Create
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "Fix auth", "instruction": "do it", "priority": 1},
+    )
+    assert res.status_code == 201
+    task = res.json()
+    assert task["status"] == "todo"
+    task_id = task["id"]
+
+    # List
+    res = client.get("/api/projects/noor/tasks")
+    assert res.status_code == 200
+    tasks = res.json()
+    assert any(t["id"] == task_id for t in tasks)
+
+    # Update status
+    res = client.patch(
+        f"/api/projects/noor/tasks/{task_id}",
+        json={"status": "running", "assignee": "agent-1"},
+    )
+    assert res.status_code == 200
+    updated = res.json()
+    assert updated["status"] == "running"
+    assert updated["assignee"] == "agent-1"
+
+
+def test_agent_task_list_unknown_project_empty(client):
+    """Listing tasks for unknown project returns empty list."""
+    res = client.get("/api/projects/unknown/tasks")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_agent_task_update_not_found_returns_404(client):
+    """PATCH of unknown task returns 404."""
+    res = client.patch(
+        "/api/projects/noor/tasks/nonexistent",
+        json={"status": "done"},
+    )
     assert res.status_code == 404
