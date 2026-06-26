@@ -31,6 +31,8 @@ trace_capture: Optional[TraceCapture] = None
 snapshot_manager: Optional[SnapshotManager] = None
 pattern_repo: Optional = None  # PatternRepository (lazy)
 audit_trail: Optional = None     # AuditTrail (lazy)
+temporal_tracker: Optional = None  # TemporalTracker
+doc_ingestor: Optional = None      # DocumentIngestor
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI):
     injected, the lifespan reuses it and skips the filesystem watcher /
     broadcast task (which depend on real ``~/.loom`` state).
     """
-    global registry, graph_engine, router, watcher, trace_capture
+    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager
 
     # Tests may inject a temp-backed registry/graph_engine beforehand.
     test_mode = registry is not None
@@ -487,6 +489,96 @@ async def get_audit_summary(project_id: str):
         audit_trail = AuditTrail()
         await audit_trail.initialize()
     return {"summary": await audit_trail.summary(project=project_id)}
+
+
+# --- Temporal facts ---
+
+@app.post("/api/projects/{project_id}/facts")
+async def record_fact(project_id: str, payload: dict):
+    """Record a temporal fact."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    fact = await temporal_tracker.record(
+        fact_text=payload.get("fact_text", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "unknown"),
+    )
+    return fact.to_dict()
+
+
+@app.get("/api/projects/{project_id}/facts")
+async def list_facts(project_id: str, active_only: bool = True):
+    """List temporal facts for a project."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    facts = (
+        await temporal_tracker.active_facts(project=project_id)
+        if active_only
+        else await temporal_tracker.list_facts(project=project_id)
+    )
+    return {"facts": [f.to_dict() for f in facts]}
+
+
+@app.get("/api/projects/{project_id}/facts/timeline")
+async def facts_timeline(project_id: str):
+    """Return facts in chronological order."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    facts = await temporal_tracker.timeline(project=project_id)
+    return {"facts": [f.to_dict() for f in facts]}
+
+
+@app.patch("/api/facts/{fact_id}/expire")
+async def expire_fact(fact_id: str, payload: dict = None):
+    """Expire a temporal fact."""
+    global temporal_tracker
+    if temporal_tracker is None:
+        from daemon.temporal import TemporalTracker
+        temporal_tracker = TemporalTracker()
+    fact = await temporal_tracker.expire(
+        fact_id, reason=(payload or {}).get("reason", "")
+    )
+    if fact is None:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    return fact.to_dict()
+
+
+# --- Document ingestion ---
+
+@app.post("/api/projects/{project_id}/ingest")
+async def ingest_document(project_id: str, payload: dict):
+    """Ingest a document into the project knowledge base."""
+    global doc_ingestor
+    if doc_ingestor is None:
+        from daemon.ingest import DocumentIngestor
+        doc_ingestor = DocumentIngestor()
+    result = await doc_ingestor.ingest_file(
+        file_path=payload.get("file_path", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "ingestor"),
+    )
+    return result
+
+
+@app.post("/api/projects/{project_id}/ingest/directory")
+async def ingest_directory(project_id: str, payload: dict):
+    """Ingest all files in a directory."""
+    global doc_ingestor
+    if doc_ingestor is None:
+        from daemon.ingest import DocumentIngestor
+        doc_ingestor = DocumentIngestor()
+    results = await doc_ingestor.ingest_directory(
+        dir_path=payload.get("dir_path", ""),
+        project=project_id,
+        agent_id=payload.get("agent_id", "ingestor"),
+    )
+    return {"results": results}
 
 
 @app.websocket("/ws")
