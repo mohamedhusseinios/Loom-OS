@@ -338,3 +338,19 @@ def test_full_task_lifecycle_with_dependencies(client):
     assert parent_id in task_ids
     assert child["id"] in task_ids
     assert child2["id"] in task_ids
+
+
+def test_hybrid_search_returns_empty_on_no_query(client):
+    """Search with no query returns empty results."""
+    res = client.get("/api/projects/noor/search")
+    assert res.status_code == 200
+    assert res.json()["results"] == []
+
+
+def test_hybrid_search_accepts_query(client):
+    """Search with a query returns results structure."""
+    res = client.get("/api/projects/noor/search?q=authentication")
+    assert res.status_code == 200
+    data = res.json()
+    assert "results" in data
+    assert isinstance(data["results"], list)

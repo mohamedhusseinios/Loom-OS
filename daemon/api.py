@@ -317,6 +317,15 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
     return updated.model_dump()
 
 
+@app.get("/api/projects/{project_id}/search")
+async def hybrid_search(project_id: str, q: str = ""):
+    """Hybrid search: text + vector cosine similarity over inbox findings."""
+    if not q:
+        return {"results": []}
+    results = await registry.hybrid_search(project_id, q)
+    return {"results": results}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for live event streaming."""
