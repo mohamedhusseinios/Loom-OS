@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project identity
 
-This is **Loom** — a unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project. Agents talk to Loom **only through the filesystem** (drop files in an inbox); there is no SDK, API client, or auth. A Next.js dashboard is the control plane.
+This is **Loom OS** — a unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project. Agents talk to Loom OS **only through the filesystem** (drop files in an inbox); there is no SDK, API client, or auth. A Next.js dashboard is the control plane.
 
-Naming drift to be aware of: the package/CLI/product is **`loom`** (`pyproject.toml`, the `loom` command, README title), but the repo directory and all design/plan docs are named **`agentic-os`** (e.g. `docs/superpowers/specs/2026-06-25-agentic-os-design.md`). They refer to the same project. The README also links to some `*-loom-*` doc paths that don't exist — the real files use the `agentic-os` prefix.
+Naming drift to be aware of: the product is **Loom OS**, but the package/CLI is **`loom`** (`pyproject.toml`, the `loom` command), and the repo directory and all design/plan docs are named **`agentic-os`** (e.g. `docs/superpowers/specs/2026-06-25-agentic-os-design.md`). They refer to the same project. The README also links to some `*-loom-*` doc paths that don't exist — the real files use the `agentic-os` prefix.
 
 ## Commands
 

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/branding/loom-icon-warp-256.png" alt="Loom" width="120" height="120" />
+<img src="docs/branding/loom-icon-warp-256.png" alt="Loom OS" width="120" height="120" />
 
-# Loom
+# Loom OS
 
 **Unified agent memory fabric**
 
@@ -12,7 +12,7 @@ Weaves all your AI coding agents into a shared Graphify-powered knowledge graph.
 
 **Status:** v0.1.0 — daemon + dashboard working, 38 tests passing, smoke-tested end-to-end. Includes project CRUD + discovery, an interactive (Cytoscape) graph explorer, agent management with task dispatch, and a bilingual (en/ar) dashboard.
 
-> The product/package is **`loom`** (the CLI command and `pyproject.toml` name). The GitHub repo and the design/plan docs are named **`agentic-os`** — same project, two names.
+> The product is **Loom OS**. The CLI command and Python package are **`loom`**, and the GitHub repo and design/plan docs are named **`agentic-os`** — same project, different identifiers.
 
 ---
 

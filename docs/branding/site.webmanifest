@@ -1,6 +1,6 @@
 {
-  "name": "Loom",
-  "short_name": "Loom",
+  "name": "Loom OS",
+  "short_name": "Loom OS",
   "description": "Unified agent memory fabric.",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
