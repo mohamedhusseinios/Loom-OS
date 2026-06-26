@@ -13,6 +13,7 @@ from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
 from daemon.watcher import InboxWatcher
+from daemon.traces import TraceCapture
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord,
@@ -25,6 +26,8 @@ registry: Optional[AgentRegistry] = None
 graph_engine: Optional[GraphEngine] = None
 router: Optional[Router] = None
 watcher: Optional[InboxWatcher] = None
+trace_capture: Optional[TraceCapture] = None
+eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
 
@@ -36,7 +39,7 @@ async def lifespan(app: FastAPI):
     injected, the lifespan reuses it and skips the filesystem watcher /
     broadcast task (which depend on real ``~/.loom`` state).
     """
-    global registry, graph_engine, router, watcher
+    global registry, graph_engine, router, watcher, trace_capture
 
     # Tests may inject a temp-backed registry/graph_engine beforehand.
     test_mode = registry is not None
@@ -49,6 +52,8 @@ async def lifespan(app: FastAPI):
         await registry.initialize()
     if router is None:
         router = Router(registry, graph_engine)
+    if trace_capture is None:
+        trace_capture = TraceCapture()
 
     if not test_mode:
         watcher = InboxWatcher()
@@ -266,6 +271,17 @@ async def discover_directories(path: str = "~"):
     dirs.sort(key=lambda d: d["name"])
     return {"directories": dirs, "parent": os.path.dirname(expanded)}
 
+@app.get("/api/traces")
+async def get_traces(project: str = None, agent_id: str = None, limit: int = 50):
+    """Return recent agent execution traces, optionally filtered."""
+    if trace_capture is None:
+        return {"traces": []}
+    spans = await trace_capture.get_spans(
+        project=project, agent_id=agent_id, limit=limit
+    )
+    return {"traces": [s.to_dict() for s in spans]}
+
+
 @app.get("/api/health")
 async def health():
     """Health check."""
@@ -324,6 +340,44 @@ async def hybrid_search(project_id: str, q: str = ""):
         return {"results": []}
     results = await registry.hybrid_search(project_id, q)
     return {"results": results}
+
+
+@app.post("/api/projects/{project_id}/eval")
+async def run_eval(project_id: str, payload: dict):
+    """Run an evaluation against agent output."""
+    global eval_engine
+    if eval_engine is None:
+        from daemon.evals import EvalEngine
+        eval_engine = EvalEngine()
+    case = await eval_engine.evaluate(
+        project=project_id,
+        agent_id=payload.get("agent_id", "unknown"),
+        criterion=payload.get("criterion", "no_hardcoded_secrets"),
+        expected=payload.get("expected", ""),
+        actual=payload.get("actual", ""),
+    )
+    return case.to_dict()
+
+
+@app.get("/api/projects/{project_id}/eval")
+async def get_evals(project_id: str):
+    """Return evaluation results for a project."""
+    global eval_engine
+    if eval_engine is None:
+        from daemon.evals import EvalEngine
+        eval_engine = EvalEngine()
+    results = await eval_engine.get_results(project=project_id)
+    return {"evals": [r.to_dict() for r in results]}
+
+
+@app.get("/api/projects/{project_id}/eval/pass-rate")
+async def get_eval_pass_rate(project_id: str):
+    """Return pass/warn/fail rates for a project."""
+    global eval_engine
+    if eval_engine is None:
+        from daemon.evals import EvalEngine
+        eval_engine = EvalEngine()
+    return await eval_engine.get_pass_rate(project=project_id)
 
 
 @app.websocket("/ws")
