@@ -263,3 +263,78 @@ def test_agent_task_update_not_found_returns_404(client):
         json={"status": "done"},
     )
     assert res.status_code == 404
+
+
+def test_full_task_lifecycle_with_dependencies(client):
+    """End-to-end: parent blocks child until parent completes."""
+    pid = "noor"
+
+    # Create parent task
+    res = client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"project": pid, "title": "Setup DB", "instruction": "init", "priority": 1},
+    )
+    assert res.status_code == 201
+    parent_id = res.json()["id"]
+
+    # Create child task dependent on parent
+    res = client.post(
+        f"/api/projects/{pid}/tasks",
+        json={
+            "project": pid,
+            "title": "Run Migrations",
+            "instruction": "migrate",
+            "dependencies": [parent_id],
+            "priority": 1,
+        },
+    )
+    assert res.status_code == 201
+    child = res.json()
+    assert child["status"] == "todo"  # parent not done yet
+
+    # Complete parent
+    res = client.patch(
+        f"/api/projects/{pid}/tasks/{parent_id}",
+        json={"status": "done"},
+    )
+    assert res.status_code == 200
+
+    # Now create another child — should auto-promote to ready
+    res = client.post(
+        f"/api/projects/{pid}/tasks",
+        json={
+            "project": pid,
+            "title": "Seed Data",
+            "instruction": "seed",
+            "dependencies": [parent_id],
+            "priority": 1,
+        },
+    )
+    assert res.status_code == 201
+    child2 = res.json()
+    assert child2["status"] == "ready"  # parent is DONE
+
+    # Assign and run the child task
+    res = client.patch(
+        f"/api/projects/{pid}/tasks/{child2["id"]}",
+        json={"status": "running", "assignee": "agent-1"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "running"
+
+    # Complete child
+    res = client.patch(
+        f"/api/projects/{pid}/tasks/{child2["id"]}",
+        json={"status": "done"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "done"
+
+    # Verify all tasks are listed
+    res = client.get(f"/api/projects/{pid}/tasks")
+    assert res.status_code == 200
+    all_tasks = res.json()
+    task_ids = {t["id"] for t in all_tasks}
+    assert parent_id in task_ids
+    assert child["id"] in task_ids
+    assert child2["id"] in task_ids
