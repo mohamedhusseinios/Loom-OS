@@ -354,3 +354,62 @@ def test_hybrid_search_accepts_query(client):
     data = res.json()
     assert "results" in data
     assert isinstance(data["results"], list)
+
+
+def test_get_traces_returns_empty(client):
+    """GET /api/traces returns empty when no traces exist."""
+    res = client.get("/api/traces")
+    assert res.status_code == 200
+    assert res.json()["traces"] == []
+
+
+def test_run_eval(client):
+    """POST /eval scores agent output."""
+    res = client.post(
+        "/api/projects/noor/eval",
+        json={
+            "agent_id": "claude-code",
+            "criterion": "no_todos",
+            "expected": "No TODOs",
+            "actual": "def foo(): return 42",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["score"] == "pass"
+
+
+def test_get_evals(client):
+    """GET /eval returns eval results."""
+    # Seed one eval
+    client.post(
+        "/api/projects/noor/eval",
+        json={
+            "agent_id": "claude-code",
+            "criterion": "no_todos",
+            "expected": "x",
+            "actual": "clean",
+        },
+    )
+    res = client.get("/api/projects/noor/eval")
+    assert res.status_code == 200
+    assert len(res.json()["evals"]) >= 1
+
+
+def test_get_eval_pass_rate(client):
+    """GET /eval/pass-rate returns statistics."""
+    client.post(
+        "/api/projects/noor/eval",
+        json={
+            "agent_id": "claude-code",
+            "criterion": "no_todos",
+            "expected": "x",
+            "actual": "clean",
+        },
+    )
+    res = client.get("/api/projects/noor/eval/pass-rate")
+    assert res.status_code == 200
+    data = res.json()
+    assert "pass" in data
+    assert "total" in data
+    assert "pass_rate" in data
