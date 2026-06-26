@@ -1,19 +1,18 @@
 #!/bin/bash
-# scripts/smoke-test.sh — end-to-end test for Agentic OS
+# scripts/smoke-test.sh — end-to-end test for Loom
+set -euo pipefail
 
-set -e
-
-AGENTIC_OS_HOME="$HOME/.agentic-os"
-INBOX="$AGENTIC_OS_HOME/inbox/test-project"
+LOOM_HOME="$HOME/.loom"
+INBOX="$LOOM_HOME/inbox/test-project"
 API="http://localhost:8472"
 
-echo "=== Agentic OS Smoke Test ==="
+echo "=== Loom Smoke Test ==="
 
 # 1. Start daemon in background
 echo "[1/5] Starting daemon..."
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
-agentic-os --port 8472 &
+loom --port 8472 &
 DAEMON_PID=$!
 sleep 3
 

@@ -1,15 +1,24 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useTranslations, useLocale } from "next-intl";
+import { Link, usePathname, useRouter } from "@/i18n/navigation";
+import { usePathname as useNextPathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Home, Plus, Activity, GitGraph, Users } from "lucide-react";
 import { listProjects } from "@/lib/api";
+import type { ProjectSummary } from "@/lib/api";
 import { AddProjectModal } from "@/components/add-project-modal";
+import { routing, LOCALE_LABELS, type Locale } from "@/i18n/routing";
 
 export function Sidebar() {
+  const t = useTranslations("Sidebar");
+  const locale = useLocale() as Locale;
+  // Localized pathname has NO locale prefix → active-link checks keep working.
   const pathname = usePathname();
-  const [projects, setProjects] = useState<any[]>([]);
+  // Raw pathname (with locale prefix) is needed for the project-id regex.
+  const rawPathname = useNextPathname();
+  const router = useRouter();
+  const [projects, setProjects] = useState<ProjectSummary["project"][]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
 
   function refreshProjects() {
@@ -18,16 +27,40 @@ export function Sidebar() {
 
   useEffect(() => { refreshProjects(); }, []);
 
-  // Detect active project from pathname
-  const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
+  // Detect active project from the raw (prefixed) pathname.
+  const projectMatch = rawPathname.match(/\/projects\/([^/]+)/);
   const activeProjectId = projectMatch ? projectMatch[1] : null;
+
+  function switchLocale(next: Locale) {
+    // router.replace keeps the current path and swaps the locale segment.
+    router.replace(pathname, { locale: next });
+  }
 
   return (
     <>
-      <aside className="w-64 border-r border-zinc-800 bg-zinc-950 min-h-screen p-4 flex flex-col">
-        <div className="mb-6">
-          <h1 className="text-lg font-bold text-zinc-100">Agentic OS</h1>
-          <p className="text-xs text-zinc-500">Agent Memory Fabric</p>
+      <aside className="w-64 border-e border-zinc-800 bg-zinc-950 min-h-screen p-4 flex flex-col">
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-zinc-100">{t("brand")}</h1>
+            <p className="text-xs text-zinc-500">{t("subtitle")}</p>
+          </div>
+          {/* Locale switcher: EN / ع */}
+          <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden text-[11px]">
+            {routing.locales.map((l) => (
+              <button
+                key={l}
+                onClick={() => switchLocale(l)}
+                className={`px-2 py-1 transition-colors ${
+                  locale === l
+                    ? "bg-zinc-700 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+                aria-pressed={locale === l}
+              >
+                {LOCALE_LABELS[l]}
+              </button>
+            ))}
+          </div>
         </div>
         <nav className="space-y-1 flex-1">
           <Link
@@ -39,13 +72,13 @@ export function Sidebar() {
             }`}
           >
             <Home className="w-4 h-4" />
-            Projects
+            {t("navProjects")}
           </Link>
 
           {projects.length > 0 && (
             <>
               <div className="text-[10px] font-semibold text-zinc-600 uppercase px-3 pt-4 pb-1">
-                Tracked Projects
+                {t("trackedProjects")}
               </div>
               {projects.map((p) => {
                 const active = pathname.startsWith(`/projects/${p.project_id}`);
@@ -68,7 +101,7 @@ export function Sidebar() {
                     </Link>
                     {/* Sub-navigation when this project is active */}
                     {active && (
-                      <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+                      <div className="ms-4 mt-0.5 mb-1 space-y-0.5">
                         <Link
                           href={`/projects/${p.project_id}`}
                           className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] transition-colors ${
@@ -77,7 +110,7 @@ export function Sidebar() {
                               : "text-zinc-500 hover:text-zinc-300"
                           }`}
                         >
-                          <Activity className="w-3 h-3" /> Overview
+                          <Activity className="w-3 h-3" /> {t("overview")}
                         </Link>
                         <Link
                           href={`/projects/${p.project_id}/graph`}
@@ -87,7 +120,7 @@ export function Sidebar() {
                               : "text-zinc-500 hover:text-zinc-300"
                           }`}
                         >
-                          <GitGraph className="w-3 h-3" /> Graph
+                          <GitGraph className="w-3 h-3" /> {t("graph")}
                         </Link>
                         <Link
                           href={`/projects/${p.project_id}/agents`}
@@ -97,7 +130,7 @@ export function Sidebar() {
                               : "text-zinc-500 hover:text-zinc-300"
                           }`}
                         >
-                          <Users className="w-3 h-3" /> Agents
+                          <Users className="w-3 h-3" /> {t("agents")}
                         </Link>
                       </div>
                     )}
@@ -112,7 +145,7 @@ export function Sidebar() {
             className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 w-full mt-2 transition-colors"
           >
             <Plus className="w-4 h-4" />
-            Add Project
+            {t("addProject")}
           </button>
         </nav>
       </aside>

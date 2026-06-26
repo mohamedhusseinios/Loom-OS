@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { getProject, listDispatches } from "@/lib/api";
+import type { ProjectSummary } from "@/lib/api";
 import { AgentCard } from "@/components/agent-card";
 import { AgentWiring } from "@/components/agent-wiring";
 import { DispatchModal } from "@/components/dispatch-modal";
@@ -12,9 +14,12 @@ import { useWebSocket } from "@/lib/use-websocket";
 import { Send } from "lucide-react";
 
 export default function AgentManagementPage() {
+  const t = useTranslations("AgentsPage");
   const { id } = useParams<{ id: string }>();
-  const [data, setData] = useState<any>(null);
-  const [dispatches, setDispatches] = useState<any[]>([]);
+  const [data, setData] = useState<ProjectSummary | null>(null);
+  const [dispatches, setDispatches] = useState<
+    Awaited<ReturnType<typeof listDispatches>>["dispatches"]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [showDispatch, setShowDispatch] = useState(false);
   const { subscribe } = useWebSocket();
@@ -42,8 +47,8 @@ export default function AgentManagementPage() {
     });
   }, [id, subscribe, loadData]);
 
-  if (loading) return <div className="text-zinc-500">Loading...</div>;
-  if (!data) return <div className="text-zinc-500">Project not found</div>;
+  if (loading) return <div className="text-zinc-500">{t("loading")}</div>;
+  if (!data) return <div className="text-zinc-500">{t("notFound")}</div>;
 
   const { agents } = data;
 
@@ -51,32 +56,32 @@ export default function AgentManagementPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold">Agents</h2>
-          <p className="text-sm text-zinc-500">{agents.length} agent{agents.length !== 1 ? "s" : ""} registered</p>
+          <h2 className="text-2xl font-bold">{t("heading")}</h2>
+          <p className="text-sm text-zinc-500">
+            {t("agentCount", { count: agents.length })}
+          </p>
         </div>
         {agents.length > 0 && (
           <Button onClick={() => setShowDispatch(true)} size="sm">
-            <Send className="w-3.5 h-3.5 mr-2" /> Dispatch Task
+            <Send className="w-3.5 h-3.5 me-2" /> {t("dispatchTask")}
           </Button>
         )}
       </div>
 
       <div className="space-y-3 mb-8">
         {agents.length === 0 ? (
-          <p className="text-sm text-zinc-600">
-            No agents registered yet. Agents appear when they write register.json to ~/.agentic-os/inbox/
-          </p>
+          <p className="text-sm text-zinc-600">{t("empty", { path: "~/.agentic-os/inbox/" })}</p>
         ) : (
-          agents.map((a: any) => <AgentCard key={a.agent_id} agent={a} />)
+          agents.map((a) => <AgentCard key={a.agent_id} agent={a} />)
         )}
       </div>
 
-      <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3">Agent Wiring</h3>
+      <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3">{t("agentWiring")}</h3>
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-8">
         <AgentWiring agents={agents} dispatches={dispatches} />
       </div>
 
-      <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3">Dispatch History</h3>
+      <h3 className="text-sm font-semibold text-zinc-400 uppercase mb-3">{t("dispatchHistory")}</h3>
       <DispatchHistory dispatches={dispatches} />
 
       <DispatchModal

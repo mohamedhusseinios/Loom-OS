@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations, useFormatter } from "next-intl";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { timeAgo } from "@/lib/time-ago";
 
 interface AgentCardProps {
   agent: {
@@ -17,6 +19,10 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
+  const t = useTranslations("AgentCard");
+  const tStatus = useTranslations("Common.status");
+  const tTime = useTranslations("Common.timeAgo");
+  const format = useFormatter();
   const [expanded, setExpanded] = useState(false);
 
   const initials = agent.agent_name
@@ -43,15 +49,7 @@ export function AgentCard({ agent }: AgentCardProps) {
     offline: "bg-zinc-800 text-zinc-500",
   };
 
-  const timeAgo = agent.last_heartbeat
-    ? (() => {
-        const diff = Date.now() - new Date(agent.last_heartbeat).getTime();
-        const mins = Math.floor(diff / 60000);
-        if (mins < 1) return "just now";
-        if (mins < 60) return `${mins}m ago`;
-        return `${Math.floor(mins / 60)}h ago`;
-      })()
-    : "never";
+  const registered = timeAgo(agent.last_heartbeat, tTime);
 
   return (
     <div
@@ -70,14 +68,20 @@ export function AgentCard({ agent }: AgentCardProps) {
             <div className={`w-2 h-2 rounded-full ${dotColor[agent.status]}`} />
           </div>
           <p className="text-[11px] text-zinc-500">
-            {agent.version} · Registered {timeAgo}
+            {agent.version} · {t("registeredAt", { timeAgo: registered })}
           </p>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-zinc-400">
-          <span>{agent.capabilities.length} capabilities</span>
-          {agent.finding_count !== undefined && <span>{agent.finding_count} findings</span>}
-          <span className="text-[10px] uppercase text-zinc-600">{agent.status}</span>
-          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          <span>{t("capabilities", { count: agent.capabilities.length })}</span>
+          {agent.finding_count !== undefined && (
+            <span>{t("findings", { count: agent.finding_count })}</span>
+          )}
+          <span className="text-[10px] uppercase text-zinc-600">{tStatus(agent.status)}</span>
+          {expanded ? (
+            <ChevronUp className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 rtl:-scale-x-100" />
+          )}
         </div>
       </div>
 
@@ -91,7 +95,14 @@ export function AgentCard({ agent }: AgentCardProps) {
             ))}
           </div>
           <div className="text-[10px] text-zinc-600">
-            Last heartbeat: {agent.last_heartbeat ? new Date(agent.last_heartbeat).toLocaleString() : "never"}
+            {t("lastHeartbeat", {
+              time: agent.last_heartbeat
+                ? format.dateTime(new Date(agent.last_heartbeat), {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })
+                : tTime("never"),
+            })}
           </div>
         </div>
       )}

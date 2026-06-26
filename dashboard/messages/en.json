@@ -1,0 +1,148 @@
+{
+  "Metadata": {
+    "title": "Agentic OS",
+    "description": "Unified agent memory fabric"
+  },
+  "Sidebar": {
+    "brand": "Agentic OS",
+    "subtitle": "Agent Memory Fabric",
+    "navProjects": "Projects",
+    "trackedProjects": "Tracked Projects",
+    "overview": "Overview",
+    "graph": "Graph",
+    "agents": "Agents",
+    "addProject": "Add Project"
+  },
+  "ProjectsPage": {
+    "loading": "Loading projects...",
+    "heading": "Projects",
+    "empty": "No projects tracked yet.",
+    "emptyHint": "Agents will appear here when they register by writing to",
+    "addFirst": "Add your first project",
+    "add": "Add Project"
+  },
+  "ProjectDetail": {
+    "loading": "Loading...",
+    "notFound": "Project not found",
+    "graphOverview": "Graph Overview",
+    "noGraph": "No graph data yet",
+    "agents": "Agents",
+    "noAgents": "No agents registered",
+    "liveActivity": "Live Activity",
+    "graphExplorer": "Graph Explorer"
+  },
+  "AgentsPage": {
+    "loading": "Loading...",
+    "notFound": "Project not found",
+    "heading": "Agents",
+    "agentCount": "{count, plural, one {# agent} other {# agents}} registered",
+    "dispatchTask": "Dispatch Task",
+    "empty": "No agents registered yet. Agents appear when they write register.json to {path}",
+    "agentWiring": "Agent Wiring",
+    "dispatchHistory": "Dispatch History"
+  },
+  "GraphExplorer": {
+    "loading": "Loading graph...",
+    "heading": "Graph Explorer",
+    "stats": "{nodes} nodes · {edges} edges · {communities} communities",
+    "searchPlaceholder": "Ask about the codebase...",
+    "empty": "No graph data yet. Agents need to register and build the graph."
+  },
+  "AddProjectModal": {
+    "heading": "Add Project",
+    "browseDisk": "Browse Disk",
+    "manualEntry": "Manual Entry",
+    "noSubdirs": "No subdirectories",
+    "namePlaceholder": "Project name",
+    "pathPlaceholder": "Absolute path (e.g. /Users/.../my-project)",
+    "create": "Create Project",
+    "cancel": "Cancel",
+    "browseError": "Failed to browse directory",
+    "createError": "Failed to create project"
+  },
+  "DispatchModal": {
+    "heading": "Dispatch Task",
+    "targetAgent": "Target Agent",
+    "selectAgent": "Select agent...",
+    "instruction": "Instruction",
+    "instructionPlaceholder": "e.g. Review the auth module for security issues",
+    "priority": "Priority",
+    "dispatch": "Dispatch",
+    "cancel": "Cancel",
+    "error": "Failed to dispatch task"
+  },
+  "DispatchHistory": {
+    "empty": "No tasks dispatched yet",
+    "colInstruction": "Instruction",
+    "colTarget": "Target",
+    "colStatus": "Status",
+    "colDispatched": "Dispatched"
+  },
+  "AgentCard": {
+    "registeredAt": "Registered {timeAgo}",
+    "capabilities": "{count, plural, =0 {No capabilities} one {# capability} other {# capabilities}}",
+    "findings": "{count, plural, =0 {No findings} one {# finding} other {# findings}}",
+    "lastHeartbeat": "Last heartbeat: {time}"
+  },
+  "AgentWiring": {
+    "empty": "No agents registered yet",
+    "findings": "{count, plural, =0 {No findings} one {# finding} other {# findings}}",
+    "task": "Task",
+    "pending": "pending"
+  },
+  "NodeDetail": {
+    "kind": "Kind",
+    "community": "Community",
+    "file": "File"
+  },
+  "GraphControls": {
+    "searchPlaceholder": "Search nodes...",
+    "communities": "Communities",
+    "flows": "Flows",
+    "showAll": "Show all",
+    "view": "View",
+    "showEdges": "Show edges"
+  },
+  "ActivityFeed": {
+    "waiting": "Waiting for activity...",
+    "agentOnline": "{agent} came online",
+    "graphUpdated": "Graph updated: +{count} nodes",
+    "findingIngested": "Finding ingested: {file}"
+  },
+  "GraphStats": {
+    "nodes": "Nodes",
+    "edges": "Edges",
+    "communities": "Communities"
+  },
+  "ProjectCard": {
+    "nodes": "nodes",
+    "edges": "edges",
+    "communities": "communities",
+    "agentsActive": "{count, plural, =0 {no agents} one {# agent active} other {# agents active}}",
+    "noAgents": "no agents",
+    "updated": "Updated {timeAgo}"
+  },
+  "Common": {
+    "status": {
+      "online": "online",
+      "offline": "offline",
+      "working": "working",
+      "pending": "pending",
+      "completed": "completed",
+      "failed": "failed"
+    },
+    "priority": {
+      "low": "low",
+      "medium": "medium",
+      "high": "high"
+    },
+    "timeAgo": {
+      "seconds": "{count, plural, one {# second ago} other {# seconds ago}}",
+      "minutes": "{count, plural, one {# minute ago} other {# minutes ago}}",
+      "hours": "{count, plural, one {# hour ago} other {# hours ago}}",
+      "days": "{count, plural, one {# day ago} other {# days ago}}",
+      "never": "never",
+      "justNow": "just now"
+    }
+  }
+}

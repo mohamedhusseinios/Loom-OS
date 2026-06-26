@@ -1,0 +1,283 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1782479190963,
+  "projectRoot": "/Users/mohamedabdulrahman/Mohamed-Hussien/my-projects/agentic-os",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "fastapi",
+        "version": null,
+        "category": "backend"
+      },
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "agentic_os.egg-info": {
+      "path": "agentic_os.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1782479190955,
+      "keyFiles": [
+        "PKG-INFO",
+        "SOURCES.txt",
+        "dependency_links.txt",
+        "entry_points.txt",
+        "requires.txt"
+      ]
+    },
+    "daemon": {
+      "path": "daemon",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1782479190955,
+      "keyFiles": [
+        "__init__.py",
+        "api.py",
+        "graph_engine.py",
+        "main.py",
+        "models.py"
+      ]
+    },
+    "dashboard": {
+      "path": "dashboard",
+      "purpose": null,
+      "fileCount": 14,
+      "lastAccessed": 1782479190956,
+      "keyFiles": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        "components.json",
+        "eslint.config.mjs"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1782479190956,
+      "keyFiles": []
+    },
+    "loom.egg-info": {
+      "path": "loom.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1782479190957,
+      "keyFiles": [
+        "PKG-INFO",
+        "SOURCES.txt",
+        "dependency_links.txt",
+        "entry_points.txt",
+        "requires.txt"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1782479190957,
+      "keyFiles": [
+        "smoke-test.sh"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 5,
+      "lastAccessed": 1782479190958,
+      "keyFiles": [
+        "test_api.py",
+        "test_graph_engine.py",
+        "test_registry.py",
+        "test_router.py",
+        "test_watcher.py"
+      ]
+    },
+    "dashboard/app": {
+      "path": "dashboard/app",
+      "purpose": "Application code",
+      "fileCount": 3,
+      "lastAccessed": 1782479190959,
+      "keyFiles": [
+        "favicon.ico",
+        "globals.css",
+        "layout.tsx"
+      ]
+    },
+    "dashboard/components": {
+      "path": "dashboard/components",
+      "purpose": "UI components",
+      "fileCount": 13,
+      "lastAccessed": 1782479190959,
+      "keyFiles": [
+        "activity-feed.tsx",
+        "add-project-modal.tsx",
+        "agent-badge.tsx"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 4,
+      "lastAccessed": 1782479446842,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 2,
+      "lastAccessed": 1782479732917,
+      "type": "file"
+    },
+    {
+      "path": "pyproject.toml",
+      "accessCount": 1,
+      "lastAccessed": 1782479234380,
+      "type": "file"
+    },
+    {
+      "path": "daemon/main.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479256458,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/package.json",
+      "accessCount": 1,
+      "lastAccessed": 1782479256936,
+      "type": "file"
+    },
+    {
+      "path": "scripts/smoke-test.sh",
+      "accessCount": 1,
+      "lastAccessed": 1782479257472,
+      "type": "file"
+    },
+    {
+      "path": "daemon/api.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479274815,
+      "type": "file"
+    },
+    {
+      "path": "daemon/router.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479275475,
+      "type": "file"
+    },
+    {
+      "path": "daemon/models.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479276001,
+      "type": "file"
+    },
+    {
+      "path": "daemon/registry.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479286424,
+      "type": "file"
+    },
+    {
+      "path": "daemon/graph_engine.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479287010,
+      "type": "file"
+    },
+    {
+      "path": "daemon/watcher.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479287113,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/next.config.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782479288369,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/proxy.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782479288601,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/lib/api.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782479289456,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_api.py",
+      "accessCount": 1,
+      "lastAccessed": 1782479289666,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/i18n/routing.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782479302518,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/i18n/request.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782479303287,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/lib/use-websocket.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782479303799,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/app/[locale]/layout.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782479304327,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

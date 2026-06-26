@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 
 interface AgentBadgeProps {
@@ -10,6 +13,7 @@ interface AgentBadgeProps {
 }
 
 export function AgentBadge({ agent }: AgentBadgeProps) {
+  const t = useTranslations("Common.status");
   const statusColor = {
     online: "bg-emerald-900 text-emerald-300",
     working: "bg-amber-900 text-amber-300",
@@ -32,7 +36,7 @@ export function AgentBadge({ agent }: AgentBadgeProps) {
         <div className="text-xs text-zinc-500">{agent.capabilities.join(", ")}</div>
       </div>
       <Badge className={statusColor[agent.status]} variant="outline">
-        {agent.status}
+        {t(agent.status)}
       </Badge>
     </div>
   );

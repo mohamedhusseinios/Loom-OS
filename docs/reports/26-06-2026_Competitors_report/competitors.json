@@ -1,0 +1,147 @@
+{
+  "target": "Agentic OS",
+  "target_description": "Single-machine daemon linking AI coding agents through a shared Graphify-powered knowledge graph. Filesystem inbox protocol (no SDK/auth), Next.js dashboard control plane, per-project isolation, SQLite registry.",
+  "target_stack": "Python FastAPI daemon + Next.js 15 dashboard + Graphify knowledge graph + SQLite + WebSocket",
+  "generated": "2026-06-26",
+  "direct_competitors": [
+    {
+      "id": "cognee",
+      "name": "Cognee",
+      "url": "https://www.cognee.ai/",
+      "github": "https://github.com/topoteretes/cognee",
+      "description": "Open-source agent memory platform. Build persistent memory across sessions with graph, vector, and relational retrieval. Self-hosted, Docker, on-prem, or cloud.",
+      "category": "Agent Memory Platform",
+      "similarity": "HIGH — graph-based agent memory, open-source, self-hosted, multi-modal retrieval",
+      "differentiator": "Cloud-native, pipeline-based ingestion, broader scope (not code-specific)"
+    },
+    {
+      "id": "graphiti",
+      "name": "Graphiti (by Zep)",
+      "url": "https://github.com/getzep/graphiti",
+      "description": "Build real-time knowledge graphs for AI agents. Temporal knowledge graph that updates as agents learn.",
+      "category": "Agent Knowledge Graph",
+      "similarity": "HIGH — knowledge graph for agents, real-time updates, open-source",
+      "differentiator": "Temporal graph model, cloud-native, not filesystem-protocol-based"
+    },
+    {
+      "id": "mem0",
+      "name": "Mem0",
+      "url": "https://mem0.ai/",
+      "description": "AI memory layer for agents and apps. Continuously learns from past interactions for personalization.",
+      "category": "Agent Memory Layer",
+      "similarity": "MEDIUM — persistent agent memory, but focuses on user personalization, not code knowledge graphs",
+      "differentiator": "User-facing personalization, not codebase knowledge"
+    },
+    {
+      "id": "letta",
+      "name": "Letta (formerly MemGPT)",
+      "url": "https://www.letta.com/",
+      "description": "Stateful agents that remember everything, learn continuously, and improve over time. OS-inspired tiered memory.",
+      "category": "Agent Memory OS",
+      "similarity": "MEDIUM — OS-inspired memory architecture, stateful agents, but focuses on chat/LLM memory not code graph",
+      "differentiator": "Tiered memory (working/archival), not codebase-scoped"
+    },
+    {
+      "id": "langmem",
+      "name": "LangMem (LangChain)",
+      "url": "https://langchain.com/",
+      "description": "Memory framework for LangChain agents. Part of the LangChain ecosystem.",
+      "category": "Agent Memory Framework",
+      "similarity": "MEDIUM — memory for agents, but tightly coupled to LangChain, not standalone",
+      "differentiator": "LangChain-only, no dashboard, framework not platform"
+    },
+    {
+      "id": "cloudflare-agent-memory",
+      "name": "Cloudflare Agent Memory",
+      "url": "https://developers.cloudflare.com/agents/",
+      "description": "Stateful AI agents with persistent memory, WebSocket, scheduled tasks. Cloudflare SDK.",
+      "category": "Agent Platform",
+      "similarity": "MEDIUM — persistent memory, WebSocket, but cloud-only, not self-hosted daemon",
+      "differentiator": "Cloud-only, no local filesystem protocol, no code knowledge graph"
+    },
+    {
+      "id": "mcp-memory-server",
+      "name": "MCP Memory Server",
+      "url": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "description": "Official MCP server providing knowledge graph-based persistent memory system.",
+      "category": "Agent Memory Protocol",
+      "similarity": "MEDIUM — knowledge graph memory, filesystem-backed, but requires MCP client",
+      "differentiator": "MCP-dependent, no dashboard, simpler scope"
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "url": "https://github.com/openclaw/openclaw",
+      "description": "Open-source agent with heartbeat/soul/memory configuration. Memory wiki plugin. Filesystem-based.",
+      "category": "Agent Framework",
+      "similarity": "MEDIUM — filesystem-based config, heartbeat protocol, memory wiki, but an agent not a daemon",
+      "differentiator": "Self-contained agent, not a multi-agent memory fabric"
+    }
+  ],
+  "adjacent_competitors": [
+    {
+      "id": "claude-code-subagents",
+      "name": "Claude Code Sub-agents",
+      "url": "https://docs.anthropic.com/en/docs/claude-code/sub-agents",
+      "category": "Agent Orchestration",
+      "description": "Hierarchical delegation: Claude Code spawns focused sub-agents. No shared knowledge graph between them.",
+      "relevance": "Proves the multi-agent pattern works. Agentic OS adds the shared memory layer Claude Code lacks."
+    },
+    {
+      "id": "github-spec-kit",
+      "name": "GitHub Spec Kit",
+      "url": "https://github.com/github/spec-kit",
+      "category": "Agent Orchestration",
+      "description": "Spec-driven agent coding. Generate specs, then delegate implementation to coding agents.",
+      "relevance": "Task decomposition pattern. Agentic OS could ingest spec-kit outputs as agent findings."
+    },
+    {
+      "id": "codex-cli",
+      "name": "OpenAI Codex CLI",
+      "url": "https://github.com/openai/codex",
+      "category": "Agent Orchestration",
+      "description": "OpenAI's coding agent with delegation capabilities.",
+      "relevance": "Another agent that could register with Agentic OS via the inbox protocol."
+    },
+    {
+      "id": "swarms",
+      "name": "Swarms (kyegomez)",
+      "url": "https://github.com/kyegomez/swarms",
+      "category": "Agent Orchestration",
+      "description": "Multi-agent orchestration framework for production.",
+      "relevance": "Proves multi-agent pattern. No shared knowledge graph. Agentic OS adds the memory layer."
+    },
+    {
+      "id": "agno",
+      "name": "Agno",
+      "url": "https://github.com/agno-agi/agno",
+      "category": "Agent Platform",
+      "description": "Build, run, and manage agent platforms.",
+      "relevance": "Management plane for agents, but broader scope. Agentic OS is more focused on code knowledge."
+    },
+    {
+      "id": "braintrust",
+      "name": "Braintrust",
+      "url": "https://www.braintrust.dev/",
+      "category": "AI Observability",
+      "description": "AI observability platform for tracing, evals, regression catching.",
+      "relevance": "Shows the observability need Agentic OS addresses with WebSocket + dashboard."
+    },
+    {
+      "id": "hermes-agent",
+      "name": "Hermes Agent",
+      "url": "https://hermes-agent.nousresearch.com/",
+      "category": "Agent Platform",
+      "description": "Full agent platform with delegation, kanban task board, skills, memory, cron. Has a control plane dashboard.",
+      "relevance": "Closest to a full control plane. Agentic OS is the multi-agent memory fabric Hermes agents could connect to."
+    },
+    {
+      "id": "langgraph-studio",
+      "name": "LangGraph Studio",
+      "url": "https://langchain.com/langgraph",
+      "category": "Agent Debugging",
+      "description": "Visual debugging and monitoring for LangGraph agents.",
+      "relevance": "Shows the visualization need Agentic OS addresses with Cytoscape.js graph explorer."
+    }
+  ]
+}

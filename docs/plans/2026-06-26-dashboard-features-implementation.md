@@ -2,7 +2,7 @@
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Add project CRUD, interactive graph explorer (Cytoscape.js), and agent management with wiring + dispatch to the Agentic OS dashboard.
+**Goal:** Add project CRUD, interactive graph explorer (Cytoscape.js), and agent management with wiring + dispatch to the Loom dashboard.
 
 **Architecture:** API-First — extend daemon with new FastAPI endpoints (project CRUD, graph topology, agent dispatch), then build dashboard components that consume them. Graph visualization uses Cytoscape.js with force-directed layout. Agent dispatch extends the filesystem inbox protocol with `task-*.json` files.
 
@@ -523,7 +523,7 @@ export function Sidebar() {
     <>
       <aside className="w-64 border-r border-zinc-800 bg-zinc-950 min-h-screen p-4 flex flex-col">
         <div className="mb-6">
-          <h1 className="text-lg font-bold text-zinc-100">Agentic OS</h1>
+          <h1 className="text-lg font-bold text-zinc-100">Loom</h1>
           <p className="text-xs text-zinc-500">Agent Memory Fabric</p>
         </div>
         <nav className="space-y-1 flex-1">
@@ -1676,7 +1676,7 @@ async def dispatch_task(project_id: str, payload: DispatchRequest):
     
     # Write to inbox (same as agents would pick up)
     import os
-    inbox_dir = os.path.expanduser(f"~/.agentic-os/inbox/{project_id}")
+    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
     os.makedirs(inbox_dir, exist_ok=True)
     task_path = os.path.join(inbox_dir, f"task-{task_id}.json")
     with open(task_path, "w") as f:
@@ -2320,7 +2320,7 @@ export default function AgentManagementPage() {
       {/* Agent Cards */}
       <div className="space-y-3 mb-8">
         {agents.length === 0 ? (
-          <p className="text-sm text-zinc-600">No agents registered yet. Agents appear when they write register.json to ~/.agentic-os/inbox/</p>
+          <p className="text-sm text-zinc-600">No agents registered yet. Agents appear when they write register.json to ~/.loom/inbox/</p>
         ) : (
           agents.map((a: any) => <AgentCard key={a.agent_id} agent={a} />)
         )}

@@ -127,4 +127,8 @@
   html {
     @apply font-sans;
   }
+  /* Native <dialog> backdrop for app modals (AddProjectModal, DispatchModal). */
+  dialog::backdrop {
+    @apply bg-black/60;
+  }
 }

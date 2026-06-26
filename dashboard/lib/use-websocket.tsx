@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 interface WsEvent {
   event: string;
@@ -9,15 +18,32 @@ interface WsEvent {
   timestamp: string;
 }
 
-export function useWebSocket() {
+type Listener = (event: WsEvent) => void;
+
+interface WebSocketContextValue {
+  lastEvent: WsEvent | null;
+  connected: boolean;
+  subscribe: (key: string, fn: Listener) => () => void;
+}
+
+const WebSocketContext = createContext<WebSocketContextValue | null>(null);
+
+const WS_URL = "ws://localhost:8472/ws";
+
+export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [lastEvent, setLastEvent] = useState<WsEvent | null>(null);
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const listenersRef = useRef<Map<string, Set<(data: WsEvent) => void>>>(new Map());
+  // Listeners keyed by event type ("agent:dispatched") or by project
+  // ("project:<id>"). Stored in a ref so it's stable across renders and
+  // doesn't trigger reconnects.
+  const listenersRef = useRef<Map<string, Set<Listener>>>(new Map());
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8472/ws");
-    wsRef.current = ws;
+    // Single shared connection for the whole app. Previously each component
+    // calling useWebSocket() opened its own socket — Sidebar + ProjectsPage +
+    // each project page = 2-3 concurrent connections and reconnect storms on
+    // navigation.
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
@@ -26,31 +52,43 @@ export function useWebSocket() {
         const event: WsEvent = JSON.parse(msg.data);
         setLastEvent(event);
         const typeListeners = listenersRef.current.get(event.event);
-        if (typeListeners) {
-          typeListeners.forEach((fn) => fn(event));
-        }
+        typeListeners?.forEach((fn) => fn(event));
         const projListeners = listenersRef.current.get(`project:${event.project}`);
-        if (projListeners) {
-          projListeners.forEach((fn) => fn(event));
-        }
-      } catch {}
+        projListeners?.forEach((fn) => fn(event));
+      } catch {
+        // malformed frame — ignore
+      }
     };
 
     return () => ws.close();
   }, []);
 
-  const subscribe = useCallback(
-    (key: string, fn: (data: WsEvent) => void) => {
-      if (!listenersRef.current.has(key)) {
-        listenersRef.current.set(key, new Set());
-      }
-      listenersRef.current.get(key)!.add(fn);
-      return () => {
-        listenersRef.current.get(key)?.delete(fn);
-      };
-    },
-    []
+  const subscribe = useCallback((key: string, fn: Listener) => {
+    let set = listenersRef.current.get(key);
+    if (!set) {
+      set = new Set();
+      listenersRef.current.set(key, set);
+    }
+    set.add(fn);
+    return () => {
+      set?.delete(fn);
+    };
+  }, []);
+
+  const value = useMemo<WebSocketContextValue>(
+    () => ({ lastEvent, connected, subscribe }),
+    [lastEvent, connected, subscribe]
   );
 
-  return { lastEvent, connected, subscribe };
+  return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;
 }
+
+export function useWebSocket(): WebSocketContextValue {
+  const ctx = useContext(WebSocketContext);
+  if (!ctx) {
+    throw new Error("useWebSocket must be used within a <WebSocketProvider>");
+  }
+  return ctx;
+}
+
+export type { WsEvent };

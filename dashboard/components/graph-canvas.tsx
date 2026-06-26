@@ -1,10 +1,24 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import cytoscape, { Core, EventObject } from "cytoscape";
+import cytoscape, { Core, EventObject, type LayoutOptions } from "cytoscape";
 import coseBilkent from "cytoscape-cose-bilkent";
 
 cytoscape.use(coseBilkent);
+
+interface GraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  community: number;
+  file: string;
+}
+
+interface GraphEdge {
+  source: string;
+  target: string;
+  kind: string;
+}
 
 const COMMUNITY_COLORS = [
   "#4ade80", "#60a5fa", "#c084fc", "#f59e0b", "#ec4899",
@@ -12,9 +26,9 @@ const COMMUNITY_COLORS = [
 ];
 
 interface GraphCanvasProps {
-  nodes: { id: string; label: string; kind: string; community: number; file: string }[];
-  edges: { source: string; target: string; kind: string }[];
-  onNodeSelect?: (node: { id: string; label: string; kind: string; community: number; file: string }) => void;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  onNodeSelect?: (node: GraphNode) => void;
   highlightedNodes?: Set<string>;
   visibleCommunities?: Set<string>;
   showEdges?: boolean;
@@ -30,6 +44,10 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  // Keep the latest callback without re-running the mount effect (which
+  // would destroy/recreate the whole graph). The tap handler reads this ref.
+  const onSelectRef = useRef(onNodeSelect);
+  onSelectRef.current = onNodeSelect;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -79,16 +97,16 @@ export function GraphCanvas({
       ],
       layout: {
         name: "cose-bilkent",
-        animate: false as any,
+        animate: false,
         gravity: 0.4,
         idealEdgeLength: 100,
         nodeRepulsion: 8000,
-      } as any,
+      } as LayoutOptions,
     });
 
     cy.on("tap", "node", (evt: EventObject) => {
       const node = evt.target;
-      onNodeSelect?.({
+      onSelectRef.current?.({
         id: node.id(),
         label: node.data("label"),
         kind: node.data("kind"),
@@ -104,6 +122,8 @@ export function GraphCanvas({
     };
   }, []);
 
+  // Sync graph elements + run layout ONLY when the data set changes.
+  // showEdges is handled separately below so toggling it doesn't re-layout.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -127,29 +147,40 @@ export function GraphCanvas({
       });
     });
 
-    if (showEdges) {
-      edges.forEach((e) => {
-        cy.add({
-          group: "edges",
-          data: {
-            id: `${e.source}->${e.target}`,
-            source: e.source,
-            target: e.target,
-            kind: e.kind,
-          },
-        });
+    edges.forEach((e) => {
+      cy.add({
+        group: "edges",
+        data: {
+          id: `${e.source}->${e.target}`,
+          source: e.source,
+          target: e.target,
+          kind: e.kind,
+        },
       });
-    }
+    });
+
+    // Apply current edge visibility immediately so the initial render
+    // honors showEdges=false.
+    cy.edges().style("display", showEdges ? "element" : "none");
 
     cy.layout({
       name: "cose-bilkent",
-      animate: true as any,
+      animate: true,
       animationDuration: 500,
       gravity: 0.4,
       idealEdgeLength: 100,
       nodeRepulsion: 8000,
-    } as any).run();
-  }, [nodes, edges, showEdges]);
+    } as LayoutOptions).run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges]);
+
+  // Toggling edge visibility only restyles — no re-layout, so the user's
+  // pan/zoom and node positions are preserved.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.edges().style("display", showEdges ? "element" : "none");
+  }, [showEdges]);
 
   useEffect(() => {
     const cy = cyRef.current;

@@ -44,9 +44,9 @@ class InboxHandler(FileSystemEventHandler):
 
 
 class InboxWatcher:
-    """Watches ~/.agentic-os/inbox/ for new files."""
+    """Watches ~/.loom/inbox/ for new files."""
 
-    def __init__(self, inbox_path: str = "~/.agentic-os/inbox"):
+    def __init__(self, inbox_path: str = "~/.loom/inbox"):
         self.inbox_path = Path(inbox_path).expanduser().resolve()
         self.observer: Optional[Observer] = None
         self._handler: Optional[InboxHandler] = None

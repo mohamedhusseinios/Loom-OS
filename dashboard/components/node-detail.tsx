@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
 
 interface NodeDetailProps {
@@ -14,10 +15,11 @@ interface NodeDetailProps {
 }
 
 export function NodeDetail({ node, onClose }: NodeDetailProps) {
+  const t = useTranslations("NodeDetail");
   if (!node) return null;
 
   return (
-    <div className="absolute bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[200px] shadow-lg z-10">
+    <div className="absolute bottom-4 end-4 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[200px] shadow-lg z-10">
       <div className="flex items-center justify-between mb-2">
         <h4 className="text-sm font-semibold text-zinc-200 font-mono truncate max-w-[160px]">
           {node.label}
@@ -28,16 +30,16 @@ export function NodeDetail({ node, onClose }: NodeDetailProps) {
       </div>
       <div className="space-y-1 text-[11px]">
         <div className="flex justify-between">
-          <span className="text-zinc-500">Kind</span>
+          <span className="text-zinc-500">{t("kind")}</span>
           <span className="text-zinc-300">{node.kind}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-zinc-500">Community</span>
+          <span className="text-zinc-500">{t("community")}</span>
           <span className="text-zinc-300">{node.community}</span>
         </div>
         {node.file && (
           <div className="flex justify-between">
-            <span className="text-zinc-500">File</span>
+            <span className="text-zinc-500">{t("file")}</span>
             <span className="text-zinc-300 font-mono text-[10px] truncate max-w-[120px]">
               {node.file}
             </span>

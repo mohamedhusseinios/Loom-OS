@@ -1,1 +1,1 @@
-"""Agentic OS — unified agent memory fabric."""
+"""Loom — unified agent memory fabric."""

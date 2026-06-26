@@ -1,4 +1,4 @@
-# Agentic OS — Design Spec
+# Loom — Design Spec
 
 **Date:** 2026-06-25  
 **Status:** Design phase  
@@ -6,7 +6,7 @@
 
 ## Overview
 
-**Agentic OS** is a unified agent memory fabric — a daemon that links all AI coding agents on a single machine through a shared knowledge graph powered by Graphify. Agents communicate via filesystem hooks (writing to `~/.agentic-os/inbox/`). A Next.js dashboard provides the control plane for monitoring, querying, and managing agents and their knowledge graphs.
+**Loom** is a unified agent memory fabric — a daemon that links all AI coding agents on a single machine through a shared knowledge graph powered by Graphify. Agents communicate via filesystem hooks (writing to `~/.loom/inbox/`). A Next.js dashboard provides the control plane for monitoring, querying, and managing agents and their knowledge graphs.
 
 ## Design Decisions (from brainstorming)
 
@@ -16,12 +16,12 @@
 | Interface | Dashboard with Full Control Plane — dispatch, monitor, manage |
 | Memory scope | Codebase knowledge only — class structures, dependencies, call graphs, architecture decisions |
 | Project location | Standalone repo, separate from Agentfiy |
-| Agent connectivity | Filesystem hooks — `~/.agentic-os/inbox/` |
+| Agent connectivity | Filesystem hooks — `~/.loom/inbox/` |
 | Implementation stack | Python daemon (FastAPI) + Next.js dashboard + Graphify in-process |
 
 ## System Architecture
 
-The Agentic OS is a single Python daemon with four internal components, plus a separate Next.js frontend.
+The Loom is a single Python daemon with four internal components, plus a separate Next.js frontend.
 
 ### Component Diagram
 
@@ -33,7 +33,7 @@ Browser :3000 ──▶  ┌─────────────────�
                                   │ REST + WebSocket
                                   │ localhost:8472
 ┌─────────────────────────────────┼───────────────────┐
-│              Agentic OS Daemon (Python)              │
+│              Loom Daemon (Python)              │
 │  ┌────────────┐  ┌───────────┐  ┌────────────────┐  │
 │  │  Watcher   │  │  Router   │  │  Graph Engine  │  │
 │  │ (watchdog) │  │(dispatcher│  │   (graphify)   │  │
@@ -54,14 +54,14 @@ Browser :3000 ──▶  ┌─────────────────�
 
 ### Components
 
-1. **Watcher** — Monitors `~/.agentic-os/inbox/` using watchdog. Detects new/modified files, validates format, routes to Router.
+1. **Watcher** — Monitors `~/.loom/inbox/` using watchdog. Detects new/modified files, validates format, routes to Router.
 2. **Router** — Core dispatcher. Processes inbox events: registers agents, queues graph updates, routes findings to Graph Engine.
 3. **Graph Engine** — Wraps Graphify Python API. Handles full builds, incremental updates, and semantic ingestion of agent findings. Runs CPU-bound work in thread pool.
 4. **Agent Registry** — SQLite database tracking all registered agents, their projects, capabilities, heartbeat status, and activity history.
 
 ### Key Design Principles
 
-- **Single process** — one `agentic-os` command starts everything. No IPC, no microservices.
+- **Single process** — one `loom` command starts everything. No IPC, no microservices.
 - **SQLite for state** — agent registry, task queue, config. File lives alongside the daemon. Zero setup.
 - **Graphify in-process** — `import graphify`, not subprocess. Faster, type-safe.
 - **WebSocket push** — dashboard gets live updates on graph changes, agent status, errors. No polling.
@@ -75,7 +75,7 @@ Agents communicate with the OS exclusively through the filesystem. No SDK, no AP
 ### Directory Layout
 
 ```
-~/.agentic-os/
+~/.loom/
 ├── inbox/                  ← agents write here
 │   ├── noor/               ← per-project subdirectory
 │   │   ├── register.json       ← agent self-registration
@@ -236,7 +236,7 @@ All methods use `asyncio.to_thread` for CPU-bound Graphify operations.
 ## Project Structure
 
 ```
-agentic-os/
+loom/
 ├── daemon/                ← Python package
 │   ├── __init__.py
 │   ├── main.py           ← entry point: uvicorn + watchdog
@@ -271,11 +271,11 @@ agentic-os/
 
 ## Daemon Startup Flow
 
-1. `agentic-os start` or `python -m daemon.main`
+1. `loom start` or `python -m daemon.main`
 2. Initialize SQLite registry (create if not exists)
-3. Start watchdog on `~/.agentic-os/inbox/`
+3. Start watchdog on `~/.loom/inbox/`
 4. Start FastAPI server on `localhost:8472`
-5. Log: "Agentic OS ready. Watching ~/.agentic-os/inbox/"
+5. Log: "Loom ready. Watching ~/.loom/inbox/"
 
 ## Agent Lifecycle
 
@@ -322,7 +322,7 @@ agentic-os/
 
 - Should the daemon run as a launchd service (auto-start on login)?
 - Should the dashboard support dark/light theme? (default: dark)
-- Should there be a CLI tool (`agentic-os query "..."`) alongside the dashboard?
+- Should there be a CLI tool (`loom query "..."`) alongside the dashboard?
 - Archive policy for `.processed/` files — keep forever? Rotate after N days?
 
 ## Out of Scope (v1)

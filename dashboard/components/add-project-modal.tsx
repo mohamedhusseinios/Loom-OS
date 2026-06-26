@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createProject, discoverDirs } from "@/lib/api";
@@ -13,6 +14,8 @@ interface AddProjectModalProps {
 }
 
 export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalProps) {
+  const t = useTranslations("AddProjectModal");
+  const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<"browse" | "manual">("browse");
   const [currentPath, setCurrentPath] = useState("~");
   const [dirs, setDirs] = useState<{ name: string; path: string; has_git: boolean }[]>([]);
@@ -21,6 +24,25 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
   const [error, setError] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPath, setManualPath] = useState("");
+
+  // Drive the native dialog. showModal()/close() give us Escape handling,
+  // focus trapping, and the ::backdrop overlay for free.
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  // Sync parent state when the dialog is dismissed natively (Escape). The
+  // `close` event fires after any close; we only need to notify React if the
+  // `open` prop hasn't already flipped to false (i.e. it wasn't our doing).
+  const onNativeClose = () => {
+    if (open) onClose();
+  };
 
   useEffect(() => {
     if (open && tab === "browse") {
@@ -36,7 +58,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
       setDirs(data.directories);
       setParent(data.parent);
     } catch {
-      setError("Failed to browse directory");
+      setError(t("browseError"));
     } finally {
       setLoading(false);
     }
@@ -50,7 +72,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
       onCreated();
       onClose();
     } catch {
-      setError("Failed to create project");
+      setError(t("createError"));
     } finally {
       setLoading(false);
     }
@@ -65,18 +87,25 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
       onCreated();
       onClose();
     } catch {
-      setError("Failed to create project");
+      setError(t("createError"));
     } finally {
       setLoading(false);
     }
   }
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <dialog
+      ref={ref}
+      onClose={onNativeClose}
+      // Backdrop click: the click lands on the <dialog> element itself (not a
+      // child), since the panel fills the dialog's content area.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="rounded-xl p-0 bg-transparent max-w-none"
+    >
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-[480px] p-6">
-        <h2 className="text-lg font-bold text-zinc-100 mb-4">Add Project</h2>
+        <h2 className="text-lg font-bold text-zinc-100 mb-4">{t("heading")}</h2>
 
         <div className="flex gap-2 mb-4">
           <Button
@@ -84,14 +113,14 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
             size="sm"
             onClick={() => setTab("browse")}
           >
-            Browse Disk
+            {t("browseDisk")}
           </Button>
           <Button
             variant={tab === "manual" ? "default" : "outline"}
             size="sm"
             onClick={() => setTab("manual")}
           >
-            Manual Entry
+            {t("manualEntry")}
           </Button>
         </div>
 
@@ -102,7 +131,8 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 onClick={() => setCurrentPath(parent)}
                 className="text-sm text-zinc-400 hover:text-zinc-200 mb-2 flex items-center gap-1"
               >
-                <ChevronRight className="w-3 h-3 rotate-180" /> {parent}
+                {/* "up one level" — chevron flips with text direction */}
+                <ChevronRight className="w-3 h-3 rotate-180 rtl:rotate-0" /> {parent}
               </button>
             )}
             <div className="text-xs text-zinc-500 mb-2 font-mono truncate">{currentPath}</div>
@@ -116,7 +146,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                   <button
                     key={d.path}
                     onClick={() => handleSelect(d)}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-zinc-800 text-left text-sm text-zinc-300"
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-zinc-800 text-start text-sm text-zinc-300"
                   >
                     {d.has_git ? (
                       <FolderGit2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -128,7 +158,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                   </button>
                 ))}
                 {dirs.length === 0 && (
-                  <p className="text-sm text-zinc-600 py-4 text-center">No subdirectories</p>
+                  <p className="text-sm text-zinc-600 py-4 text-center">{t("noSubdirs")}</p>
                 )}
               </div>
             )}
@@ -136,21 +166,21 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         ) : (
           <form onSubmit={handleManualCreate} className="space-y-3">
             <Input
-              placeholder="Project name"
+              placeholder={t("namePlaceholder")}
               value={manualName}
               onChange={(e) => setManualName(e.target.value)}
               className="bg-zinc-800 border-zinc-700 text-zinc-200"
               required
             />
             <Input
-              placeholder="Absolute path (e.g. /Users/.../my-project)"
+              placeholder={t("pathPlaceholder")}
               value={manualPath}
               onChange={(e) => setManualPath(e.target.value)}
               className="bg-zinc-800 border-zinc-700 text-zinc-200"
               required
             />
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Project"}
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("create")}
             </Button>
           </form>
         )}
@@ -158,9 +188,9 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
 
         <Button variant="ghost" size="sm" onClick={onClose} className="mt-3 w-full">
-          Cancel
+          {t("cancel")}
         </Button>
       </div>
-    </div>
+    </dialog>
   );
 }

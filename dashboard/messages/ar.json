@@ -1,0 +1,148 @@
+{
+  "Metadata": {
+    "title": "أجنتك أوإس",
+    "description": "نسيج ذاكرة الوكلاء الموحّد"
+  },
+  "Sidebar": {
+    "brand": "أجنتك أوإس",
+    "subtitle": "نسيج ذاكرة الوكلاء",
+    "navProjects": "المشاريع",
+    "trackedProjects": "المشاريع المتتبَّعة",
+    "overview": "نظرة عامة",
+    "graph": "الرسم البياني",
+    "agents": "الوكلاء",
+    "addProject": "إضافة مشروع"
+  },
+  "ProjectsPage": {
+    "loading": "جارٍ تحميل المشاريع...",
+    "heading": "المشاريع",
+    "empty": "لا توجد مشاريع متتبَّعة بعد.",
+    "emptyHint": "ستظهر الوكلاء هنا عند تسجيلهم بالكتابة إلى",
+    "addFirst": "أضف مشروعك الأول",
+    "add": "إضافة مشروع"
+  },
+  "ProjectDetail": {
+    "loading": "جارٍ التحميل...",
+    "notFound": "المشروع غير موجود",
+    "graphOverview": "نظرة عامة على الرسم البياني",
+    "noGraph": "لا توجد بيانات رسم بياني بعد",
+    "agents": "الوكلاء",
+    "noAgents": "لا يوجد وكلاء مسجَّلون",
+    "liveActivity": "النشاط المباشر",
+    "graphExplorer": "مستكشف الرسم البياني"
+  },
+  "AgentsPage": {
+    "loading": "جارٍ التحميل...",
+    "notFound": "المشروع غير موجود",
+    "heading": "الوكلاء",
+    "agentCount": "{count, plural, =0 {لا وكلاء} one {وكيل واحد} two {وكيلان} few {# وكلاء} many {# وكيلًا} other {# وكيل}} مسجَّل",
+    "dispatchTask": "إرسال مهمة",
+    "empty": "لا يوجد وكلاء مسجَّلون بعد. يظهر الوكلاء عند كتابة register.json إلى {path}",
+    "agentWiring": "توصيلات الوكلاء",
+    "dispatchHistory": "سجل الإرسالات"
+  },
+  "GraphExplorer": {
+    "loading": "جارٍ تحميل الرسم البياني...",
+    "heading": "مستكشف الرسم البياني",
+    "stats": "{nodes} عقدة · {edges} حافة · {communities} مجتمع",
+    "searchPlaceholder": "اسأل عن قاعدة الشيفرة...",
+    "empty": "لا توجد بيانات رسم بياني بعد. يحتاج الوكلاء إلى التسجيل وبناء الرسم البياني."
+  },
+  "AddProjectModal": {
+    "heading": "إضافة مشروع",
+    "browseDisk": "تصفّح القرص",
+    "manualEntry": "إدخال يدوي",
+    "noSubdirs": "لا توجد مجلدات فرعية",
+    "namePlaceholder": "اسم المشروع",
+    "pathPlaceholder": "المسار المطلق (مثال: /Users/.../my-project)",
+    "create": "إنشاء المشروع",
+    "cancel": "إلغاء",
+    "browseError": "فشل تصفّح المجلد",
+    "createError": "فشل إنشاء المشروع"
+  },
+  "DispatchModal": {
+    "heading": "إرسال مهمة",
+    "targetAgent": "الوكيل الهدف",
+    "selectAgent": "اختر وكيلًا...",
+    "instruction": "التعليمات",
+    "instructionPlaceholder": "مثال: راجع وحدة المصادقة للمشاكل الأمنية",
+    "priority": "الأولوية",
+    "dispatch": "إرسال",
+    "cancel": "إلغاء",
+    "error": "فشل إرسال المهمة"
+  },
+  "DispatchHistory": {
+    "empty": "لا توجد مهام مُرسلة بعد",
+    "colInstruction": "التعليمات",
+    "colTarget": "الهدف",
+    "colStatus": "الحالة",
+    "colDispatched": "أُرسلت"
+  },
+  "AgentCard": {
+    "registeredAt": "سُجِّل {timeAgo}",
+    "capabilities": "{count, plural, =0 {لا قدرات} one {قدرة واحدة} two {قدرتان} few {# قدرات} many {# قدرة} other {# قدرة}}",
+    "findings": "{count, plural, =0 {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}}",
+    "lastHeartbeat": "آخر نبضة: {time}"
+  },
+  "AgentWiring": {
+    "empty": "لا يوجد وكلاء مسجَّلون بعد",
+    "findings": "{count, plural, =0 {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}}",
+    "task": "مهمة",
+    "pending": "معلَّقة"
+  },
+  "NodeDetail": {
+    "kind": "النوع",
+    "community": "المجتمع",
+    "file": "الملف"
+  },
+  "GraphControls": {
+    "searchPlaceholder": "ابحث في العقد...",
+    "communities": "المجتمعات",
+    "flows": "التدفقات",
+    "showAll": "عرض الكل",
+    "view": "العرض",
+    "showEdges": "إظهار الحواف"
+  },
+  "ActivityFeed": {
+    "waiting": "في انتظار النشاط...",
+    "agentOnline": "اتصل {agent}",
+    "graphUpdated": "تحديث الرسم البياني: +{count} عقدة",
+    "findingIngested": "تم استيعاب نتيجة: {file}"
+  },
+  "GraphStats": {
+    "nodes": "العقد",
+    "edges": "الحواف",
+    "communities": "المجتمعات"
+  },
+  "ProjectCard": {
+    "nodes": "عقدة",
+    "edges": "حافة",
+    "communities": "مجتمع",
+    "agentsActive": "{count, plural, =0 {لا وكلاء} one {# وكيل نشط} two {# وكيلان نشطان} few {# وكلاء نشطون} many {# وكيلًا نشطًا} other {# وكيل نشط}}",
+    "noAgents": "لا وكلاء",
+    "updated": "حُدِّث {timeAgo}"
+  },
+  "Common": {
+    "status": {
+      "online": "متصل",
+      "offline": "غير متصل",
+      "working": "يعمل",
+      "pending": "معلَّقة",
+      "completed": "مكتملة",
+      "failed": "فاشلة"
+    },
+    "priority": {
+      "low": "منخفضة",
+      "medium": "متوسطة",
+      "high": "عالية"
+    },
+    "timeAgo": {
+      "seconds": "{count, plural, =0 {الآن} one {قبل ثانية واحدة} two {قبل ثانيتين} few {قبل # ثوانٍ} many {قبل # ثانيةً} other {قبل # ثانية}}",
+      "minutes": "{count, plural, =0 {الآن} one {قبل دقيقة واحدة} two {قبل دقيقتين} few {قبل # دقائق} many {قبل # دقيقةً} other {قبل # دقيقة}}",
+      "hours": "{count, plural, =0 {الآن} one {قبل ساعة واحدة} two {قبل ساعتين} few {قبل # ساعات} many {قبل # ساعةً} other {قبل # ساعة}}",
+      "days": "{count, plural, =0 {الآن} one {قبل يوم واحد} two {قبل يومين} few {قبل # أيام} many {قبل # يومًا} other {قبل # يوم}}",
+      "never": "أبدًا",
+      "justNow": "الآن"
+    }
+  }
+}

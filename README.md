@@ -89,6 +89,7 @@ agentic-os/                       # repo dir (package/product is "loom")
 ├── tests/                        # pytest suite: api, registry, graph_engine, router, watcher
 ├── scripts/
 │   └── smoke-test.sh             # End-to-end test
+├── run.sh                        # Single-command full-stack launcher
 ├── docs/
 │   ├── plans/                    # Implementation plans
 │   ├── superpowers/specs/        # Design specs
@@ -124,10 +125,22 @@ cd dashboard && npm install
 ### Run
 
 ```bash
-# Terminal 1: start the daemon
+# Single command — starts daemon + dashboard, stops both on Ctrl+C
+./run.sh
+```
+
+| What | Where |
+|------|-------|
+| Daemon | `http://127.0.0.1:8472` |
+| Dashboard | `http://localhost:3000` |
+
+Or start each manually:
+
+```bash
+# Terminal 1: daemon only
 loom --port 8472
 
-# Terminal 2: start the dashboard
+# Terminal 2: dashboard only
 cd dashboard && npm run dev
 ```
 

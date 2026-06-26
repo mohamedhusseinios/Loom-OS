@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph } from "@/lib/api";
+import type { GraphTopology, CommunityInfo, FlowInfo } from "@/lib/api";
 import { GraphCanvas } from "@/components/graph-canvas";
 import { GraphControls } from "@/components/graph-controls";
 import { NodeDetail } from "@/components/node-detail";
@@ -11,14 +13,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2 } from "lucide-react";
 
+type GraphNode = GraphTopology["nodes"][number];
+
 export default function GraphExplorerPage() {
+  const t = useTranslations("GraphExplorer");
   const { id } = useParams<{ id: string }>();
-  const [nodes, setNodes] = useState<any[]>([]);
-  const [edges, setEdges] = useState<any[]>([]);
-  const [communities, setCommunities] = useState<any[]>([]);
-  const [flows, setFlows] = useState<any[]>([]);
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [edges, setEdges] = useState<GraphTopology["edges"]>([]);
+  const [communities, setCommunities] = useState<CommunityInfo[]>([]);
+  const [flows, setFlows] = useState<FlowInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [visibleCommunities, setVisibleCommunities] = useState<Set<string>>(new Set());
   const [selectedFlow, setSelectedFlow] = useState<string | null>(null);
   const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(new Set());
@@ -40,7 +45,7 @@ export default function GraphExplorerPage() {
       setEdges(topo.edges || []);
       setCommunities(comms.communities || []);
       setFlows(flws.flows || []);
-      setVisibleCommunities(new Set((comms.communities || []).map((c: any) => String(c.id))));
+      setVisibleCommunities(new Set((comms.communities || []).map((c) => String(c.id))));
     } catch {
       // graph not built yet
     } finally {
@@ -73,7 +78,7 @@ export default function GraphExplorerPage() {
       setHighlightedNodes(new Set());
       return;
     }
-    const flow = flows.find((f: any) => f.id === flowId);
+    const flow = flows.find((f) => f.id === flowId);
     if (flow) {
       setHighlightedNodes(new Set(flow.node_ids));
     }
@@ -86,8 +91,8 @@ export default function GraphExplorerPage() {
       return;
     }
     const matching = nodes
-      .filter((n: any) => n.label.toLowerCase().includes(q.toLowerCase()))
-      .map((n: any) => n.id);
+      .filter((n) => n.label.toLowerCase().includes(q.toLowerCase()))
+      .map((n) => n.id);
     setHighlightedNodes(new Set(matching));
   }
 
@@ -103,23 +108,23 @@ export default function GraphExplorerPage() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-96 text-zinc-500">Loading graph...</div>;
+    return <div className="flex items-center justify-center h-96 text-zinc-500">{t("loading")}</div>;
   }
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)]">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-xl font-bold">Graph Explorer</h2>
+          <h2 className="text-xl font-bold">{t("heading")}</h2>
           <p className="text-xs text-zinc-500">
-            {nodes.length} nodes · {edges.length} edges · {communities.length} communities
+            {t("stats", { nodes: nodes.length, edges: edges.length, communities: communities.length })}
           </p>
         </div>
         <form onSubmit={handleNLQuery} className="flex gap-2">
           <Input
             value={nlQuery}
             onChange={(e) => setNlQuery(e.target.value)}
-            placeholder="Ask about the codebase..."
+            placeholder={t("searchPlaceholder")}
             className="bg-zinc-900 border-zinc-700 text-zinc-200 text-sm w-64"
           />
           <Button type="submit" size="sm" disabled={nlLoading}>
@@ -145,7 +150,7 @@ export default function GraphExplorerPage() {
         <div className="flex-1 relative">
           {nodes.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-zinc-600">
-              No graph data yet. Agents need to register and build the graph.
+              {t("empty")}
             </div>
           ) : (
             <GraphCanvas

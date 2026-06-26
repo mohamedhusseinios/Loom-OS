@@ -1,20 +1,20 @@
-# Agentic OS Dashboard Features — Design Spec
+# Loom Dashboard Features — Design Spec
 
 **Date:** 2026-06-26
 **Status:** Design approved — ready for implementation planning
-**Project:** Agentic OS (standalone)
-**Parent Spec:** [2026-06-25-agentic-os-design.md](./2026-06-25-agentic-os-design.md)
+**Project:** Loom (standalone)
+**Parent Spec:** [2026-06-25-loom-design.md](./2026-06-25-loom-design.md)
 
 ## Overview
 
-Three new dashboard features that extend the Agentic OS control plane: manual project management (no longer agent-discovery-only), an interactive visual graph explorer powered by Cytoscape.js, and a full agent management page with wiring diagrams and task dispatch.
+Three new dashboard features that extend the Loom control plane: manual project management (no longer agent-discovery-only), an interactive visual graph explorer powered by Cytoscape.js, and a full agent management page with wiring diagrams and task dispatch.
 
 All three features follow the existing **API-First** architecture: daemon endpoints serve structured data, dashboard renders it. No new transport mechanisms — the existing filesystem inbox protocol is extended for agent dispatch.
 
 ## Feature 1: Project CRUD
 
 ### Current State
-Projects only appear when an agent writes `register.json` to `~/.agentic-os/inbox/<project>/`. The dashboard has no way to create or browse projects directly.
+Projects only appear when an agent writes `register.json` to `~/.loom/inbox/<project>/`. The dashboard has no way to create or browse projects directly.
 
 ### Design
 
@@ -44,7 +44,7 @@ Projects only appear when an agent writes `register.json` to `~/.agentic-os/inbo
 
 ### Key Decisions
 - **No auto-build on create** — graph build only happens when an agent registers or user clicks "Rebuild." Keeps project creation fast and predictable.
-- **Browse is read-only** — daemon only lists directories, never modifies the filesystem outside `~/.agentic-os/`.
+- **Browse is read-only** — daemon only lists directories, never modifies the filesystem outside `~/.loom/`.
 - **Path validation** — daemon verifies the path exists and is a directory before creating the project.
 
 ### Components
@@ -163,7 +163,7 @@ New inbox file type: `task-<uuid>.json`
 ```
 
 **Lifecycle:**
-1. Dashboard POST → daemon writes `task-<uuid>.json` to `~/.agentic-os/inbox/<project>/`
+1. Dashboard POST → daemon writes `task-<uuid>.json` to `~/.loom/inbox/<project>/`
 2. Watcher detects → Router processes → emits `agent:dispatched` WS event
 3. Target agent reads task from inbox (implementation: agent polling or watchdog on agent side)
 4. Agent writes finding-*.md or result back → Router ingests

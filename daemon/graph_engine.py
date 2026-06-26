@@ -1,4 +1,4 @@
-"""Graphify wrapper for the Agentic OS daemon."""
+"""Graphify wrapper for the Loom daemon."""
 
 import asyncio
 import json

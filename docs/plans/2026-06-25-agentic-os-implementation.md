@@ -1,10 +1,10 @@
-# Agentic OS — Implementation Plan
+# Loom — Implementation Plan
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Build the Agentic OS daemon (Python/FastAPI) and dashboard (Next.js) that unifies AI coding agents through a shared Graphify-powered knowledge graph.
+**Goal:** Build the Loom daemon (Python/FastAPI) and dashboard (Next.js) that unifies AI coding agents through a shared Graphify-powered knowledge graph.
 
-**Architecture:** Single Python daemon with 4 internal components (Watcher, Router, Graph Engine, Agent Registry) exposing REST + WebSocket API. Separate Next.js dashboard consuming that API. Agents communicate via filesystem hooks (`~/.agentic-os/inbox/`).
+**Architecture:** Single Python daemon with 4 internal components (Watcher, Router, Graph Engine, Agent Registry) exposing REST + WebSocket API. Separate Next.js dashboard consuming that API. Agents communicate via filesystem hooks (`~/.loom/inbox/`).
 
 **Tech Stack:** Python 3.11+, FastAPI, uvicorn, watchdog, Graphify (graphifyy), SQLite (aiosqlite), Pydantic. Next.js 15, Shadcn UI, Tailwind, TypeScript.
 
@@ -25,9 +25,9 @@
 
 ```toml
 [project]
-name = "agentic-os"
+name = "loom"
 version = "0.1.0"
-description = "Agentic OS — unified agent memory fabric"
+description = "Loom — unified agent memory fabric"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agentic-os = "daemon.main:main"
+loom = "daemon.main:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]
@@ -63,7 +63,7 @@ dist/
 **Step 3: Create empty __init__.py**
 
 ```python
-"""Agentic OS — unified agent memory fabric."""
+"""Loom — unified agent memory fabric."""
 ```
 
 **Step 4: Install dependencies and verify**
@@ -147,7 +147,7 @@ git commit -m "chore: scaffold Next.js dashboard with Shadcn UI"
 **Step 1: Write models.py**
 
 ```python
-"""Pydantic models for the Agentic OS daemon."""
+"""Pydantic models for the Loom daemon."""
 
 from datetime import datetime
 from enum import Enum
@@ -345,7 +345,7 @@ from daemon.models import AgentInfo, ProjectInfo, AgentStatus
 
 
 class AgentRegistry:
-    def __init__(self, db_path: str = "~/.agentic-os/state.db"):
+    def __init__(self, db_path: str = "~/.loom/state.db"):
         self.db_path = db_path
         self.db: Optional[aiosqlite.Connection] = None
 
@@ -476,7 +476,7 @@ Expected: FAIL
 **Step 3: Write graph_engine.py**
 
 ```python
-"""Graphify wrapper for the Agentic OS daemon."""
+"""Graphify wrapper for the Loom daemon."""
 
 import asyncio
 import json
@@ -642,7 +642,7 @@ git commit -m "feat: implement Graph Engine (Graphify wrapper)"
 
 ### Task 6: Implement Watcher (filesystem monitor)
 
-**Objective:** Watchdog-based monitor for `~/.agentic-os/inbox/`. Emits events on new/modified files.
+**Objective:** Watchdog-based monitor for `~/.loom/inbox/`. Emits events on new/modified files.
 
 **Files:**
 - Create: `daemon/watcher.py`
@@ -697,9 +697,9 @@ class InboxHandler(FileSystemEventHandler):
 
 
 class InboxWatcher:
-    """Watches ~/.agentic-os/inbox/ for new files."""
+    """Watches ~/.loom/inbox/ for new files."""
 
-    def __init__(self, inbox_path: str = "~/.agentic-os/inbox"):
+    def __init__(self, inbox_path: str = "~/.loom/inbox"):
         self.inbox_path = Path(inbox_path).expanduser().resolve()
         self.observer: Optional[Observer] = None
         self._handler: Optional[InboxHandler] = None
@@ -978,7 +978,7 @@ git commit -m "feat: implement inbox event router"
 **Step 1: Write api.py**
 
 ```python
-"""FastAPI application for the Agentic OS daemon."""
+"""FastAPI application for the Loom daemon."""
 
 import asyncio
 import json
@@ -1020,14 +1020,14 @@ async def lifespan(app: FastAPI):
     # Background task: broadcast events to WebSocket clients
     asyncio.create_task(_broadcast_events())
 
-    logger.info("Agentic OS daemon started")
+    logger.info("Loom daemon started")
     yield
     watcher.stop()
     await registry.close()
-    logger.info("Agentic OS daemon stopped")
+    logger.info("Loom daemon stopped")
 
 
-app = FastAPI(title="Agentic OS", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Loom", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1158,7 +1158,7 @@ git commit -m "feat: implement FastAPI routes + WebSocket"
 **Step 1: Write main.py**
 
 ```python
-"""Agentic OS daemon entry point."""
+"""Loom daemon entry point."""
 
 import argparse
 import logging
@@ -1166,7 +1166,7 @@ import uvicorn
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agentic OS Daemon")
+    parser = argparse.ArgumentParser(description="Loom Daemon")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8472, help="Bind port")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
@@ -1206,7 +1206,7 @@ The `pyproject.toml` already has `[project.scripts]` pointing to `daemon.main:ma
 
 ```bash
 pip install -e .
-agentic-os --help
+loom --help
 ```
 Expected: same help output
 
@@ -1315,7 +1315,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 border-r border-zinc-800 bg-zinc-950 min-h-screen p-4">
       <div className="mb-8">
-        <h1 className="text-lg font-bold text-zinc-100">Agentic OS</h1>
+        <h1 className="text-lg font-bold text-zinc-100">Loom</h1>
         <p className="text-xs text-zinc-500">Agent Memory Fabric</p>
       </div>
       <nav className="space-y-1">
@@ -1354,7 +1354,7 @@ import { Sidebar } from "@/components/sidebar";
 const geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Agentic OS",
+  title: "Loom",
   description: "Unified agent memory fabric",
 };
 
@@ -1611,7 +1611,7 @@ export default function ProjectsPage() {
           <p>No projects tracked yet.</p>
           <p className="text-sm mt-2">
             Agents will appear here when they register by writing to{" "}
-            <code className="text-zinc-400">~/.agentic-os/inbox/</code>
+            <code className="text-zinc-400">~/.loom/inbox/</code>
           </p>
         </div>
       ) : (
@@ -1999,21 +1999,21 @@ git commit -m "feat: add graph explorer with query interface"
 
 ```bash
 #!/bin/bash
-# scripts/smoke-test.sh — end-to-end test for Agentic OS
+# scripts/smoke-test.sh — end-to-end test for Loom
 
 set -e
 
-AGENTIC_OS_HOME="$HOME/.agentic-os"
+LOOM_HOME="$HOME/.loom"
 INBOX="$AGENTIC_OS_HOME/inbox/test-project"
 API="http://localhost:8472"
 
-echo "=== Agentic OS Smoke Test ==="
+echo "=== Loom Smoke Test ==="
 
 # 1. Start daemon in background
 echo "[1/5] Starting daemon..."
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
-agentic-os --port 8472 &
+loom --port 8472 &
 DAEMON_PID=$!
 sleep 3
 
@@ -2088,7 +2088,7 @@ git commit -m "test: add end-to-end smoke test"
 **Step 1: Write README**
 
 ```markdown
-# Agentic OS
+# Loom
 
 Unified agent memory fabric. Links all AI coding agents on a single machine through a shared Graphify-powered knowledge graph. Agents communicate via filesystem hooks. Next.js dashboard for monitoring and querying.
 
@@ -2097,8 +2097,8 @@ Unified agent memory fabric. Links all AI coding agents on a single machine thro
 ```
 Browser :3000 → Next.js Dashboard
                     ↓ REST + WebSocket
-Agentic OS Daemon (Python/FastAPI) :8472
-  ├── Watcher (watchdog) → ~/.agentic-os/inbox/
+Loom Daemon (Python/FastAPI) :8472
+  ├── Watcher (watchdog) → ~/.loom/inbox/
   ├── Router (dispatcher)
   ├── Graph Engine (Graphify)
   └── Agent Registry (SQLite)
@@ -2111,12 +2111,12 @@ Claude Code · Codex · Hermes
 ```bash
 # Install
 git clone <repo>
-cd agentic-os
+cd loom
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 # Start daemon
-agentic-os
+loom
 
 # In another terminal, start dashboard
 cd dashboard && npm install && npm run dev
@@ -2126,17 +2126,17 @@ Open http://localhost:3000
 
 ## How Agents Connect
 
-Agents write files to `~/.agentic-os/inbox/<project>/`:
+Agents write files to `~/.loom/inbox/<project>/`:
 
 ```bash
 # Register
-echo '{"agent":"claude-code","version":"2.1","project":"noor","project_path":"~/projects/Noor","capabilities":["code-analysis"]}' > ~/.agentic-os/inbox/noor/register.json
+echo '{"agent":"claude-code","version":"2.1","project":"noor","project_path":"~/projects/Noor","capabilities":["code-analysis"]}' > ~/.loom/inbox/noor/register.json
 
 # Heartbeat (every 60s)
-echo '{"agent":"claude-code","project":"noor","status":"analyzing","timestamp":"2026-06-25T14:30:00Z"}' > ~/.agentic-os/inbox/noor/heartbeat.json
+echo '{"agent":"claude-code","project":"noor","status":"analyzing","timestamp":"2026-06-25T14:30:00Z"}' > ~/.loom/inbox/noor/heartbeat.json
 
 # Share findings
-cat > ~/.agentic-os/inbox/noor/finding-auth.md << 'EOF'
+cat > ~/.loom/inbox/noor/finding-auth.md << 'EOF'
 ---
 agent: claude-code
 project: noor

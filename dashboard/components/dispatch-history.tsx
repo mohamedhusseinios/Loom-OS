@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations, useFormatter } from "next-intl";
+
 interface DispatchInfo {
   task_id: string;
   target_agent: string;
@@ -14,6 +16,10 @@ interface DispatchHistoryProps {
 }
 
 export function DispatchHistory({ dispatches }: DispatchHistoryProps) {
+  const t = useTranslations("DispatchHistory");
+  const tStatus = useTranslations("Common.status");
+  const format = useFormatter();
+
   const statusBadge = (status: string) => {
     switch (status) {
       case "completed":
@@ -29,19 +35,17 @@ export function DispatchHistory({ dispatches }: DispatchHistoryProps) {
 
   if (dispatches.length === 0) {
     return (
-      <div className="text-sm text-zinc-600 text-center py-6">
-        No tasks dispatched yet
-      </div>
+      <div className="text-sm text-zinc-600 text-center py-6">{t("empty")}</div>
     );
   }
 
   return (
     <div className="border border-zinc-800 rounded-lg overflow-hidden">
       <div className="grid grid-cols-[1fr_100px_80px_140px] gap-2 px-4 py-2 bg-zinc-900 text-[11px] text-zinc-500 font-semibold uppercase border-b border-zinc-800">
-        <span>Instruction</span>
-        <span>Target</span>
-        <span>Status</span>
-        <span className="text-right">Dispatched</span>
+        <span>{t("colInstruction")}</span>
+        <span>{t("colTarget")}</span>
+        <span>{t("colStatus")}</span>
+        <span className="text-end">{t("colDispatched")}</span>
       </div>
       {dispatches.map((d) => (
         <div
@@ -52,11 +56,14 @@ export function DispatchHistory({ dispatches }: DispatchHistoryProps) {
           <span className="text-zinc-400 text-xs font-mono">{d.target_agent}</span>
           <span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${statusBadge(d.status)}`}>
-              {d.status}
+              {tStatus(d.status as never)}
             </span>
           </span>
-          <span className="text-zinc-600 text-xs text-right">
-            {new Date(d.dispatched_at).toLocaleString()}
+          <span className="text-zinc-600 text-xs text-end">
+            {format.dateTime(new Date(d.dispatched_at), {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
           </span>
         </div>
       ))}

@@ -1,6 +1,6 @@
 """Tests for the Agent Registry."""
 import pytest
-from daemon.registry import AgentRegistry
+from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.models import AgentInfo, AgentStatus
 
 
@@ -83,3 +83,29 @@ async def test_create_and_delete_project(registry):
 async def test_delete_nonexistent_project(registry):
     deleted = await registry.delete_project("nonexistent")
     assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_create_duplicate_project_raises(registry):
+    """Re-creating the same project id surfaces a typed error (→ 409 in API)."""
+    await registry.create_project("dup", "Dup", "/tmp/dup")
+    with pytest.raises(ProjectExistsError):
+        await registry.create_project("dup", "Dup", "/tmp/dup")
+
+
+@pytest.mark.asyncio
+async def test_create_task_is_idempotent(registry):
+    """Replaying the same task_id (watcher reprocessing) must not error.
+
+    Regression: the API writes a task row, then the inbox watcher reprocesses
+    the dropped file and calls create_task again. Before INSERT OR IGNORE this
+    raised IntegrityError on the PRIMARY KEY.
+    """
+    created_first = await registry.create_task("t1", "noor", "claude-code", "do thing", "high")
+    created_second = await registry.create_task("t1", "noor", "claude-code", "do thing", "high")
+
+    assert created_first is True, "first insert should report creation"
+    assert created_second is False, "duplicate task_id must be a no-op, not an error"
+
+    tasks = await registry.list_tasks("noor")
+    assert len(tasks) == 1, "idempotent insert must not duplicate the row"

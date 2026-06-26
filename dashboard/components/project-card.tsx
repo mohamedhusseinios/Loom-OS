@@ -1,6 +1,10 @@
-import Link from "next/link";
+"use client";
+
+import { useTranslations, useFormatter } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { timeAgo } from "@/lib/time-ago";
 
 interface ProjectCardProps {
   project: {
@@ -15,9 +19,11 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project }: ProjectCardProps) {
-  const timeAgo = project.last_graph_update
-    ? getTimeAgo(new Date(project.last_graph_update))
-    : "never";
+  const t = useTranslations("ProjectCard");
+  const tTime = useTranslations("Common.timeAgo");
+  const format = useFormatter();
+
+  const updated = timeAgo(project.last_graph_update, tTime);
 
   return (
     <Link href={`/projects/${project.project_id}`}>
@@ -29,42 +35,38 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <CardContent>
           <div className="flex gap-4 text-sm">
             <div>
-              <span className="text-emerald-400 font-mono">{project.node_count}</span>
-              <span className="text-zinc-600 ml-1">nodes</span>
+              <span className="text-emerald-400 font-mono">
+                {format.number(project.node_count)}
+              </span>
+              <span className="text-zinc-600 ms-1">{t("nodes")}</span>
             </div>
             <div>
-              <span className="text-blue-400 font-mono">{project.edge_count}</span>
-              <span className="text-zinc-600 ml-1">edges</span>
+              <span className="text-blue-400 font-mono">
+                {format.number(project.edge_count)}
+              </span>
+              <span className="text-zinc-600 ms-1">{t("edges")}</span>
             </div>
             <div>
-              <span className="text-purple-400 font-mono">{project.community_count}</span>
-              <span className="text-zinc-600 ml-1">communities</span>
+              <span className="text-purple-400 font-mono">
+                {format.number(project.community_count)}
+              </span>
+              <span className="text-zinc-600 ms-1">{t("communities")}</span>
             </div>
           </div>
           <div className="flex gap-2 mt-3">
             {project.active_agents > 0 ? (
               <Badge variant="default" className="bg-emerald-900 text-emerald-300 text-xs">
-                {project.active_agents} agent{project.active_agents !== 1 ? "s" : ""} active
+                {t("agentsActive", { count: project.active_agents })}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-zinc-600 text-xs">
-                no agents
+                {t("noAgents")}
               </Badge>
             )}
-            <span className="text-xs text-zinc-600 self-center">Updated {timeAgo}</span>
+            <span className="text-xs text-zinc-600 self-center">{t("updated", { timeAgo: updated })}</span>
           </div>
         </CardContent>
       </Card>
     </Link>
   );
-}
-
-function getTimeAgo(date: Date): string {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
