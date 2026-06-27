@@ -523,3 +523,19 @@ def test_update_persists_workspace_path(client):
     )
     assert res.status_code == 200
     assert res.json()["workspace_path"] == "/tmp/ws/task-1"
+
+
+def test_task_diff_empty_without_workspace(client):
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "T", "instruction": "do"},
+    )
+    task_id = res.json()["id"]
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/diff")
+    assert res.status_code == 200
+    assert res.json() == {"diff": "", "branch": f"loom/task-{task_id}"}
+
+
+def test_task_diff_404_for_unknown_task(client):
+    res = client.get("/api/projects/noor/tasks/nope/diff")
+    assert res.status_code == 404

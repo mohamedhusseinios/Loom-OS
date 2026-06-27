@@ -2,10 +2,12 @@
 
 import os
 import uuid
+import json as _json
 from typing import Optional
 
 import asyncio
 import logging
+from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -661,6 +663,49 @@ async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayl
     if router:
         await router._emit_event("task:progress", project_id, {"id": task_id, "message": payload.message})
     return {"ok": True}
+
+
+def _task_base_branch(record) -> str:
+    try:
+        return _json.loads(record.result or "{}").get("base_branch", "main")
+    except (ValueError, TypeError):
+        return "main"
+
+
+@app.get("/api/projects/{project_id}/tasks/{task_id}/diff")
+async def task_diff(project_id: str, task_id: str):
+    """Return the git diff for a task's worktree branch vs its base branch."""
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    branch = f"loom/task-{task_id}"
+    if not record.workspace_path:
+        return {"diff": "", "branch": branch}
+    project = await registry.get_project(project_id)
+    repo = os.path.expanduser(project.project_path) if project else record.workspace_path
+    try:
+        diff = await asyncio.to_thread(
+            _worktree.branch_diff, repo, _task_base_branch(record), branch
+        )
+    except RuntimeError as exc:
+        diff = f"(diff unavailable: {exc})"
+    return {"diff": diff, "branch": branch}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/merge")
+async def task_merge(project_id: str, task_id: str):
+    """Merge a task's worktree branch into the project's current branch."""
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    branch = f"loom/task-{task_id}"
+    ok, output = await asyncio.to_thread(
+        _worktree.merge_branch, os.path.expanduser(project.project_path), branch
+    )
+    return {"merged": ok, "output": output}
 
 
 @app.get("/api/projects/{project_id}/search")
