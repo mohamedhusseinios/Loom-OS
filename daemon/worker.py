@@ -234,13 +234,14 @@ class Worker:
             return  # one task per tick (V1)
 
     def run_once(self, task_id: str) -> None:
-        """Process a single Running task by id, then return (no poll loop)."""
+        """Process a single eligible Running task by id, then return (no poll loop)."""
         self.ensure_registered()
         task = next(
-            (t for t in self._get_running_tasks() if t.get("id") == task_id), None
+            (t for t in self.eligible(self._get_running_tasks()) if t.get("id") == task_id),
+            None,
         )
         if task is None:
-            logger.info("task %s not in Running; nothing to do", task_id)
+            logger.info("task %s not eligible for %s; nothing to do", task_id, self.agent_id)
             return
         self.process_task(task)
 

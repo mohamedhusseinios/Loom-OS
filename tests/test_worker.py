@@ -58,6 +58,7 @@ def test_process_task_claude_error_marks_blocked(monkeypatch):
 
     assert w.patches[-1][1]["status"] == "blocked"
     assert w.findings == []  # no finding on failure
+    assert any(k == "error" for (_tid, k, _m) in w.progress)
 
 
 def test_process_task_worktree_failure_marks_blocked(monkeypatch):
@@ -70,6 +71,8 @@ def test_process_task_worktree_failure_marks_blocked(monkeypatch):
     w.process_task({"id": "t3", "title": "T", "instruction": "x", "result": None})
     assert w.patches[-1][1]["status"] == "blocked"
     assert "not a git repo" in w.patches[-1][1]["result"]
+    assert any(k == "error" for (_tid, k, _m) in w.progress)
+    assert any("Worktree failed" in m for (_tid, _k, m) in w.progress)
 
 
 def test_agent_id_matches_daemon_convention():
