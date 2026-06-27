@@ -34,6 +34,9 @@ export default function GraphExplorerPage() {
   const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(new Set());
   const [showEdges, setShowEdges] = useState(true);
   const [layout, setLayout] = useState<GraphLayout>("forceDirected2d");
+  // Drill-down state for large graphs: null = community overview, an id =
+  // that community's members. Ignored for small graphs (rendered in full).
+  const [expandedCommunity, setExpandedCommunity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [nlQuery, setNlQuery] = useState("");
   const [nlLoading, setNlLoading] = useState(false);
@@ -50,6 +53,7 @@ export default function GraphExplorerPage() {
       ]);
       setNodes(topo.nodes || []);
       setEdges(topo.edges || []);
+      setExpandedCommunity(null); // a fresh graph resets any drill-down
       setCommunities(comms.communities || []);
       setFlows(flws.flows || []);
       setVisibleCommunities(new Set((comms.communities || []).map((c) => String(c.id))));
@@ -261,11 +265,14 @@ export default function GraphExplorerPage() {
               <GraphCanvas
                 nodes={nodes}
                 edges={edges}
+                communities={communities}
                 onNodeSelect={setSelectedNode}
                 highlightedNodes={highlightedNodes}
                 visibleCommunities={visibleCommunities}
                 showEdges={showEdges}
                 layout={layout}
+                expandedCommunity={expandedCommunity}
+                onExpandCommunity={setExpandedCommunity}
               />
               <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
             </div>
