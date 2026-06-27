@@ -24,6 +24,9 @@ pytest tests/test_api.py::test_health   # one test
 bash scripts/smoke-test.sh       # end-to-end: starts daemon, registers an agent, hits the API, cleans up (needs .venv)
 ```
 
+loom worker --project <name> --agent <agent> --project-path /abs/path  # start worker (separate terminal; project must be a git repo)
+#   --max-budget-usd N   cap spend per task (default $5)
+
 No Python linter is wired into the project (no `ruff`/`flake8` config or dev dependency). Only the dashboard has a configured linter (`npm run lint`).
 
 ### Dashboard (Next.js, port 3000)
@@ -98,6 +101,8 @@ models.py    All Pydantic schemas (inbox payloads, registry models, WS events).
 - **One shared WebSocket for the whole app.** `WebSocketProvider` (`lib/use-websocket.tsx`) opens a single `ws://localhost:8472/ws` connection and fans events out to subscribers keyed by event type (e.g. `agent:dispatched`) or `project:<id>`. Never open sockets per-component — call `useWebSocket()` and `subscribe(...)`. It throws if used outside the provider.
 
 - **UI stack:** shadcn (v4, components in `components/ui/`), Tailwind v4, `@base-ui/react`, `lucide-react`, dark theme. Graph visualization uses `cytoscape` + `cytoscape-cose-bilkent` (`components/graph-canvas.tsx`, `graph-controls.tsx`, `node-detail.tsx`). Agent management: `agent-card`, `agent-wiring`, `dispatch-modal`, `dispatch-history`.
+
+- **Tasks board** — each project has a Tasks tab with a Kanban board (Todo · Ready · Running · Blocked · Done). Dragging a card to **Running** triggers the `loom worker` process for the assigned agent. The worker executes in an isolated `git worktree` (branch `loom/task-<id>`), budget-capped via `--max-budget-usd`, and moves the card to Done with a reviewable diff. Task state lives in the `tasks` table of `state.db`; the 7-state lifecycle (triage → todo → ready → running → blocked → done → archived) is enforced by the daemon.
 
 ## Docs & roadmap
 
