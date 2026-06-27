@@ -19,6 +19,27 @@ from daemon.models import AgentInfo
 from daemon.registry import AgentRegistry
 
 
+class _FakeSupervisor:
+    def __init__(self):
+        self.spawned = []
+        self._running = set()
+
+    def spawn(self, project, agent, project_path, task_id, max_budget_usd=5.0):
+        self.spawned.append((project, agent, project_path, task_id))
+        self._running.add(task_id)
+
+    def is_running(self, task_id):
+        return task_id in self._running
+
+    def running_ids(self):
+        return list(self._running)
+
+    def stop(self, task_id):
+        was = task_id in self._running
+        self._running.discard(task_id)
+        return was
+
+
 @pytest.fixture
 async def client(tmp_path):
     """Yield a TestClient wired to a temp registry + graph engine."""
@@ -42,6 +63,7 @@ async def client(tmp_path):
     api_module.graph_engine = GraphEngine()
     api_module.router = None
     api_module.watcher = None
+    api_module.supervisor = None
 
     # lifespan="off" skips startup/shutdown (no watcher/broadcast task).
     with TestClient(api_module.app) as c:
@@ -623,3 +645,76 @@ def test_task_merge_no_worktree(client):
     res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
     assert res.status_code == 200
     assert res.json() == {"merged": False, "output": "No worktree assigned to this task"}
+
+
+def test_patch_to_running_spawns_worker_once(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert len(sup.spawned) == 1
+        proj, agent, path, tid = sup.spawned[0]
+        assert (proj, agent, tid) == ("noor", "claude-code", task_id)
+        assert path.endswith("/noor")
+        # idempotent: a second PATCH while running does not re-spawn
+        client.patch(f"/api/projects/noor/tasks/{task_id}", json={"status": "running"})
+        assert len(sup.spawned) == 1
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_patch_to_running_without_assignee_does_not_spawn(client):
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}", json={"status": "running"})
+        assert sup.spawned == []
+    finally:
+        api_module.supervisor = None
+
+
+def test_worker_stop_blocks_task(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        res = client.post(f"/api/projects/noor/tasks/{task_id}/worker/stop")
+        assert res.status_code == 200
+        assert res.json()["stopped"] is True
+        listing = client.get("/api/projects/noor/tasks").json()
+        t = next(x for x in listing if x["id"] == task_id)
+        assert t["status"] == "blocked"
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_list_workers_returns_running_ids(client):
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    sup._running.add("abc")
+    api_module.supervisor = sup
+    try:
+        res = client.get("/api/projects/noor/workers")
+        assert res.json() == {"running": ["abc"]}
+    finally:
+        api_module.supervisor = None

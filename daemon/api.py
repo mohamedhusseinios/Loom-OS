@@ -17,6 +17,7 @@ from daemon.router import Router
 from daemon.watcher import InboxWatcher
 from daemon.traces import TraceCapture
 from daemon.snapshots import SnapshotManager
+from daemon.supervisor import WorkerSupervisor
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
@@ -39,6 +40,9 @@ doc_ingestor: Optional = None      # DocumentIngestor
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
+WORKER_MAX_BUDGET_USD = 5.0
+supervisor: Optional[WorkerSupervisor] = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,7 +52,7 @@ async def lifespan(app: FastAPI):
     injected, the lifespan reuses it and skips the filesystem watcher /
     broadcast task (which depend on real ``~/.loom`` state).
     """
-    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager
+    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager, supervisor
 
     # Tests may inject a temp-backed registry/graph_engine beforehand.
     test_mode = registry is not None
@@ -65,6 +69,8 @@ async def lifespan(app: FastAPI):
         trace_capture = TraceCapture()
     if snapshot_manager is None:
         snapshot_manager = SnapshotManager()
+    if not test_mode and supervisor is None:
+        supervisor = WorkerSupervisor()
 
     if not test_mode:
         watcher = InboxWatcher()
@@ -610,6 +616,22 @@ async def health():
 # Agent task board (Kanban — Feature 2)
 # ------------------------------------------------------------------
 
+
+async def _start_worker_for(project_id: str, task: AgentTaskRecord) -> bool:
+    """Spawn a one-shot worker for a Running task. Returns True if spawned."""
+    if supervisor is None or not task.assignee:
+        return False
+    project = await registry.get_project(project_id)
+    if project is None:
+        return False
+    agent = task.assignee.removesuffix(f"-{project_id}")
+    supervisor.spawn(project_id, agent, project.project_path, task.id,
+                     WORKER_MAX_BUDGET_USD)
+    if router:
+        await router._emit_event("worker:started", project_id, {"id": task.id})
+    return True
+
+
 @app.post("/api/projects/{project_id}/tasks", status_code=201)
 async def create_agent_task(project_id: str, payload: AgentTaskCreatePayload):
     """Create a new agent coordination task."""
@@ -649,6 +671,9 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         raise HTTPException(status_code=500, detail="Task update failed")
     if router:
         await router._emit_event("task:updated", project_id, updated.model_dump())
+    if (supervisor is not None and payload.status == AgentTaskStatus.RUNNING
+            and updated.assignee and not supervisor.is_running(task_id)):
+        await _start_worker_for(project_id, updated)
     if payload.status == AgentTaskStatus.DONE:
         for pid in await registry.promote_ready_dependents(task_id):
             promoted = await registry.get_agent_task(pid)
@@ -673,6 +698,55 @@ async def get_task_progress(project_id: str, task_id: str):
     """Return the persisted progress transcript for a task, ordered by seq."""
     items = await registry.list_progress(task_id)
     return {"items": [i.model_dump() for i in items]}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/worker/start")
+async def worker_start(project_id: str, task_id: str):
+    """Manually (re)launch a one-shot worker for a task with an assignee."""
+    if supervisor is None:
+        raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    if not record.assignee:
+        raise HTTPException(status_code=400, detail="Task has no assignee")
+    if supervisor.is_running(task_id):
+        return {"started": False, "running": True}
+    if not await _start_worker_for(project_id, record):
+        raise HTTPException(status_code=400, detail="Could not start worker")
+    return {"started": True, "running": True}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/worker/stop")
+async def worker_stop(project_id: str, task_id: str):
+    """Stop a live worker and mark its task blocked (cancelled by user)."""
+    if supervisor is None:
+        raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
+    was_running = supervisor.stop(task_id)
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    try:
+        meta = _json.loads(record.result or "{}")
+    except (ValueError, TypeError):
+        meta = {}
+    meta["cancelled"] = True
+    await registry.update_agent_task(task_id, status=AgentTaskStatus.BLOCKED,
+                                     result=_json.dumps(meta))
+    updated = await registry.get_agent_task(task_id)
+    if router:
+        await router._emit_event("worker:exited", project_id, {"id": task_id})
+        if updated:
+            await router._emit_event("task:updated", project_id, updated.model_dump())
+    return {"stopped": was_running}
+
+
+@app.get("/api/projects/{project_id}/workers")
+async def list_workers(project_id: str):
+    """Task ids that currently have a live worker process."""
+    if supervisor is None:
+        return {"running": []}
+    return {"running": supervisor.running_ids()}
 
 
 def _task_base_branch(record: AgentTaskRecord) -> str:
