@@ -236,3 +236,74 @@ export async function scanProjectKnowledge(projectId: string): Promise<{
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// --- Agent Task Board (Kanban) ---
+export type AgentTaskStatus =
+  | "triage" | "todo" | "ready" | "running" | "blocked" | "done" | "archived";
+
+export interface AgentTask {
+  id: string;
+  project: string;
+  title: string;
+  instruction: string;
+  status: AgentTaskStatus;
+  assignee: string | null;
+  priority: number;
+  dependencies: string[];
+  acceptance_criteria: string;
+  result: string | null;
+  created_at: string;
+  updated_at: string;
+  workspace_path: string | null;
+}
+
+export interface CreateAgentTaskPayload {
+  title: string;
+  instruction: string;
+  assignee?: string | null;
+  priority?: number;
+  dependencies?: string[];
+  acceptance_criteria?: string;
+}
+
+export interface UpdateAgentTaskPayload {
+  status?: AgentTaskStatus;
+  assignee?: string | null;
+  result?: string;
+  workspace_path?: string;
+}
+
+export async function listAgentTasks(projectId: string, status?: AgentTaskStatus): Promise<AgentTask[]> {
+  const q = status ? `?status=${status}` : "";
+  return fetchApi(`/api/projects/${projectId}/tasks${q}`);
+}
+
+export async function createAgentTask(projectId: string, payload: CreateAgentTaskPayload): Promise<AgentTask> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project: projectId, ...payload }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateAgentTask(projectId: string, taskId: string, payload: UpdateAgentTaskPayload): Promise<AgentTask> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function getTaskDiff(projectId: string, taskId: string): Promise<{ diff: string; branch: string }> {
+  return fetchApi(`/api/projects/${projectId}/tasks/${taskId}/diff`);
+}
+
+export async function mergeTask(projectId: string, taskId: string): Promise<{ merged: boolean; output: string }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/merge`, { method: "POST" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
