@@ -33,7 +33,8 @@ export function TaskBoard({ tasks, onMove, onSelect }: TaskBoardProps) {
             key={col.status}
             onDragOver={(e) => { e.preventDefault(); setOverCol(col.status); }}
             onDragLeave={() => setOverCol((c) => (c === col.status ? null : c))}
-            onDrop={() => {
+            onDrop={(e) => {
+              e.preventDefault();
               if (dragId) onMove(dragId, col.status);
               setDragId(null); setOverCol(null);
             }}
