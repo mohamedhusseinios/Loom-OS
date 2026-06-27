@@ -307,3 +307,46 @@ export async function mergeTask(projectId: string, taskId: string): Promise<{ me
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+export interface TaskProgressItem {
+  task_id: string;
+  seq: number;
+  kind: string; // milestone | tool | text | error | summary
+  message: string;
+  ts: string;
+}
+
+export async function getTaskProgress(
+  projectId: string,
+  taskId: string,
+): Promise<{ items: TaskProgressItem[] }> {
+  return fetchApi(`/api/projects/${projectId}/tasks/${taskId}/progress`);
+}
+
+export async function listWorkers(projectId: string): Promise<{ running: string[] }> {
+  return fetchApi(`/api/projects/${projectId}/workers`);
+}
+
+export async function startWorker(
+  projectId: string,
+  taskId: string,
+): Promise<{ started: boolean; running: boolean }> {
+  const res = await fetch(
+    `${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/worker/start`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function stopWorker(
+  projectId: string,
+  taskId: string,
+): Promise<{ stopped: boolean }> {
+  const res = await fetch(
+    `${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/worker/stop`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

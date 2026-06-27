@@ -43,7 +43,7 @@ export default function AgentManagementPage() {
 
   useEffect(() => {
     return subscribe(`project:${id}`, (event) => {
-      if (["agent:online", "agent:offline", "agent:dispatched", "task:completed"].includes(event.event)) {
+      if (["agent:online", "agent:offline", "agent:dispatched", "task:completed", "task:created", "task:updated"].includes(event.event)) {
         loadData();
       }
     });

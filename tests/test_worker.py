@@ -18,8 +18,8 @@ class _CaptureWorker(Worker):
         self.progress = []
     def _patch_task(self, task_id, body):
         self.patches.append((task_id, body)); return {}
-    def _post_progress(self, task_id, message):
-        self.progress.append((task_id, message))
+    def _post_progress(self, task_id, message, kind="text"):
+        self.progress.append((task_id, kind, message))
     def _write_finding(self, task_id, title, text):
         self.findings.append((task_id, title, text))
 
@@ -58,6 +58,7 @@ def test_process_task_claude_error_marks_blocked(monkeypatch):
 
     assert w.patches[-1][1]["status"] == "blocked"
     assert w.findings == []  # no finding on failure
+    assert any(k == "error" for (_tid, k, _m) in w.progress)
 
 
 def test_process_task_worktree_failure_marks_blocked(monkeypatch):
@@ -70,6 +71,8 @@ def test_process_task_worktree_failure_marks_blocked(monkeypatch):
     w.process_task({"id": "t3", "title": "T", "instruction": "x", "result": None})
     assert w.patches[-1][1]["status"] == "blocked"
     assert "not a git repo" in w.patches[-1][1]["result"]
+    assert any(k == "error" for (_tid, k, _m) in w.progress)
+    assert any("Worktree failed" in m for (_tid, _k, m) in w.progress)
 
 
 def test_agent_id_matches_daemon_convention():
@@ -146,3 +149,39 @@ def test_ensure_registered_registers_when_absent():
     w.ensure_registered()
     assert len(w.posts) == 1
     assert "register-agent" in w.posts[0][0]
+
+
+# ---------------------------------------------------------------------------
+# one-shot mode + milestone tests
+# ---------------------------------------------------------------------------
+
+def test_run_once_processes_matching_task(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
+    monkeypatch.setattr(w, "ensure_registered", lambda: None)
+    monkeypatch.setattr(w, "_get_running_tasks", lambda: [
+        {"id": "a", "assignee": "claude-code-noor", "title": "A", "instruction": "x", "result": None},
+    ])
+    processed = []
+    monkeypatch.setattr(w, "process_task", lambda task: processed.append(task["id"]))
+    w.run_once("a")
+    assert processed == ["a"]
+
+
+def test_run_once_no_match_is_noop(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
+    monkeypatch.setattr(w, "ensure_registered", lambda: None)
+    monkeypatch.setattr(w, "_get_running_tasks", lambda: [])
+    def _boom(task):
+        raise AssertionError("should not process anything")
+    monkeypatch.setattr(w, "process_task", _boom)
+    w.run_once("missing")  # returns cleanly
+
+
+def test_process_task_posts_milestones_and_summary(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
+    _patch_git_and_claude(monkeypatch, ClaudeResult("done text", "sess-1", False))
+    w.process_task({"id": "t1", "title": "T", "instruction": "x",
+                    "acceptance_criteria": "", "result": None})
+    kinds = [k for (_tid, k, _m) in w.progress]
+    assert "milestone" in kinds
+    assert "summary" in kinds

@@ -156,9 +156,16 @@
       "online": "متصل",
       "offline": "غير متصل",
       "working": "يعمل",
-      "pending": "معلَّقة",
-      "completed": "مكتملة",
-      "failed": "فاشلة"
+      "pending": "قيد الانتظار",
+      "completed": "مكتمل",
+      "failed": "فشل",
+      "triage": "فرز",
+      "todo": "قائمة المهام",
+      "ready": "جاهز",
+      "running": "قيد التشغيل",
+      "blocked": "محظور",
+      "done": "تم",
+      "archived": "مؤرشف"
     },
     "priority": {
       "low": "منخفضة",
@@ -220,14 +227,22 @@
   },
   "TaskDetail": {
     "status": "الحالة",
-    "assignee": "المُسنَدة إليه",
-    "unassigned": "غير مُسنَدة",
+    "assignee": "المسؤول",
+    "unassigned": "غير معيّن",
     "instruction": "التعليمات",
     "acceptanceCriteria": "معايير القبول",
     "result": "النتيجة",
     "diff": "التغييرات",
     "merge": "دمج",
     "mergeOk": "تم الدمج في فرع المشروع.",
-    "mergeConflict": "فشل الدمج — قم بحل التعارضات يدويًا."
+    "mergeConflict": "فشل الدمج — قم بحل التعارضات يدويًا.",
+    "activity": "النشاط",
+    "noActivity": "لا يوجد نشاط بعد.",
+    "workerRunning": "العامل قيد التشغيل",
+    "workerIdle": "لا يوجد عامل",
+    "run": "تشغيل",
+    "stop": "إيقاف",
+    "noWorkerTitle": "في قائمة الانتظار، لكن لا شيء يُنفّذها",
+    "noWorkerBody": "هذه المهمة في حالة التشغيل، لكن لا يوجد عامل متصل. اضغط تشغيل لبدء واحد."
   }
 }

@@ -207,3 +207,12 @@ class AgentTaskUpdatePayload(BaseModel):
 
 class TaskProgressPayload(BaseModel):
     message: str
+    kind: str = "text"  # milestone | tool | text | error | summary
+
+
+class TaskProgressRecord(BaseModel):
+    task_id: str
+    seq: int
+    kind: str
+    message: str
+    ts: str

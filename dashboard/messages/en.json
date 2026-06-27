@@ -158,7 +158,14 @@
       "working": "working",
       "pending": "pending",
       "completed": "completed",
-      "failed": "failed"
+      "failed": "failed",
+      "triage": "triage",
+      "todo": "to do",
+      "ready": "ready",
+      "running": "running",
+      "blocked": "blocked",
+      "done": "done",
+      "archived": "archived"
     },
     "priority": {
       "low": "low",
@@ -228,6 +235,14 @@
     "diff": "Changes",
     "merge": "Merge",
     "mergeOk": "Merged into the project branch.",
-    "mergeConflict": "Merge failed — resolve conflicts manually."
+    "mergeConflict": "Merge failed — resolve conflicts manually.",
+    "activity": "Activity",
+    "noActivity": "No activity yet.",
+    "workerRunning": "Worker running",
+    "workerIdle": "No worker",
+    "run": "Run",
+    "stop": "Stop",
+    "noWorkerTitle": "Queued, but nothing is running it",
+    "noWorkerBody": "This task is in Running, but no worker is attached. Click Run to start one."
   }
 }

@@ -7,7 +7,7 @@ from typing import Optional
 from daemon.models import AgentInfo, ProjectInfo, AgentStatus
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskRecord, AgentTaskStatus,
-    AgentTaskUpdatePayload,
+    AgentTaskUpdatePayload, TaskProgressRecord,
 )
 
 
@@ -86,6 +86,20 @@ class AgentRegistry:
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_tasks_project_status"
             " ON agent_tasks(project, status)"
+        )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS task_progress (
+                task_id TEXT NOT NULL,
+                seq     INTEGER NOT NULL,
+                kind    TEXT NOT NULL,
+                message TEXT NOT NULL,
+                ts      TEXT NOT NULL,
+                PRIMARY KEY (task_id, seq)
+            )
+        """)
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_progress_task"
+            " ON task_progress(task_id)"
         )
         await self.db.commit()
 
@@ -251,17 +265,24 @@ class AgentRegistry:
     # Agent task CRUD (Kanban board — Feature 2)
     # ----------------------------------------------------------------
 
-    async def create_agent_task(self, payload: AgentTaskCreatePayload) -> str:
+    async def create_agent_task(
+        self,
+        payload: AgentTaskCreatePayload,
+        task_id: str | None = None,
+        status: AgentTaskStatus | None = None,
+    ) -> str:
         import uuid
         now = datetime.now(timezone.utc).isoformat()
-        task_id = str(uuid.uuid4())[:12]
+        if task_id is None:
+            task_id = str(uuid.uuid4())[:12]
 
-        status = AgentTaskStatus.READY if (
-            payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
-        ) else AgentTaskStatus.TODO
+        if status is None:
+            status = AgentTaskStatus.READY if (
+                payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
+            ) else AgentTaskStatus.TODO
 
         await self.db.execute(
-            """INSERT INTO agent_tasks
+            """INSERT OR IGNORE INTO agent_tasks
                (id, project, title, instruction, status, assignee,
                 priority, dependencies, acceptance_criteria, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -312,6 +333,37 @@ class AgentRegistry:
             f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = ?", params,
         )
         await self.db.commit()
+
+    async def append_progress(self, task_id: str, kind: str, message: str) -> int:
+        cursor = await self.db.execute(
+            "SELECT COALESCE(MAX(seq), 0) AS m FROM task_progress WHERE task_id = ?",
+            (task_id,),
+        )
+        row = await cursor.fetchone()
+        seq = row["m"] + 1
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO task_progress (task_id, seq, kind, message, ts)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (task_id, seq, kind, message, now),
+        )
+        await self.db.commit()
+        return seq
+
+    async def list_progress(self, task_id: str) -> list[TaskProgressRecord]:
+        cursor = await self.db.execute(
+            "SELECT task_id, seq, kind, message, ts FROM task_progress"
+            " WHERE task_id = ? ORDER BY seq",
+            (task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            TaskProgressRecord(
+                task_id=r["task_id"], seq=r["seq"], kind=r["kind"],
+                message=r["message"], ts=r["ts"],
+            )
+            for r in rows
+        ]
 
     async def hybrid_search(self, project: str, query: str) -> list[dict]:
         """Hybrid search combining text matching with vector cosine similarity.

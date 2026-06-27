@@ -17,6 +17,7 @@ from daemon.router import Router
 from daemon.watcher import InboxWatcher
 from daemon.traces import TraceCapture
 from daemon.snapshots import SnapshotManager
+from daemon.supervisor import WorkerSupervisor
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
@@ -39,6 +40,12 @@ doc_ingestor: Optional = None      # DocumentIngestor
 eval_engine: Optional = None  # EvalEngine (lazy import)
 connected_clients: list[WebSocket] = []
 
+WORKER_MAX_BUDGET_USD = 5.0
+supervisor: Optional[WorkerSupervisor] = None
+
+LOOM_WORKER_AGENTS = {"claude-code"}        # agent names the loom worker runs via claude -p
+LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,7 +55,7 @@ async def lifespan(app: FastAPI):
     injected, the lifespan reuses it and skips the filesystem watcher /
     broadcast task (which depend on real ``~/.loom`` state).
     """
-    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager
+    global registry, graph_engine, router, watcher, trace_capture, snapshot_manager, supervisor
 
     # Tests may inject a temp-backed registry/graph_engine beforehand.
     test_mode = registry is not None
@@ -65,6 +72,8 @@ async def lifespan(app: FastAPI):
         trace_capture = TraceCapture()
     if snapshot_manager is None:
         snapshot_manager = SnapshotManager()
+    if not test_mode and supervisor is None:
+        supervisor = WorkerSupervisor()
 
     if not test_mode:
         watcher = InboxWatcher()
@@ -164,53 +173,51 @@ async def query_graph(project_id: str, q: str = ""):
     result = await graph_engine.query(project.project_path, q)
     return result.model_dump()
 
+_DISPATCH_PRIORITY = {"low": 0, "medium": 1, "high": 2}
+
+
 @app.post("/api/projects/{project_id}/dispatch")
 async def dispatch_task(project_id: str, payload: DispatchRequest):
-    """Dispatch a task to an agent.
+    """Dispatch a task to an agent — creates a Ready Kanban task (unified system).
 
-    Persistence is owned here: we write the inbox file (so an offline agent /
-    the watcher can pick it up) AND insert the registry row atomically. The
-    watcher's ``_handle_task`` is idempotent, so reprocessing the dropped file
-    is a no-op rather than a duplicate insert / duplicate broadcast.
+    Execution is deferred until the task enters Running, where it routes by
+    assignee (loom worker for first-party agents, inbox drop for external ones).
     """
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    task_id = str(uuid.uuid4())
-    task_payload = TaskPayload(
-        task_id=task_id,
-        target_agent=payload.target_agent,
+    task_id = str(uuid.uuid4())[:12]
+    first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]
+    create = AgentTaskCreatePayload(
+        project=project_id,
+        title=first_line[:80] or "Dispatched task",
         instruction=payload.instruction,
-        priority=payload.priority,
+        assignee=f"{payload.target_agent}-{project_id}",
+        priority=_DISPATCH_PRIORITY.get(payload.priority, 1),
     )
+    await registry.create_agent_task(create, task_id=task_id, status=AgentTaskStatus.READY)
+    record = await registry.get_agent_task(task_id)
+    if record and router:
+        await router._emit_event("task:created", project_id, record.model_dump())
+    return {"task_id": task_id, "status": "ready"}
 
-    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
-    os.makedirs(inbox_dir, exist_ok=True)
-    task_path = os.path.join(inbox_dir, f"task-{task_id}.json")
-    with open(task_path, "w") as f:
-        f.write(task_payload.model_dump_json())
-
-    created = await registry.create_task(
-        task_id, project_id, payload.target_agent, payload.instruction, payload.priority
-    )
-
-    # Only emit on the first creation — the watcher path (and any retry)
-    # returns False from create_task and stays silent.
-    if created and router:
-        await router._emit_event("agent:dispatched", project_id, {
-            "task_id": task_id,
-            "target_agent": payload.target_agent,
-            "instruction": payload.instruction,
-        })
-
-    return {"task_id": task_id, "status": "dispatched"}
 
 @app.get("/api/projects/{project_id}/dispatches")
 async def list_dispatches(project_id: str):
-    """List task dispatches for a project."""
-    tasks = await registry.list_tasks(project_id)
-    return {"dispatches": tasks}
+    """List dispatched/Kanban tasks for a project (unified), dispatch-shaped."""
+    tasks = await registry.list_agent_tasks(project_id)
+    return {"dispatches": [
+        {
+            "task_id": t.id,
+            "target_agent": t.assignee or "",
+            "instruction": t.instruction,
+            "status": t.status.value,
+            "dispatched_at": t.created_at,
+            "priority": t.priority,
+        }
+        for t in tasks
+    ]}
 
 
 @app.post("/api/projects/{project_id}/register-agent")
@@ -610,6 +617,51 @@ async def health():
 # Agent task board (Kanban — Feature 2)
 # ------------------------------------------------------------------
 
+
+def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
+                     instruction: str, priority: str = "medium") -> None:
+    """Write a task-<id>.json into the project inbox for filesystem-protocol pickup."""
+    payload = TaskPayload(
+        task_id=task_id, target_agent=target_agent,
+        instruction=instruction, priority=priority,
+    )
+    inbox_dir = os.path.join(LOOM_INBOX_BASE, project_id)
+    os.makedirs(inbox_dir, exist_ok=True)
+    with open(os.path.join(inbox_dir, f"task-{task_id}.json"), "w") as f:
+        f.write(payload.model_dump_json())
+
+
+async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+    """Route a Running task by assignee. Returns True if execution was started."""
+    if not task.assignee:
+        return False
+    agent = task.assignee.removesuffix(f"-{project_id}")
+    if agent in LOOM_WORKER_AGENTS:
+        if supervisor is None or supervisor.is_running(task.id):
+            return False
+        project = await registry.get_project(project_id)
+        if project is None:
+            return False
+        supervisor.spawn(project_id, agent, project.project_path, task.id,
+                         WORKER_MAX_BUDGET_USD)
+        if router:
+            await router._emit_event("worker:started", project_id, {"id": task.id})
+        return True
+    # External agent → filesystem protocol.
+    _drop_inbox_task(project_id, task.id, agent, task.instruction)
+    seq = await registry.append_progress(
+        task.id, "milestone", f"Dispatched to {agent} via inbox")
+    if router:
+        await router._emit_event("task:progress", project_id, {
+            "id": task.id, "seq": seq, "kind": "milestone",
+            "message": f"Dispatched to {agent} via inbox",
+        })
+        await router._emit_event("agent:dispatched", project_id, {
+            "task_id": task.id, "target_agent": agent, "instruction": task.instruction,
+        })
+    return True
+
+
 @app.post("/api/projects/{project_id}/tasks", status_code=201)
 async def create_agent_task(project_id: str, payload: AgentTaskCreatePayload):
     """Create a new agent coordination task."""
@@ -649,6 +701,9 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         raise HTTPException(status_code=500, detail="Task update failed")
     if router:
         await router._emit_event("task:updated", project_id, updated.model_dump())
+    if (record.status != AgentTaskStatus.RUNNING
+            and payload.status == AgentTaskStatus.RUNNING and updated.assignee):
+        await _route_task_execution(project_id, updated)
     if payload.status == AgentTaskStatus.DONE:
         for pid in await registry.promote_ready_dependents(task_id):
             promoted = await registry.get_agent_task(pid)
@@ -659,10 +714,64 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/progress")
 async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayload):
-    """Relay a live progress line from the worker to WebSocket clients."""
+    """Persist a progress line and relay it to WebSocket clients."""
+    seq = await registry.append_progress(task_id, payload.kind, payload.message)
     if router:
-        await router._emit_event("task:progress", project_id, {"id": task_id, "message": payload.message})
-    return {"ok": True}
+        await router._emit_event("task:progress", project_id, {
+            "id": task_id, "seq": seq, "kind": payload.kind, "message": payload.message,
+        })
+    return {"ok": True, "seq": seq}
+
+
+@app.get("/api/projects/{project_id}/tasks/{task_id}/progress")
+async def get_task_progress(project_id: str, task_id: str):
+    """Return the persisted progress transcript for a task, ordered by seq."""
+    items = await registry.list_progress(task_id)
+    return {"items": [i.model_dump() for i in items]}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/worker/start")
+async def worker_start(project_id: str, task_id: str):
+    """Manually (re)start execution for a task with an assignee (routes by assignee)."""
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    if not record.assignee:
+        raise HTTPException(status_code=400, detail="Task has no assignee")
+    started = await _route_task_execution(project_id, record)
+    return {"started": started}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/worker/stop")
+async def worker_stop(project_id: str, task_id: str):
+    """Stop a live worker and mark its task blocked (cancelled by user)."""
+    if supervisor is None:
+        raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    was_running = supervisor.stop(task_id)
+    try:
+        meta = _json.loads(record.result or "{}")
+    except (ValueError, TypeError):
+        meta = {}
+    meta["cancelled"] = True
+    await registry.update_agent_task(task_id, status=AgentTaskStatus.BLOCKED,
+                                     result=_json.dumps(meta))
+    updated = await registry.get_agent_task(task_id)
+    if router:
+        await router._emit_event("worker:exited", project_id, {"id": task_id})
+        if updated:
+            await router._emit_event("task:updated", project_id, updated.model_dump())
+    return {"stopped": was_running}
+
+
+@app.get("/api/projects/{project_id}/workers")
+async def list_workers(project_id: str):
+    """Task ids that currently have a live worker process."""
+    if supervisor is None:
+        return {"running": []}
+    return {"running": supervisor.running_ids()}
 
 
 def _task_base_branch(record: AgentTaskRecord) -> str:

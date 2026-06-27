@@ -19,6 +19,29 @@ from daemon.models import AgentInfo
 from daemon.registry import AgentRegistry
 
 
+class _FakeSupervisor:
+    def __init__(self):
+        self.spawned = []
+        self._running = set()
+        self.stop_calls = []
+
+    def spawn(self, project, agent, project_path, task_id, max_budget_usd=5.0):
+        self.spawned.append((project, agent, project_path, task_id))
+        self._running.add(task_id)
+
+    def is_running(self, task_id):
+        return task_id in self._running
+
+    def running_ids(self):
+        return list(self._running)
+
+    def stop(self, task_id):
+        self.stop_calls.append(task_id)
+        was = task_id in self._running
+        self._running.discard(task_id)
+        return was
+
+
 @pytest.fixture
 async def client(tmp_path):
     """Yield a TestClient wired to a temp registry + graph engine."""
@@ -42,6 +65,8 @@ async def client(tmp_path):
     api_module.graph_engine = GraphEngine()
     api_module.router = None
     api_module.watcher = None
+    api_module.supervisor = None
+    api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
 
     # lifespan="off" skips startup/shutdown (no watcher/broadcast task).
     with TestClient(api_module.app) as c:
@@ -181,16 +206,21 @@ def test_create_project_duplicate_returns_409(client):
     assert "detail" in res.json()
 
 
-def test_dispatch_task(client):
-    """POST /dispatch persists a task and returns its id."""
+def test_dispatch_creates_ready_agent_task(client):
     res = client.post(
         "/api/projects/noor/dispatch",
         json={"target_agent": "claude-code", "instruction": "review auth", "priority": "high"},
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "dispatched"
-    assert "task_id" in data
+    assert data["status"] == "ready"
+    task_id = data["task_id"]
+    tasks = client.get("/api/projects/noor/tasks").json()
+    t = next(x for x in tasks if x["id"] == task_id)
+    assert t["status"] == "ready"
+    assert t["assignee"] == "claude-code-noor"
+    assert t["title"] == "review auth"
+    assert t["priority"] == 2  # high → 2
 
 
 def test_dispatch_task_unknown_project_404(client):
@@ -506,9 +536,28 @@ def test_task_progress_endpoint_emits_event(client):
         assert res.status_code == 200
         ev = api_module.router.events.get_nowait()
         assert ev.event == "task:progress"
-        assert ev.data == {"id": task_id, "message": "running tool: Edit"}
+        assert ev.data == {
+            "id": task_id, "seq": 1, "kind": "text", "message": "running tool: Edit",
+        }
     finally:
         api_module.router = None
+
+
+def test_task_progress_persisted_and_listed(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "do"})
+    task_id = res.json()["id"]
+    client.post(f"/api/projects/noor/tasks/{task_id}/progress",
+                json={"message": "worktree created", "kind": "milestone"})
+    client.post(f"/api/projects/noor/tasks/{task_id}/progress",
+                json={"message": "tool: Edit"})
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/progress")
+    assert res.status_code == 200
+    items = res.json()["items"]
+    assert [i["seq"] for i in items] == [1, 2]
+    assert items[0]["kind"] == "milestone"
+    assert items[0]["message"] == "worktree created"
+    assert items[1]["kind"] == "text"
 
 
 def test_update_persists_workspace_path(client):
@@ -604,3 +653,125 @@ def test_task_merge_no_worktree(client):
     res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
     assert res.status_code == 200
     assert res.json() == {"merged": False, "output": "No worktree assigned to this task"}
+
+
+def test_patch_to_running_spawns_worker_once(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert len(sup.spawned) == 1
+        proj, agent, path, tid = sup.spawned[0]
+        assert (proj, agent, tid) == ("noor", "claude-code", task_id)
+        assert path.endswith("/noor")
+        # idempotent: a second PATCH while running does not re-spawn
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert len(sup.spawned) == 1
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_patch_to_running_without_assignee_does_not_spawn(client):
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}", json={"status": "running"})
+        assert sup.spawned == []
+    finally:
+        api_module.supervisor = None
+
+
+def test_worker_stop_blocks_task(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        res = client.post(f"/api/projects/noor/tasks/{task_id}/worker/stop")
+        assert res.status_code == 200
+        assert res.json()["stopped"] is True
+        listing = client.get("/api/projects/noor/tasks").json()
+        t = next(x for x in listing if x["id"] == task_id)
+        assert t["status"] == "blocked"
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_list_workers_returns_running_ids(client):
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    sup._running.add("abc")
+    api_module.supervisor = sup
+    try:
+        res = client.get("/api/projects/noor/workers")
+        assert res.json() == {"running": ["abc"]}
+    finally:
+        api_module.supervisor = None
+
+
+def test_worker_stop_unknown_task_404_without_stopping(client):
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks/does-not-exist/worker/stop")
+        assert res.status_code == 404
+        assert sup.stop_calls == []   # 404 returned BEFORE any stop
+    finally:
+        api_module.supervisor = None
+
+
+def test_running_first_party_spawns_worker(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert sup.spawned and sup.spawned[0][3] == task_id
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_running_external_agent_drops_inbox_file(client, tmp_path):
+    import os, glob
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "ship it"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "hermes-noor"})
+        assert sup.spawned == []  # no loom worker for an external agent
+        files = glob.glob(os.path.join(api_module.LOOM_INBOX_BASE, "noor", "task-*.json"))
+        assert len(files) == 1  # inbox file dropped for filesystem pickup
+    finally:
+        api_module.supervisor = None

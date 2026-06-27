@@ -109,3 +109,39 @@ async def test_create_task_is_idempotent(registry):
 
     tasks = await registry.list_tasks("noor")
     assert len(tasks) == 1, "idempotent insert must not duplicate the row"
+
+
+@pytest.mark.asyncio
+async def test_append_and_list_progress(tmp_path):
+    from daemon.registry import AgentRegistry
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    s1 = await reg.append_progress("t1", "milestone", "worktree created")
+    s2 = await reg.append_progress("t1", "tool", "tool: Edit")
+    assert (s1, s2) == (1, 2)
+    items = await reg.list_progress("t1")
+    assert [i.seq for i in items] == [1, 2]
+    assert items[0].kind == "milestone"
+    assert items[1].message == "tool: Edit"
+    # isolation between tasks
+    assert await reg.list_progress("other") == []
+    await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_create_agent_task_explicit_id_is_idempotent(tmp_path):
+    from daemon.registry import AgentRegistry
+    from daemon.models import AgentTaskCreatePayload, AgentTaskStatus
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    payload = AgentTaskCreatePayload(
+        project="noor", title="T", instruction="do", assignee="claude-code-noor")
+    id1 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    id2 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    assert id1 == id2 == "fixed-1"
+    rec = await reg.get_agent_task("fixed-1")
+    assert rec.status == AgentTaskStatus.READY
+    assert rec.assignee == "claude-code-noor"
+    tasks = await reg.list_agent_tasks("noor")
+    assert sum(1 for t in tasks if t.id == "fixed-1") == 1  # only one row
+    await reg.close()
