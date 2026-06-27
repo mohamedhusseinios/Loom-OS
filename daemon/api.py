@@ -722,10 +722,10 @@ async def worker_stop(project_id: str, task_id: str):
     """Stop a live worker and mark its task blocked (cancelled by user)."""
     if supervisor is None:
         raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
-    was_running = supervisor.stop(task_id)
     record = await registry.get_agent_task(task_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Agent task not found")
+    was_running = supervisor.stop(task_id)
     try:
         meta = _json.loads(record.result or "{}")
     except (ValueError, TypeError):
