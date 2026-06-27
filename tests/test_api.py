@@ -450,3 +450,27 @@ def test_task_create_and_update_emit_ws_events(client):
         assert updated.data["status"] == "running"
     finally:
         api_module.router = None  # always reset, even on failure
+
+
+def test_dependency_repromotion_on_parent_done(client):
+    """A todo child auto-promotes to ready when its parent is marked done."""
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "Parent", "instruction": "x"},
+    )
+    parent_id = res.json()["id"]
+
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "Child", "instruction": "y",
+              "dependencies": [parent_id]},
+    )
+    child_id = res.json()["id"]
+    assert res.json()["status"] == "todo"  # parent not done yet
+
+    # Mark parent done — child must re-promote to ready.
+    client.patch(f"/api/projects/noor/tasks/{parent_id}", json={"status": "done"})
+
+    res = client.get("/api/projects/noor/tasks")
+    child = next(t for t in res.json() if t["id"] == child_id)
+    assert child["status"] == "ready"

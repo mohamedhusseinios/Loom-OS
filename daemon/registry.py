@@ -399,6 +399,28 @@ class AgentRegistry:
         finally:
             conn.close()
 
+    async def promote_ready_dependents(self, task_id: str) -> list[str]:
+        """Promote todo tasks whose deps are all done to ready. Returns ids."""
+        cursor = await self.db.execute(
+            "SELECT id, dependencies FROM agent_tasks"
+            " WHERE project = (SELECT project FROM agent_tasks WHERE id = ?)"
+            " AND status = ?",
+            (task_id, AgentTaskStatus.TODO.value),
+        )
+        rows = await cursor.fetchall()
+        promoted: list[str] = []
+        for row in rows:
+            deps = json.loads(row["dependencies"] or "[]")
+            if task_id in deps and self._all_agent_task_deps_done(deps):
+                await self.db.execute(
+                    "UPDATE agent_tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (AgentTaskStatus.READY.value,
+                     datetime.now(timezone.utc).isoformat(), row["id"]),
+                )
+                promoted.append(row["id"])
+        await self.db.commit()
+        return promoted
+
     @staticmethod
     def _row_to_agent_task(row) -> AgentTaskRecord:
         return AgentTaskRecord(

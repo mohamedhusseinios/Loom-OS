@@ -18,6 +18,7 @@ from daemon.snapshots import SnapshotManager
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
+    AgentTaskStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -645,6 +646,11 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         raise HTTPException(status_code=500, detail="Task update failed")
     if router:
         await router._emit_event("task:updated", project_id, updated.model_dump())
+    if payload.status == AgentTaskStatus.DONE:
+        for pid in await registry.promote_ready_dependents(task_id):
+            promoted = await registry.get_agent_task(pid)
+            if promoted and router:
+                await router._emit_event("task:updated", project_id, promoted.model_dump())
     return updated.model_dump()
 
 
