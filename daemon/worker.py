@@ -77,9 +77,13 @@ def run_claude(prompt, cwd, model=None, max_budget_usd=5.0, resume=None, on_prog
         elif event.get("type") == "assistant" and on_progress:
             on_progress(_summarize_event(event))
     code = proc.wait()
-    if code != 0 and not final["text"]:
+    if code != 0:
+        # Any non-zero exit is a failure (e.g. budget exhausted). Keep the
+        # result text if one was emitted; otherwise fall back to stderr
+        # (empty string is falsy, so the default kicks in when stderr is empty).
         final["is_error"] = True
-        final["text"] = (proc.stderr.read() or "claude exited non-zero").strip()
+        if not final["text"]:
+            final["text"] = (proc.stderr.read() or "claude exited non-zero").strip()
     return ClaudeResult(final["text"], final["session_id"], final["is_error"])
 
 
@@ -119,7 +123,7 @@ class Worker:
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    def _api(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _api(self, method: str, path: str, body: dict | None = None) -> dict | list:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(
             f"{self.base_url}{path}", data=data, method=method,
@@ -146,10 +150,10 @@ class Worker:
         os.makedirs(inbox, exist_ok=True)
         fid = uuid.uuid4().hex[:8]
         ts = datetime.now(timezone.utc).isoformat()
-        with open(os.path.join(inbox, f"finding-{fid}.md"), "w") as f:
+        with open(os.path.join(inbox, f"finding-{fid}.md"), "w", encoding="utf-8") as f:
             f.write(
                 f"---\nagent: {self.agent}\nproject: {self.project}\n"
-                f"type: general\ntimestamp: {ts}\n---\n"
+                f"task_id: {task_id}\ntype: general\ntimestamp: {ts}\n---\n"
                 f"# Task complete: {title}\n\n{text}\n"
             )
 
