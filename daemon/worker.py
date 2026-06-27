@@ -40,18 +40,17 @@ def _summarize_event(event: dict) -> str:
     return "working…"
 
 
-def run_claude(prompt, cwd, model=None, max_turns=30, resume=None, on_progress=None) -> ClaudeResult:
+def run_claude(prompt, cwd, model=None, max_budget_usd=5.0, resume=None, on_progress=None) -> ClaudeResult:
     """Run `claude -p` headless and return a ClaudeResult.
 
-    NOTE: --max-turns is NOT a flag in the installed claude CLI (verified via
-    `claude --help`). The max_turns parameter is accepted for API compatibility
-    but is silently ignored when building the subprocess command. Use
-    --max-budget-usd if spend-capping is needed in the future.
+    Uses --max-budget-usd to cap autonomous spend per run. The installed
+    claude CLI (2.1.190) does not support --max-turns.
     """
     cmd = [
         "claude", "-p", prompt,
         "--output-format", "stream-json", "--verbose",
         "--permission-mode", "acceptEdits",
+        "--max-budget-usd", str(max_budget_usd),
     ]
     if model:
         cmd += ["--model", model]
@@ -92,7 +91,7 @@ class Worker:
         project_path: str,
         base_url: str = "http://127.0.0.1:8472",
         model: str | None = None,
-        max_turns: int = 30,
+        max_budget_usd: float = 5.0,
         poll_interval: float = 2.5,
     ):
         self.project = project
@@ -100,7 +99,7 @@ class Worker:
         self.project_path = project_path
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.max_turns = max_turns
+        self.max_budget_usd = max_budget_usd
         self.poll_interval = poll_interval
         self.workspaces_dir: str = os.path.expanduser("~/.loom/workspaces")
         self._inflight: set[str] = set()
