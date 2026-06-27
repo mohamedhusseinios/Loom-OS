@@ -616,6 +616,8 @@ async def create_agent_task(project_id: str, payload: AgentTaskCreatePayload):
     record = await registry.get_agent_task(task_id)
     if record is None:
         raise HTTPException(status_code=500, detail="Task creation failed")
+    if router:
+        await router._emit_event("task:created", project_id, record.model_dump())
     return record.model_dump()
 
 
@@ -641,6 +643,8 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
     updated = await registry.get_agent_task(task_id)
     if updated is None:
         raise HTTPException(status_code=500, detail="Task update failed")
+    if router:
+        await router._emit_event("task:updated", project_id, updated.model_dump())
     return updated.model_dump()
 
 
