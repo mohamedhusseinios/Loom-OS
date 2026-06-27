@@ -74,7 +74,7 @@ export function TaskDetailDrawer({
     setMerging(true);
     setMergeMsg("");
     try {
-      const res = await mergeTask(projectId, task.id);
+      const res = await mergeTask(projectId, task!.id);
       setMergeMsg(res.merged ? t("mergeOk") : t("mergeConflict"));
       if (res.merged) onChanged();
     } catch {
@@ -86,7 +86,7 @@ export function TaskDetailDrawer({
 
   async function handleStatus(status: AgentTaskStatus) {
     try {
-      await updateAgentTask(projectId, task.id, { status });
+      await updateAgentTask(projectId, task!.id, { status });
     } catch {
       // ignore — the finally re-syncs from server state
     } finally {
@@ -96,7 +96,7 @@ export function TaskDetailDrawer({
 
   async function handleAssignee(assignee: string) {
     try {
-      await updateAgentTask(projectId, task.id, { assignee: assignee || null });
+      await updateAgentTask(projectId, task!.id, { assignee: assignee || null });
     } catch {
       // ignore — the finally re-syncs from server state
     } finally {

@@ -29,7 +29,8 @@
     "agents": "الوكلاء",
     "noAgents": "لا يوجد وكلاء مسجَّلون",
     "liveActivity": "النشاط المباشر",
-    "graphExplorer": "مستكشف الرسم البياني"
+    "graphExplorer": "مستكشف الرسم البياني",
+    "tasks": "المهام"
   },
   "AgentsPage": {
     "loading": "جارٍ التحميل...",
@@ -124,6 +125,13 @@
     "layoutRadial": "شعاعي",
     "layoutHierarchical": "هرمي"
   },
+  "GraphCanvas": {
+    "overview": "نظرة عامة",
+    "communitiesShown": "{shown} من {total} مجتمع",
+    "drillHint": "انقر على مجتمع للتوسّع",
+    "nodesShown": "{shown} من {total} عقدة",
+    "renderError": "تعذّر عرض هذا المخطط."
+  },
   "ActivityFeed": {
     "waiting": "في انتظار النشاط...",
     "agentOnline": "اتصل {agent}",
@@ -187,5 +195,39 @@
     "found": "تم العثور",
     "usedBy": "يستخدمه",
     "scan": "البحث عن مصادر المعرفة"
+  },
+  "TaskBoard": {
+    "heading": "لوحة المهام",
+    "loading": "جارٍ تحميل المهام…",
+    "count": "{count} مهمة",
+    "newTask": "مهمة جديدة",
+    "emptyColumn": "لا توجد مهام",
+    "columns": { "todo": "قيد الانتظار", "ready": "جاهزة", "running": "قيد التنفيذ", "blocked": "متوقفة", "done": "منجزة" }
+  },
+  "NewTaskModal": {
+    "heading": "مهمة جديدة",
+    "title": "العنوان",
+    "instruction": "التعليمات",
+    "instructionPlaceholder": "ما الذي يجب أن يقوم به الوكيل؟",
+    "assignee": "المُسنَدة إليه",
+    "autoAssign": "تلقائي (أول وكيل متصل)",
+    "priority": "الأولوية",
+    "dependencies": "تعتمد على",
+    "acceptanceCriteria": "معايير القبول",
+    "create": "إنشاء",
+    "cancel": "إلغاء",
+    "error": "تعذّر إنشاء المهمة"
+  },
+  "TaskDetail": {
+    "status": "الحالة",
+    "assignee": "المُسنَدة إليه",
+    "unassigned": "غير مُسنَدة",
+    "instruction": "التعليمات",
+    "acceptanceCriteria": "معايير القبول",
+    "result": "النتيجة",
+    "diff": "التغييرات",
+    "merge": "دمج",
+    "mergeOk": "تم الدمج في فرع المشروع.",
+    "mergeConflict": "فشل الدمج — قم بحل التعارضات يدويًا."
   }
 }

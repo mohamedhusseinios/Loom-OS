@@ -43,6 +43,11 @@ export default function ProjectDetailPage() {
               <Users className="w-3 h-3 me-1" /> {t("agents")}
             </Button>
           </Link>
+          <Link href={`/projects/${id}/tasks`}>
+            <Button variant="outline" size="sm">
+              {t("tasks")} <ArrowRight className="w-3 h-3 ms-2 rtl:rotate-180" />
+            </Button>
+          </Link>
           <Link href={`/projects/${id}/graph`}>
             <Button variant="outline" size="sm">
               {t("graphExplorer")} <ArrowRight className="w-3 h-3 ms-2 rtl:rotate-180" />
