@@ -225,10 +225,29 @@ class Worker:
                 self._inflight.discard(task["id"])
             return  # one task per tick (V1)
 
+    def _heartbeat(self) -> None:
+        inbox = os.path.expanduser(f"~/.loom/inbox/{self.project}")
+        os.makedirs(inbox, exist_ok=True)
+        with open(os.path.join(inbox, "heartbeat.json"), "w") as f:
+            json.dump({
+                "agent": self.agent,
+                "project": self.project,
+                "status": "online",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }, f)
+
     def run(self) -> None:
         self.ensure_registered()
         logger.info("worker %s online for project %s", self.agent_id, self.project)
+        last_hb = 0.0
         while not self._stop:
+            now = time.monotonic()
+            if now - last_hb > 30:
+                try:
+                    self._heartbeat()
+                except Exception as exc:
+                    logger.warning("heartbeat failed: %s", exc)
+                last_hb = now
             try:
                 self.poll_once()
             except Exception as exc:  # never let the loop die
