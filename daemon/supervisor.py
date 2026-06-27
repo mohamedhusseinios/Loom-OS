@@ -57,5 +57,6 @@ class WorkerSupervisor:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
         self._procs.pop(task_id, None)
         return True

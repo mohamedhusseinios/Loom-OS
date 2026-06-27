@@ -71,3 +71,36 @@ def test_stop_terminates_live_process(monkeypatch):
     assert proc.terminated is True
     assert s.is_running("t1") is False
     assert s.stop("t1") is False  # nothing left to stop
+
+
+class _StubbornPopen:
+    """A process that ignores terminate() and times out, forcing kill()."""
+    def __init__(self, cmd):
+        self.cmd = cmd
+        self._returncode = None
+        self.killed = False
+        self.waited_after_kill = False
+    def poll(self):
+        return self._returncode
+    def terminate(self):
+        pass  # ignores SIGTERM — stays live
+    def kill(self):
+        self.killed = True
+        self._returncode = -9
+    def wait(self, timeout=None):
+        if timeout is not None and not self.killed:
+            raise sup_mod.subprocess.TimeoutExpired(self.cmd, timeout)
+        self.waited_after_kill = True
+        return self._returncode
+
+
+def test_stop_kills_and_reaps_on_timeout(monkeypatch):
+    _patch_popen(monkeypatch)
+    s = WorkerSupervisor()
+    s.spawn("noor", "claude-code", "/tmp/noor", "t1")
+    stub = _StubbornPopen(["x"])
+    s._procs["t1"] = stub
+    assert s.stop("t1") is True
+    assert stub.killed is True
+    assert stub.waited_after_kill is True   # proc.wait() reaped the process after kill()
+    assert s.is_running("t1") is False
