@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  listAgentTasks, getProject, updateAgentTask,
+  listAgentTasks, getProject, updateAgentTask, listWorkers,
   type AgentTask, type AgentTaskStatus, type AgentInfo,
 } from "@/lib/api";
 import { useWebSocket } from "@/lib/use-websocket";
@@ -23,13 +23,19 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<AgentTask | null>(null);
+  const [workerIds, setWorkerIds] = useState<Set<string>>(new Set());
   const { subscribe } = useWebSocket();
 
   const loadData = useCallback(async () => {
     try {
-      const [taskList, project] = await Promise.all([listAgentTasks(id), getProject(id)]);
+      const [taskList, project, workers] = await Promise.all([
+        listAgentTasks(id),
+        getProject(id),
+        listWorkers(id),
+      ]);
       setTasks(taskList);
       setAgents(project.agents || []);
+      setWorkerIds(new Set(workers.running));
     } catch {
       // no tasks yet
     } finally {
@@ -53,7 +59,22 @@ export default function TasksPage() {
       });
     return subscribe(`project:${id}`, (event) => {
       if (event.event === "task:created" || event.event === "task:updated") {
-        upsert(event.data as unknown as AgentTask);
+        const task = event.data as unknown as AgentTask;
+        upsert(task);
+        if (event.event === "task:updated" &&
+            (task.status === "done" || task.status === "blocked")) {
+          setWorkerIds((prev) => {
+            const n = new Set(prev); n.delete(task.id); return n;
+          });
+        }
+      } else if (event.event === "worker:started") {
+        const tid = (event.data as { id: string }).id;
+        setWorkerIds((prev) => new Set(prev).add(tid));
+      } else if (event.event === "worker:exited") {
+        const tid = (event.data as { id: string }).id;
+        setWorkerIds((prev) => {
+          const n = new Set(prev); n.delete(tid); return n;
+        });
       }
     });
   }, [id, subscribe]);
@@ -104,6 +125,7 @@ export default function TasksPage() {
         task={selected}
         projectId={id}
         agents={agents}
+        workerRunning={selected ? workerIds.has(selected.id) : false}
         onClose={() => setSelected(null)}
         onChanged={loadData}
       />
