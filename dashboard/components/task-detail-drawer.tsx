@@ -8,6 +8,7 @@ import { useWebSocket } from "@/lib/use-websocket";
 import {
   getTaskDiff,
   mergeTask,
+  getBranches,
   updateAgentTask,
   getTaskProgress,
   startWorker,
@@ -64,6 +65,8 @@ export function TaskDetailDrawer({
   const [diff, setDiff] = useState("");
   const [merging, setMerging] = useState(false);
   const [mergeMsg, setMergeMsg] = useState("");
+  const [branches, setBranches] = useState<{ name: string; remote: boolean }[]>([]);
+  const [target, setTarget] = useState("");
   const [progress, setProgress] = useState<TaskProgressItem[]>([]);
   const [busy, setBusy] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -75,6 +78,22 @@ export function TaskDetailDrawer({
       let cancelled = false;
       getTaskDiff(projectId, task.id)
         .then((d) => { if (!cancelled) setDiff(d.diff); })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }
+  }, [task, projectId]);
+
+  // Load branch list + default target for completed/blocked tasks.
+  useEffect(() => {
+    if (!task) return;
+    if (task.status === "done" || task.status === "blocked") {
+      let cancelled = false;
+      getBranches(projectId)
+        .then((b) => {
+          if (cancelled) return;
+          setBranches(b.branches);
+          setTarget(b.current);
+        })
         .catch(() => {});
       return () => { cancelled = true; };
     }
@@ -118,8 +137,9 @@ export function TaskDetailDrawer({
     setMerging(true);
     setMergeMsg("");
     try {
-      const res = await mergeTask(projectId, task!.id);
-      setMergeMsg(res.merged ? t("mergeOk") : t("mergeConflict"));
+      const sel = branches.find((b) => b.name === target);
+      const res = await mergeTask(projectId, task!.id, target, sel?.remote ?? false);
+      setMergeMsg(res.merged ? t("mergedInto", { branch: res.target }) : t("mergeConflict"));
       if (res.merged) onChanged();
     } catch {
       setMergeMsg(t("mergeConflict"));
@@ -299,10 +319,23 @@ export function TaskDetailDrawer({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-zinc-500">{t("diff")}</label>
-              <Button size="sm" variant="outline" onClick={handleMerge} disabled={merging}>
-                {merging ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitMerge className="w-3 h-3" />}
-                <span className="ms-1">{t("merge")}</span>
-              </Button>
+              <div className="flex items-center gap-1">
+                <select
+                  aria-label={t("mergeInto")}
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  disabled={merging}
+                  className="bg-zinc-900 border border-zinc-700 rounded text-[11px] text-zinc-200 px-1 py-0.5 max-w-[160px]"
+                >
+                  {branches.map((b) => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+                <Button size="sm" variant="outline" onClick={handleMerge} disabled={merging || !target}>
+                  {merging ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitMerge className="w-3 h-3" />}
+                  <span className="ms-1">{t("merge")}</span>
+                </Button>
+              </div>
             </div>
             {mergeMsg && <p className="text-[10px] text-zinc-400 mb-1">{mergeMsg}</p>}
             <pre className="bg-black/50 border border-zinc-800 rounded p-2 text-[10px] text-zinc-300 overflow-x-auto max-h-64">
