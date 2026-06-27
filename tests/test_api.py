@@ -485,3 +485,41 @@ def test_dependency_repromotion_on_parent_done(client):
     res = client.get("/api/projects/noor/tasks")
     child = next(t for t in res.json() if t["id"] == child_id)
     assert child["status"] == "ready"
+
+
+def test_task_progress_endpoint_emits_event(client):
+    from daemon.router import Router
+    import daemon.api as api_module
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        res = client.post(
+            "/api/projects/noor/tasks",
+            json={"project": "noor", "title": "T", "instruction": "do"},
+        )
+        task_id = res.json()["id"]
+        api_module.router.events.get_nowait()  # drain task:created
+
+        res = client.post(
+            f"/api/projects/noor/tasks/{task_id}/progress",
+            json={"message": "running tool: Edit"},
+        )
+        assert res.status_code == 200
+        ev = api_module.router.events.get_nowait()
+        assert ev.event == "task:progress"
+        assert ev.data == {"id": task_id, "message": "running tool: Edit"}
+    finally:
+        api_module.router = None
+
+
+def test_update_persists_workspace_path(client):
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "T", "instruction": "do"},
+    )
+    task_id = res.json()["id"]
+    res = client.patch(
+        f"/api/projects/noor/tasks/{task_id}",
+        json={"workspace_path": "/tmp/ws/task-1"},
+    )
+    assert res.status_code == 200
+    assert res.json()["workspace_path"] == "/tmp/ws/task-1"

@@ -290,23 +290,22 @@ class AgentRegistry:
         status: AgentTaskStatus | None = None,
         assignee: str | None = None,
         result: str | None = None,
+        workspace_path: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         sets = ["updated_at = ?"]
         params: list = [now]
         if status is not None:
-            sets.append("status = ?")
-            params.append(status.value)
+            sets.append("status = ?"); params.append(status.value)
         if assignee is not None:
-            sets.append("assignee = ?")
-            params.append(assignee)
+            sets.append("assignee = ?"); params.append(assignee)
         if result is not None:
-            sets.append("result = ?")
-            params.append(result)
+            sets.append("result = ?"); params.append(result)
+        if workspace_path is not None:
+            sets.append("workspace_path = ?"); params.append(workspace_path)
         params.append(task_id)
         await self.db.execute(
-            f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = ?",
-            params,
+            f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = ?", params,
         )
         await self.db.commit()
 

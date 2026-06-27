@@ -640,6 +640,7 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         status=payload.status,
         assignee=payload.assignee,
         result=payload.result,
+        workspace_path=payload.workspace_path,
     )
     updated = await registry.get_agent_task(task_id)
     if updated is None:
@@ -652,6 +653,15 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
             if promoted and router:
                 await router._emit_event("task:updated", project_id, promoted.model_dump())
     return updated.model_dump()
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/progress")
+async def task_progress(project_id: str, task_id: str, payload: dict):
+    """Relay a live progress line from the worker to WebSocket clients."""
+    message = str(payload.get("message", ""))
+    if router:
+        await router._emit_event("task:progress", project_id, {"id": task_id, "message": message})
+    return {"ok": True}
 
 
 @app.get("/api/projects/{project_id}/search")

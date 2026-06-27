@@ -201,3 +201,4 @@ class AgentTaskUpdatePayload(BaseModel):
     status: Optional[AgentTaskStatus] = None
     assignee: Optional[str] = None
     result: Optional[str] = None
+    workspace_path: Optional[str] = None
