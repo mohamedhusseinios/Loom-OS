@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  listAgentTasks, getProject, updateAgentTask, listWorkers,
+  listAgentTasks, getProject, updateAgentTask, listWorkers, listRunnableAgents,
   type AgentTask, type AgentTaskStatus, type AgentInfo,
 } from "@/lib/api";
 import { useWebSocket } from "@/lib/use-websocket";
@@ -24,18 +24,21 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<AgentTask | null>(null);
   const [workerIds, setWorkerIds] = useState<Set<string>>(new Set());
+  const [runnable, setRunnable] = useState<Set<string>>(new Set());
   const { subscribe } = useWebSocket();
 
   const loadData = useCallback(async () => {
     try {
-      const [taskList, project, workers] = await Promise.all([
+      const [taskList, project, workers, runnableRes] = await Promise.all([
         listAgentTasks(id),
         getProject(id),
         listWorkers(id),
+        listRunnableAgents(),
       ]);
       setTasks(taskList);
       setAgents(project.agents || []);
       setWorkerIds(new Set(workers.running));
+      setRunnable(new Set(runnableRes.agents));
     } catch {
       // no tasks yet
     } finally {
@@ -90,6 +93,13 @@ export default function TasksPage() {
     }
   }
 
+  const assigneeName = selected?.assignee
+    ? selected.assignee.endsWith(`-${id}`)
+      ? selected.assignee.slice(0, -(id.length + 1))
+      : selected.assignee
+    : null;
+  const assigneeRunnable = assigneeName ? runnable.has(assigneeName) : false;
+
   if (loading) {
     return <div className="flex items-center justify-center h-96 text-zinc-500">{t("loading")}</div>;
   }
@@ -126,6 +136,7 @@ export default function TasksPage() {
         projectId={id}
         agents={agents}
         workerRunning={selected ? workerIds.has(selected.id) : false}
+        assigneeRunnable={assigneeRunnable}
         onClose={() => setSelected(null)}
         onChanged={loadData}
       />

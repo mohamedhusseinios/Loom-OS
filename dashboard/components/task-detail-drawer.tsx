@@ -27,6 +27,7 @@ interface TaskDetailDrawerProps {
   projectId: string;
   agents: AgentInfo[];
   workerRunning: boolean;
+  assigneeRunnable: boolean;
   onClose: () => void;
   onChanged: () => void;
 }
@@ -54,6 +55,7 @@ export function TaskDetailDrawer({
   projectId,
   agents,
   workerRunning,
+  assigneeRunnable,
   onClose,
   onChanged,
 }: TaskDetailDrawerProps) {
@@ -172,8 +174,13 @@ export function TaskDetailDrawer({
 
   const isDone = task.status === "done";
   const isBlocked = task.status === "blocked";
-  const showNoWorker = task.status === "running" && !workerRunning;
-  const canRun = !workerRunning && !isDone && !!task.assignee;
+  const assigneeShort = task.assignee
+    ? agents.find((a) => a.agent_id === task.assignee)?.agent_name ?? task.assignee
+    : "";
+  const isExternal = !!task.assignee && !assigneeRunnable;
+  const showNoWorker = task.status === "running" && !workerRunning && !isExternal;
+  const showExternal = task.status === "running" && !workerRunning && isExternal;
+  const canRun = !workerRunning && !isDone && !!task.assignee && assigneeRunnable;
 
   return (
     <div className="fixed inset-y-0 end-0 w-[440px] bg-zinc-950 border-s border-zinc-800 shadow-xl z-50 flex flex-col">
@@ -213,6 +220,12 @@ export function TaskDetailDrawer({
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2">
             <p className="text-amber-300 font-medium">{t("noWorkerTitle")}</p>
             <p className="text-amber-200/80 mt-1">{t("noWorkerBody")}</p>
+          </div>
+        )}
+        {showExternal && (
+          <div className="rounded-md border border-zinc-700 bg-zinc-800/40 p-2">
+            <p className="text-zinc-300 font-medium">{t("externalAgentTitle")}</p>
+            <p className="text-zinc-400 mt-1">{t("externalAgentBody", { agent: assigneeShort })}</p>
           </div>
         )}
 
