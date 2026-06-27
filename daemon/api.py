@@ -18,6 +18,7 @@ from daemon.watcher import InboxWatcher
 from daemon.traces import TraceCapture
 from daemon.snapshots import SnapshotManager
 from daemon.supervisor import WorkerSupervisor
+from daemon import runners
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
@@ -43,7 +44,7 @@ connected_clients: list[WebSocket] = []
 WORKER_MAX_BUDGET_USD = 5.0
 supervisor: Optional[WorkerSupervisor] = None
 
-LOOM_WORKER_AGENTS = {"claude-code"}        # agent names the loom worker runs via claude -p
+LOOM_WORKER_AGENTS = runners.runnable_agents()   # registry-derived: agents the worker can spawn
 LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
 
 
@@ -294,6 +295,12 @@ async def list_known_agents():
     for agent in known:
         agent["installed"] = agent["name"] in installed
     return {"agents": known}
+
+
+@app.get("/api/agents/runnable")
+async def list_runnable_agents():
+    """Canonical names of agents the daemon can run as a worker (registry-derived)."""
+    return {"agents": sorted(runners.runnable_agents())}
 
 
 @app.get("/api/projects/{project_id}/knowledge")

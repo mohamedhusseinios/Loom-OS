@@ -768,10 +768,40 @@ def test_running_external_agent_drops_inbox_file(client, tmp_path):
         res = client.post("/api/projects/noor/tasks",
                           json={"project": "noor", "title": "T", "instruction": "ship it"})
         task_id = res.json()["id"]
+        # "cursor-noor" — cursor is NOT in the runners registry, so it is
+        # a true external agent and must be handled via the inbox drop path.
         client.patch(f"/api/projects/noor/tasks/{task_id}",
-                     json={"status": "running", "assignee": "hermes-noor"})
-        assert sup.spawned == []  # no loom worker for an external agent
+                     json={"status": "running", "assignee": "cursor-noor"})
+        assert sup.spawned == []  # no loom worker for a truly external agent
         files = glob.glob(os.path.join(api_module.LOOM_INBOX_BASE, "noor", "task-*.json"))
         assert len(files) == 1  # inbox file dropped for filesystem pickup
     finally:
         api_module.supervisor = None
+
+
+def test_runnable_agents_endpoint(client):
+    r = client.get("/api/agents/runnable")
+    assert r.status_code == 200
+    agents = r.json()["agents"]
+    assert "claude-code" in agents
+    assert "hermes" in agents
+    assert "opencode" not in agents
+
+
+async def test_running_transition_spawns_worker_for_runnable_agent(client):
+    fake = _FakeSupervisor()
+    api_module.supervisor = fake
+
+    r = client.post("/api/projects/noor/tasks", json={
+        "project": "noor", "title": "T", "instruction": "do x",
+        "assignee": "hermes-noor",
+    })
+    assert r.status_code == 201
+    tid = r.json()["id"]
+
+    r = client.patch(f"/api/projects/noor/tasks/{tid}", json={"status": "running"})
+    assert r.status_code == 200
+
+    # hermes is now a runnable agent → the supervisor was asked to spawn it,
+    # rather than the task being dropped into the inbox.
+    assert any(agent == "hermes" for (_proj, agent, _path, _tid) in fake.spawned)
