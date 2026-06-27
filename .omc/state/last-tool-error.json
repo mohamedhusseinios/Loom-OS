@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd /Users/mohamedabdulrahman/Mohamed-Hussien/my-projects/agentic-os\\nsource .venv/bin/activate 2>/dev/null || true\\npython - <<'EOF'\\nimport asyncio, tempfile, os\\nfrom daemon.project_know...",
-  "error": "Exit code 1\n[discover] 6/10 sources found:\n   ✓ Code Review Graph      used_by=codex,claude-code,hermes\n   ✓ Graphify Graph         used_by=claude-code,codex,hermes\n   ✓ CLAUDE.md              used_by=claude-code\n   ✓ README.md              used_by=claude-code,codex,hermes\n   ✓ docs/ directory        used_by=claude-code,codex,hermes\n   ✓ pyproject.toml         used_by=claude-code,codex,hermes\n\n[ingest] 4 sources ingested into shared fabric\n[ingest] 4 finding-*.md files written to /var/folders/5r...",
-  "timestamp": "2026-06-26T18:21:20.249Z",
-  "retry_count": 1
-}

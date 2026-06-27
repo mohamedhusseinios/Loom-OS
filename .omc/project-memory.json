@@ -159,21 +159,105 @@
   },
   "hotPaths": [
     {
-      "path": "daemon/router.py",
-      "accessCount": 7,
-      "lastAccessed": 1782498156146,
+      "path": ".superpowers/sdd/progress.md",
+      "accessCount": 45,
+      "lastAccessed": 1782533961165,
       "type": "file"
     },
     {
       "path": "daemon/api.py",
-      "accessCount": 5,
-      "lastAccessed": 1782498665309,
+      "accessCount": 31,
+      "lastAccessed": 1782533549792,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_api.py",
+      "accessCount": 19,
+      "lastAccessed": 1782528142818,
+      "type": "file"
+    },
+    {
+      "path": "daemon/registry.py",
+      "accessCount": 16,
+      "lastAccessed": 1782527776605,
+      "type": "file"
+    },
+    {
+      "path": "daemon/router.py",
+      "accessCount": 10,
+      "lastAccessed": 1782533500052,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/app/[locale]/projects/[id]/graph/page.tsx",
+      "accessCount": 9,
+      "lastAccessed": 1782531998901,
+      "type": "file"
+    },
+    {
+      "path": "daemon/models.py",
+      "accessCount": 9,
+      "lastAccessed": 1782533500908,
       "type": "file"
     },
     {
       "path": "CLAUDE.md",
+      "accessCount": 7,
+      "lastAccessed": 1782533232343,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-06-27-kanban-task-board.md",
+      "accessCount": 6,
+      "lastAccessed": 1782524258016,
+      "type": "file"
+    },
+    {
+      "path": "daemon/main.py",
+      "accessCount": 6,
+      "lastAccessed": 1782530000548,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/lib/api.ts",
+      "accessCount": 5,
+      "lastAccessed": 1782531550442,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/messages/en.json",
+      "accessCount": 5,
+      "lastAccessed": 1782532836655,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/messages/ar.json",
+      "accessCount": 5,
+      "lastAccessed": 1782532855757,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-A1-report.md",
       "accessCount": 4,
-      "lastAccessed": 1782479446842,
+      "lastAccessed": 1782525407817,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-A2-report.md",
+      "accessCount": 4,
+      "lastAccessed": 1782525936524,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 4,
+      "lastAccessed": 1782533214719,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-06-27-agentic-os-kanban-task-board-design.md",
+      "accessCount": 4,
+      "lastAccessed": 1782533465825,
       "type": "file"
     },
     {
@@ -183,21 +267,15 @@
       "type": "file"
     },
     {
-      "path": "daemon/registry.py",
+      "path": "dashboard/components/dispatch-modal.tsx",
       "accessCount": 3,
-      "lastAccessed": 1782498687745,
+      "lastAccessed": 1782531551052,
       "type": "file"
     },
     {
-      "path": "dashboard/app/[locale]/projects/[id]/graph/page.tsx",
+      "path": "dashboard/lib/use-websocket.tsx",
       "accessCount": 3,
-      "lastAccessed": 1782498700960,
-      "type": "file"
-    },
-    {
-      "path": "README.md",
-      "accessCount": 2,
-      "lastAccessed": 1782479732917,
+      "lastAccessed": 1782533501405,
       "type": "file"
     },
     {
@@ -213,33 +291,75 @@
       "type": "file"
     },
     {
+      "path": "dashboard/components/graph-canvas-reagraph.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1782500800986,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/components/graph-canvas.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1782500820737,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/package.json",
+      "accessCount": 2,
+      "lastAccessed": 1782523469388,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-0.1-brief.md",
+      "accessCount": 2,
+      "lastAccessed": 1782524795590,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-0.1-report.md",
+      "accessCount": 2,
+      "lastAccessed": 1782524795907,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-A1-brief.md",
+      "accessCount": 2,
+      "lastAccessed": 1782525183521,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-A1-review.md",
+      "accessCount": 2,
+      "lastAccessed": 1782525272184,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/task-A2-brief.md",
+      "accessCount": 2,
+      "lastAccessed": 1782525671579,
+      "type": "file"
+    },
+    {
+      "path": "daemon/worktree.py",
+      "accessCount": 2,
+      "lastAccessed": 1782526527528,
+      "type": "file"
+    },
+    {
+      "path": "dashboard/components/graph-controls.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1782530911677,
+      "type": "file"
+    },
+    {
       "path": "pyproject.toml",
       "accessCount": 1,
       "lastAccessed": 1782479234380,
       "type": "file"
     },
     {
-      "path": "daemon/main.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479256458,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/package.json",
-      "accessCount": 1,
-      "lastAccessed": 1782479256936,
-      "type": "file"
-    },
-    {
       "path": "scripts/smoke-test.sh",
       "accessCount": 1,
       "lastAccessed": 1782479257472,
-      "type": "file"
-    },
-    {
-      "path": "daemon/models.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479276001,
       "type": "file"
     },
     {
@@ -261,18 +381,6 @@
       "type": "file"
     },
     {
-      "path": "dashboard/lib/api.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782479289456,
-      "type": "file"
-    },
-    {
-      "path": "tests/test_api.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479289666,
-      "type": "file"
-    },
-    {
       "path": "dashboard/i18n/routing.ts",
       "accessCount": 1,
       "lastAccessed": 1782479302518,
@@ -282,12 +390,6 @@
       "path": "dashboard/i18n/request.ts",
       "accessCount": 1,
       "lastAccessed": 1782479303287,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/lib/use-websocket.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1782479303799,
       "type": "file"
     },
     {
@@ -327,9 +429,33 @@
       "type": "file"
     },
     {
-      "path": "dashboard/components/graph-canvas.tsx",
+      "path": "docs/plans/2026-06-26-competitor-gap-closure-implementation.md",
       "accessCount": 1,
-      "lastAccessed": 1782498523623,
+      "lastAccessed": 1782520942039,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_worktree.py",
+      "accessCount": 1,
+      "lastAccessed": 1782524642963,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/review-72cbb46..c1bc82d.diff",
+      "accessCount": 1,
+      "lastAccessed": 1782524804170,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/review-c1bc82d..b66be53.diff",
+      "accessCount": 1,
+      "lastAccessed": 1782525190604,
+      "type": "file"
+    },
+    {
+      "path": ".superpowers/sdd/review-465bfb6..74359fa.diff",
+      "accessCount": 1,
+      "lastAccessed": 1782525677369,
       "type": "file"
     }
   ],
