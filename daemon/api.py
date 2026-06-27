@@ -43,6 +43,9 @@ connected_clients: list[WebSocket] = []
 WORKER_MAX_BUDGET_USD = 5.0
 supervisor: Optional[WorkerSupervisor] = None
 
+LOOM_WORKER_AGENTS = {"claude-code"}        # agent names the loom worker runs via claude -p
+LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -617,18 +620,47 @@ async def health():
 # ------------------------------------------------------------------
 
 
-async def _start_worker_for(project_id: str, task: AgentTaskRecord) -> bool:
-    """Spawn a one-shot worker for a Running task. Returns True if spawned."""
-    if supervisor is None or not task.assignee:
-        return False
-    project = await registry.get_project(project_id)
-    if project is None:
+def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
+                     instruction: str, priority: str = "medium") -> None:
+    """Write a task-<id>.json into the project inbox for filesystem-protocol pickup."""
+    payload = TaskPayload(
+        task_id=task_id, target_agent=target_agent,
+        instruction=instruction, priority=priority,
+    )
+    inbox_dir = os.path.join(LOOM_INBOX_BASE, project_id)
+    os.makedirs(inbox_dir, exist_ok=True)
+    with open(os.path.join(inbox_dir, f"task-{task_id}.json"), "w") as f:
+        f.write(payload.model_dump_json())
+
+
+async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+    """Route a Running task by assignee. Returns True if execution was started."""
+    if not task.assignee:
         return False
     agent = task.assignee.removesuffix(f"-{project_id}")
-    supervisor.spawn(project_id, agent, project.project_path, task.id,
-                     WORKER_MAX_BUDGET_USD)
+    if agent in LOOM_WORKER_AGENTS:
+        if supervisor is None or supervisor.is_running(task.id):
+            return False
+        project = await registry.get_project(project_id)
+        if project is None:
+            return False
+        supervisor.spawn(project_id, agent, project.project_path, task.id,
+                         WORKER_MAX_BUDGET_USD)
+        if router:
+            await router._emit_event("worker:started", project_id, {"id": task.id})
+        return True
+    # External agent → filesystem protocol.
+    _drop_inbox_task(project_id, task.id, agent, task.instruction)
+    seq = await registry.append_progress(
+        task.id, "milestone", f"Dispatched to {agent} via inbox")
     if router:
-        await router._emit_event("worker:started", project_id, {"id": task.id})
+        await router._emit_event("task:progress", project_id, {
+            "id": task.id, "seq": seq, "kind": "milestone",
+            "message": f"Dispatched to {agent} via inbox",
+        })
+        await router._emit_event("agent:dispatched", project_id, {
+            "task_id": task.id, "target_agent": agent, "instruction": task.instruction,
+        })
     return True
 
 
@@ -671,9 +703,9 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         raise HTTPException(status_code=500, detail="Task update failed")
     if router:
         await router._emit_event("task:updated", project_id, updated.model_dump())
-    if (supervisor is not None and payload.status == AgentTaskStatus.RUNNING
-            and updated.assignee and not supervisor.is_running(task_id)):
-        await _start_worker_for(project_id, updated)
+    if (record.status != AgentTaskStatus.RUNNING
+            and payload.status == AgentTaskStatus.RUNNING and updated.assignee):
+        await _route_task_execution(project_id, updated)
     if payload.status == AgentTaskStatus.DONE:
         for pid in await registry.promote_ready_dependents(task_id):
             promoted = await registry.get_agent_task(pid)
@@ -702,19 +734,14 @@ async def get_task_progress(project_id: str, task_id: str):
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/worker/start")
 async def worker_start(project_id: str, task_id: str):
-    """Manually (re)launch a one-shot worker for a task with an assignee."""
-    if supervisor is None:
-        raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
+    """Manually (re)start execution for a task with an assignee (routes by assignee)."""
     record = await registry.get_agent_task(task_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Agent task not found")
     if not record.assignee:
         raise HTTPException(status_code=400, detail="Task has no assignee")
-    if supervisor.is_running(task_id):
-        return {"started": False, "running": True}
-    if not await _start_worker_for(project_id, record):
-        raise HTTPException(status_code=400, detail="Could not start worker")
-    return {"started": True, "running": True}
+    started = await _route_task_execution(project_id, record)
+    return {"started": started}
 
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/worker/stop")

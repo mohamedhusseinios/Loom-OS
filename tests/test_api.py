@@ -66,6 +66,7 @@ async def client(tmp_path):
     api_module.router = None
     api_module.watcher = None
     api_module.supervisor = None
+    api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
 
     # lifespan="off" skips startup/shutdown (no watcher/broadcast task).
     with TestClient(api_module.app) as c:
@@ -731,5 +732,41 @@ def test_worker_stop_unknown_task_404_without_stopping(client):
         res = client.post("/api/projects/noor/tasks/does-not-exist/worker/stop")
         assert res.status_code == 404
         assert sup.stop_calls == []   # 404 returned BEFORE any stop
+    finally:
+        api_module.supervisor = None
+
+
+def test_running_first_party_spawns_worker(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert sup.spawned and sup.spawned[0][3] == task_id
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_running_external_agent_drops_inbox_file(client, tmp_path):
+    import os, glob
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "ship it"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "hermes-noor"})
+        assert sup.spawned == []  # no loom worker for an external agent
+        files = glob.glob(os.path.join(api_module.LOOM_INBOX_BASE, "noor", "task-*.json"))
+        assert len(files) == 1  # inbox file dropped for filesystem pickup
     finally:
         api_module.supervisor = None
