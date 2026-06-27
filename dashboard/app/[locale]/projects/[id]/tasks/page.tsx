@@ -25,9 +25,6 @@ export default function TasksPage() {
   const [selected, setSelected] = useState<AgentTask | null>(null);
   const { subscribe } = useWebSocket();
 
-  // Stable callback for child props (onCreated / onChanged / retry after failed move).
-  // Not called from within an effect body — only passed as prop or invoked from
-  // event handlers — so it does not trigger react-hooks/set-state-in-effect.
   const loadData = useCallback(async () => {
     try {
       const [taskList, project] = await Promise.all([listAgentTasks(id), getProject(id)]);
@@ -40,23 +37,10 @@ export default function TasksPage() {
     }
   }, [id]);
 
-  // Initial load uses an inline async IIFE so the setState calls happen after
-  // awaits, never synchronously in the effect body.  This satisfies the
-  // react-hooks/set-state-in-effect rule (the rule traces into named functions
-  // called from effect bodies, but not into inline async IIFEs).
   useEffect(() => {
-    (async () => {
-      try {
-        const [taskList, project] = await Promise.all([listAgentTasks(id), getProject(id)]);
-        setTasks(taskList);
-        setAgents(project.agents || []);
-      } catch {
-        // no tasks yet
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [id]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+  }, [loadData]);
 
   // Live WebSocket updates — setState is inside the subscribe callback, not
   // the effect body itself, so no set-state-in-effect violation.
