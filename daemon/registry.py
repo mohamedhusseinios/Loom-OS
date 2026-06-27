@@ -290,6 +290,7 @@ class AgentRegistry:
         status: AgentTaskStatus | None = None,
         assignee: str | None = None,
         result: str | None = None,
+        workspace_path: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         sets = ["updated_at = ?"]
@@ -303,10 +304,12 @@ class AgentRegistry:
         if result is not None:
             sets.append("result = ?")
             params.append(result)
+        if workspace_path is not None:
+            sets.append("workspace_path = ?")
+            params.append(workspace_path)
         params.append(task_id)
         await self.db.execute(
-            f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = ?",
-            params,
+            f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = ?", params,
         )
         await self.db.commit()
 
@@ -399,6 +402,36 @@ class AgentRegistry:
         finally:
             conn.close()
 
+    async def promote_ready_dependents(self, task_id: str) -> list[str]:
+        """Promote todo tasks whose deps are all done to ready. Returns ids.
+
+        Invoked from the PATCH /tasks handler when a task transitions to
+        ``done`` — the only path that moves an agent_task to ``done`` (the
+        inbox watcher's ``_handle_task`` operates on the legacy ``tasks``
+        table, not ``agent_tasks``). Safe no-op (returns ``[]``) for an
+        unknown ``task_id``: the project subquery yields NULL and matches no
+        rows; callers already 404 before reaching here.
+        """
+        cursor = await self.db.execute(
+            "SELECT id, dependencies FROM agent_tasks"
+            " WHERE project = (SELECT project FROM agent_tasks WHERE id = ?)"
+            " AND status = ?",
+            (task_id, AgentTaskStatus.TODO.value),
+        )
+        rows = await cursor.fetchall()
+        promoted: list[str] = []
+        for row in rows:
+            deps = json.loads(row["dependencies"] or "[]")
+            if task_id in deps and self._all_agent_task_deps_done(deps):
+                await self.db.execute(
+                    "UPDATE agent_tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (AgentTaskStatus.READY.value,
+                     datetime.now(timezone.utc).isoformat(), row["id"]),
+                )
+                promoted.append(row["id"])
+        await self.db.commit()
+        return promoted
+
     @staticmethod
     def _row_to_agent_task(row) -> AgentTaskRecord:
         return AgentTaskRecord(
@@ -414,6 +447,7 @@ class AgentRegistry:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             workspace_path=row["workspace_path"],
+            result=row["result"],
         )
 
 

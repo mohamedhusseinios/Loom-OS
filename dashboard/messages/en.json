@@ -29,7 +29,8 @@
     "agents": "Agents",
     "noAgents": "No agents registered",
     "liveActivity": "Live Activity",
-    "graphExplorer": "Graph Explorer"
+    "graphExplorer": "Graph Explorer",
+    "tasks": "Tasks"
   },
   "AgentsPage": {
     "loading": "Loading...",
@@ -124,6 +125,13 @@
     "layoutRadial": "Radial",
     "layoutHierarchical": "Hierarchical"
   },
+  "GraphCanvas": {
+    "overview": "Overview",
+    "communitiesShown": "{shown} of {total} communities",
+    "drillHint": "Click a community to drill in",
+    "nodesShown": "{shown} of {total} nodes",
+    "renderError": "This view failed to render."
+  },
   "ActivityFeed": {
     "waiting": "Waiting for activity...",
     "agentOnline": "{agent} came online",
@@ -187,5 +195,39 @@
     "found": "found",
     "usedBy": "Used by",
     "scan": "Scan for knowledge sources"
+  },
+  "TaskBoard": {
+    "heading": "Task Board",
+    "loading": "Loading tasks…",
+    "count": "{count} tasks",
+    "newTask": "New Task",
+    "emptyColumn": "No tasks",
+    "columns": { "todo": "To Do", "ready": "Ready", "running": "Running", "blocked": "Blocked", "done": "Done" }
+  },
+  "NewTaskModal": {
+    "heading": "New Task",
+    "title": "Title",
+    "instruction": "Instruction",
+    "instructionPlaceholder": "What should the agent do?",
+    "assignee": "Assignee",
+    "autoAssign": "Auto (first online agent)",
+    "priority": "Priority",
+    "dependencies": "Depends on",
+    "acceptanceCriteria": "Acceptance criteria",
+    "create": "Create",
+    "cancel": "Cancel",
+    "error": "Could not create task"
+  },
+  "TaskDetail": {
+    "status": "Status",
+    "assignee": "Assignee",
+    "unassigned": "Unassigned",
+    "instruction": "Instruction",
+    "acceptanceCriteria": "Acceptance criteria",
+    "result": "Result",
+    "diff": "Changes",
+    "merge": "Merge",
+    "mergeOk": "Merged into the project branch.",
+    "mergeConflict": "Merge failed — resolve conflicts manually."
   }
 }

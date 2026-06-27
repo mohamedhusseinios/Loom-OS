@@ -420,3 +420,187 @@ def test_get_snapshots_returns_empty(client):
     res = client.get("/api/projects/noor/snapshots")
     assert res.status_code == 200
     assert res.json()["snapshots"] == []
+
+
+def test_task_create_and_update_emit_ws_events(client):
+    """POST emits task:created, PATCH emits task:updated (router injected)."""
+    from daemon.router import Router
+    import daemon.api as api_module
+
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        res = client.post(
+            "/api/projects/noor/tasks",
+            json={"project": "noor", "title": "T", "instruction": "do", "priority": 0},
+        )
+        assert res.status_code == 201
+        task_id = res.json()["id"]
+
+        created = api_module.router.events.get_nowait()
+        assert created.event == "task:created"
+        assert created.data["id"] == task_id
+
+        res = client.patch(
+            f"/api/projects/noor/tasks/{task_id}",
+            json={"status": "running", "assignee": "claude-code-noor"},
+        )
+        assert res.status_code == 200
+        updated = api_module.router.events.get_nowait()
+        assert updated.event == "task:updated"
+        assert updated.data["status"] == "running"
+    finally:
+        api_module.router = None  # always reset, even on failure
+
+
+def test_dependency_repromotion_on_parent_done(client):
+    """A todo child auto-promotes to ready when its parent is marked done,
+    and a task:updated event is emitted for the promoted child."""
+    from daemon.router import Router
+    import daemon.api as api_module
+
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "Parent", "instruction": "x"})
+    parent_id = res.json()["id"]
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "Child", "instruction": "y",
+                            "dependencies": [parent_id]})
+    child_id = res.json()["id"]
+    assert res.json()["status"] == "todo"
+
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        client.patch(f"/api/projects/noor/tasks/{parent_id}", json={"status": "done"})
+
+        events = []
+        while not api_module.router.events.empty():
+            events.append(api_module.router.events.get_nowait())
+        promoted = [e for e in events
+                    if e.event == "task:updated"
+                    and e.data["id"] == child_id
+                    and e.data["status"] == "ready"]
+        assert promoted, "expected a task:updated(ready) event for the promoted child"
+    finally:
+        api_module.router = None
+
+    res = client.get("/api/projects/noor/tasks")
+    child = next(t for t in res.json() if t["id"] == child_id)
+    assert child["status"] == "ready"
+
+
+def test_task_progress_endpoint_emits_event(client):
+    from daemon.router import Router
+    import daemon.api as api_module
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        res = client.post(
+            "/api/projects/noor/tasks",
+            json={"project": "noor", "title": "T", "instruction": "do"},
+        )
+        task_id = res.json()["id"]
+        api_module.router.events.get_nowait()  # drain task:created
+
+        res = client.post(
+            f"/api/projects/noor/tasks/{task_id}/progress",
+            json={"message": "running tool: Edit"},
+        )
+        assert res.status_code == 200
+        ev = api_module.router.events.get_nowait()
+        assert ev.event == "task:progress"
+        assert ev.data == {"id": task_id, "message": "running tool: Edit"}
+    finally:
+        api_module.router = None
+
+
+def test_update_persists_workspace_path(client):
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "T", "instruction": "do"},
+    )
+    task_id = res.json()["id"]
+    res = client.patch(
+        f"/api/projects/noor/tasks/{task_id}",
+        json={"workspace_path": "/tmp/ws/task-1"},
+    )
+    assert res.status_code == 200
+    assert res.json()["workspace_path"] == "/tmp/ws/task-1"
+
+
+def test_task_diff_empty_without_workspace(client):
+    res = client.post(
+        "/api/projects/noor/tasks",
+        json={"project": "noor", "title": "T", "instruction": "do"},
+    )
+    task_id = res.json()["id"]
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/diff")
+    assert res.status_code == 200
+    assert res.json() == {"diff": "", "branch": f"loom/task-{task_id}"}
+
+
+def test_task_diff_404_for_unknown_task(client):
+    res = client.get("/api/projects/noor/tasks/nope/diff")
+    assert res.status_code == 404
+
+
+def test_task_merge_404_for_unknown_task(client):
+    res = client.post("/api/projects/noor/tasks/nope/merge")
+    assert res.status_code == 404
+
+
+def test_task_merge_404_for_unknown_project(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    res = client.post(f"/api/projects/missing/tasks/{task_id}/merge")
+    assert res.status_code == 404
+
+
+def test_task_merge_success(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    monkeypatch.setattr(worktree_mod, "merge_branch", lambda repo, branch: (True, "Merged"))
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
+    assert res.status_code == 200
+    assert res.json() == {"merged": True, "output": "Merged"}
+
+
+def test_task_diff_uses_base_branch_from_result(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    captured = {}
+    def fake_diff(repo, base_branch, branch):
+        captured["base_branch"] = base_branch
+        return "diff-text"
+    monkeypatch.setattr(worktree_mod, "branch_diff", fake_diff)
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x", "result": '{"base_branch": "dev"}'})
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/diff")
+    assert res.status_code == 200
+    assert res.json()["diff"] == "diff-text"
+    assert captured["base_branch"] == "dev"
+
+
+def test_task_diff_404_for_unknown_project(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    # workspace_path must be set so the diff endpoint reaches the project lookup
+    # (otherwise it returns an empty diff early, before the 404 branch).
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+    res = client.get(f"/api/projects/missing/tasks/{task_id}/diff")
+    assert res.status_code == 404
+
+
+def test_task_merge_no_worktree(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
+    assert res.status_code == 200
+    assert res.json() == {"merged": False, "output": "No worktree assigned to this task"}

@@ -1,84 +1,77 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState } from "react";
+import { useTranslations } from "next-intl";
+import { GripVertical } from "lucide-react";
+import type { AgentTask, AgentTaskStatus } from "@/lib/api";
 
-type TaskStatus =
-  | "todo"
-  | "ready"
-  | "running"
-  | "blocked"
-  | "done";
-
-const COLUMNS: { status: TaskStatus; label: string; color: string }[] = [
-  { status: "todo", label: "To Do", color: "text-zinc-400" },
-  { status: "ready", label: "Ready", color: "text-blue-400" },
-  { status: "running", label: "Running", color: "text-amber-400" },
-  { status: "blocked", label: "Blocked", color: "text-red-400" },
-  { status: "done", label: "Done", color: "text-emerald-400" },
+const COLUMNS: { status: AgentTaskStatus; key: string; color: string }[] = [
+  { status: "todo", key: "todo", color: "text-zinc-400" },
+  { status: "ready", key: "ready", color: "text-blue-400" },
+  { status: "running", key: "running", color: "text-amber-400" },
+  { status: "blocked", key: "blocked", color: "text-red-400" },
+  { status: "done", key: "done", color: "text-emerald-400" },
 ];
-
-export interface AgentTask {
-  id: string;
-  title: string;
-  status: TaskStatus;
-  assignee: string | null;
-  priority: number;
-  dependencies: string[];
-}
 
 interface TaskBoardProps {
   tasks: AgentTask[];
+  onMove: (taskId: string, status: AgentTaskStatus) => void;
+  onSelect: (task: AgentTask) => void;
 }
 
-export function TaskBoard({ tasks }: TaskBoardProps) {
-  if (!tasks.length) {
-    return (
-      <Card className="bg-zinc-950 border-zinc-800">
-        <CardContent className="p-4">
-          <p className="text-zinc-500 text-xs">
-            No tasks yet. Create tasks to coordinate agents via the Kanban board.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+export function TaskBoard({ tasks, onMove, onSelect }: TaskBoardProps) {
+  const t = useTranslations("TaskBoard");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState<AgentTaskStatus | null>(null);
 
   return (
-    <div className="grid grid-cols-5 gap-3">
+    <div className="grid grid-cols-5 gap-3 flex-1 min-h-0">
       {COLUMNS.map((col) => {
-        const columnTasks = tasks.filter((t) => t.status === col.status);
+        const colTasks = tasks.filter((x) => x.status === col.status);
         return (
-          <div key={col.status} className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${col.color}`}>
-                {col.label}
-              </span>
-              <Badge variant="outline" className="text-xs">
-                {columnTasks.length}
-              </Badge>
+          <div
+            key={col.status}
+            onDragOver={(e) => { e.preventDefault(); setOverCol(col.status); }}
+            onDragLeave={() => setOverCol((c) => (c === col.status ? null : c))}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragId) onMove(dragId, col.status);
+              setDragId(null); setOverCol(null);
+            }}
+            className={`flex flex-col rounded-lg border p-2 overflow-y-auto transition-colors ${
+              overCol === col.status ? "border-zinc-600 bg-zinc-900/60" : "border-zinc-800 bg-zinc-950"
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className={`text-xs font-semibold ${col.color}`}>{t(`columns.${col.key}`)}</span>
+              <span className="text-xs text-zinc-600">{colTasks.length}</span>
             </div>
             <div className="space-y-2">
-              {columnTasks.map((task) => (
-                <Card
+              {colTasks.map((task) => (
+                <div
                   key={task.id}
-                  className="bg-zinc-900 border-zinc-800 p-2"
+                  draggable
+                  onDragStart={() => setDragId(task.id)}
+                  onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                  onClick={() => onSelect(task)}
+                  className="group cursor-pointer rounded-md border border-zinc-800 bg-zinc-900 p-2 hover:border-zinc-700"
                 >
-                  <p className="text-zinc-200 text-xs font-medium">
-                    {task.title}
-                  </p>
-                  {task.assignee && (
-                    <p className="text-zinc-500 text-xs mt-1">
-                      {task.assignee}
-                    </p>
-                  )}
-                  {task.dependencies.length > 0 && (
-                    <p className="text-zinc-600 text-xs mt-1">
-                      Depends on: {task.dependencies.join(", ")}
-                    </p>
-                  )}
-                </Card>
+                  <div className="flex items-start gap-1">
+                    <GripVertical className="w-3 h-3 mt-0.5 text-zinc-700 group-hover:text-zinc-500 shrink-0" />
+                    <p className="text-xs font-medium text-zinc-200 line-clamp-2">{task.title}</p>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 ps-4">
+                    {task.assignee && <span className="text-[10px] text-zinc-500 truncate">{task.assignee}</span>}
+                    {task.priority > 0 && <span className="text-[10px] text-amber-500">P{task.priority}</span>}
+                    {task.dependencies.length > 0 && (
+                      <span className="text-[10px] text-zinc-600">⛓ {task.dependencies.length}</span>
+                    )}
+                  </div>
+                </div>
               ))}
+              {colTasks.length === 0 && (
+                <p className="text-[10px] text-zinc-700 px-1 py-2">{t("emptyColumn")}</p>
+              )}
             </div>
           </div>
         );

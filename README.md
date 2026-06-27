@@ -330,6 +330,64 @@ A single shared `WebSocketProvider` (`lib/use-websocket.tsx`) opens one `ws://lo
 
 ---
 
+## Task Board & Worker
+
+### Kanban task board
+
+Every project has a **Tasks** tab in the dashboard. The board follows a Kanban layout with five visible columns — **Todo · Ready · Running · Blocked · Done** — and an archived state for finished work. Create a task from the tab, assign it to any registered agent, and drag the card between columns to advance it.
+
+Moving a card to **Running** is the signal that triggers execution. Moving it back to **Todo** or **Blocked** pauses it.
+
+### 7-state task lifecycle
+
+```
+triage → todo → ready → running → blocked → done → archived
+```
+
+| State | Meaning |
+|-------|---------|
+| `triage` | Just created; not yet assigned or prioritised |
+| `todo` | Assigned to an agent; waiting on dependencies |
+| `ready` | All dependencies complete; ready to execute |
+| `running` | Worker has picked it up and is executing |
+| `blocked` | Stalled; needs human intervention |
+| `done` | Completed; diff available for review |
+| `archived` | Finished and filed away; removed from the board |
+
+**Dependency auto-promotion:** when all of a task's dependencies reach `done`, the task automatically advances from `todo` to `ready` — no manual drag required.
+
+### Running the worker
+
+The worker is a separate, optional process that executes tasks assigned to a given agent. The project directory must be a git repository — the worker creates an isolated branch for each task.
+
+```bash
+# 1. Start the daemon (if not already running)
+loom --port 8472
+
+# 2. Start a worker for a project (separate terminal)
+loom worker --project my-project --agent claude-code --project-path /abs/path/to/my-project
+
+# Optional: cap spend per task (default $5)
+loom worker --project my-project --agent claude-code --project-path /abs/path/to/my-project --max-budget-usd 10
+
+# 3. In the dashboard → project's Tasks tab → create a task, assign it to
+#    the worker's agent, and drag the card to "Running".
+#    The worker runs Claude Code headless in an isolated git worktree
+#    (branch loom/task-<id>) and moves the card to Done with a reviewable diff.
+```
+
+### Safety model
+
+| Concern | Safeguard |
+|---------|-----------|
+| **Your main checkout** | The worker never touches it. Each task runs in a `git worktree` on branch `loom/task-<id>` — a fully isolated copy. |
+| **Runaway spend** | `--max-budget-usd` caps API cost per task (defaults to $5). The installed Claude CLI has no built-in turn cap; the budget flag is the enforcement point. |
+| **Credentials** | The daemon holds no API keys. Only the user-run worker process invokes `claude`. |
+| **Merging** | The worker never merges. When a task reaches `done`, you review the diff in the task detail drawer and merge into the project branch as an explicit action. |
+| **Knowledge retention** | A finished task's findings are automatically contributed as a finding into the project's knowledge graph, so every completed task enriches the shared fabric. |
+
+---
+
 ## Agent Lifecycle
 
 1. **Registration** — agent writes `register.json` to `inbox/<project>/`
