@@ -788,20 +788,22 @@ def test_runnable_agents_endpoint(client):
     assert "opencode" not in agents
 
 
-async def test_running_transition_spawns_worker_for_runnable_agent(client):
+def test_running_transition_spawns_worker_for_runnable_agent(client):
     fake = _FakeSupervisor()
     api_module.supervisor = fake
+    try:
+        r = client.post("/api/projects/noor/tasks", json={
+            "project": "noor", "title": "T", "instruction": "do x",
+            "assignee": "hermes-noor",
+        })
+        assert r.status_code == 201
+        tid = r.json()["id"]
 
-    r = client.post("/api/projects/noor/tasks", json={
-        "project": "noor", "title": "T", "instruction": "do x",
-        "assignee": "hermes-noor",
-    })
-    assert r.status_code == 201
-    tid = r.json()["id"]
+        r = client.patch(f"/api/projects/noor/tasks/{tid}", json={"status": "running"})
+        assert r.status_code == 200
 
-    r = client.patch(f"/api/projects/noor/tasks/{tid}", json={"status": "running"})
-    assert r.status_code == 200
-
-    # hermes is now a runnable agent → the supervisor was asked to spawn it,
-    # rather than the task being dropped into the inbox.
-    assert any(agent == "hermes" for (_proj, agent, _path, _tid) in fake.spawned)
+        # hermes is now a runnable agent → the supervisor was asked to spawn it,
+        # rather than the task being dropped into the inbox.
+        assert any(agent == "hermes" for (_proj, agent, _path, _tid) in fake.spawned)
+    finally:
+        api_module.supervisor = None

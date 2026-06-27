@@ -300,7 +300,7 @@ async def list_known_agents():
 @app.get("/api/agents/runnable")
 async def list_runnable_agents():
     """Canonical names of agents the daemon can run as a worker (registry-derived)."""
-    return {"agents": sorted(runners.runnable_agents())}
+    return {"agents": sorted(LOOM_WORKER_AGENTS)}
 
 
 @app.get("/api/projects/{project_id}/knowledge")
