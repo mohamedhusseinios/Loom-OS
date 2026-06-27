@@ -447,6 +447,7 @@ class AgentRegistry:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             workspace_path=row["workspace_path"],
+            result=row["result"],
         )
 
 

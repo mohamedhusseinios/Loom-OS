@@ -539,3 +539,47 @@ def test_task_diff_empty_without_workspace(client):
 def test_task_diff_404_for_unknown_task(client):
     res = client.get("/api/projects/noor/tasks/nope/diff")
     assert res.status_code == 404
+
+
+def test_task_merge_404_for_unknown_task(client):
+    res = client.post("/api/projects/noor/tasks/nope/merge")
+    assert res.status_code == 404
+
+
+def test_task_merge_404_for_unknown_project(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    res = client.post(f"/api/projects/missing/tasks/{task_id}/merge")
+    assert res.status_code == 404
+
+
+def test_task_merge_success(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    monkeypatch.setattr(worktree_mod, "merge_branch", lambda repo, branch: (True, "Merged"))
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
+    assert res.status_code == 200
+    assert res.json() == {"merged": True, "output": "Merged"}
+
+
+def test_task_diff_uses_base_branch_from_result(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    captured = {}
+    def fake_diff(repo, base_branch, branch):
+        captured["base_branch"] = base_branch
+        return "diff-text"
+    monkeypatch.setattr(worktree_mod, "branch_diff", fake_diff)
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x", "result": '{"base_branch": "dev"}'})
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/diff")
+    assert res.status_code == 200
+    assert res.json()["diff"] == "diff-text"
+    assert captured["base_branch"] == "dev"

@@ -682,7 +682,9 @@ async def task_diff(project_id: str, task_id: str):
     if not record.workspace_path:
         return {"diff": "", "branch": branch}
     project = await registry.get_project(project_id)
-    repo = os.path.expanduser(project.project_path) if project else record.workspace_path
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repo = os.path.expanduser(project.project_path)
     try:
         diff = await asyncio.to_thread(
             _worktree.branch_diff, repo, _task_base_branch(record), branch
@@ -701,6 +703,8 @@ async def task_merge(project_id: str, task_id: str):
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if not record.workspace_path:
+        return {"merged": False, "output": "No worktree assigned to this task"}
     branch = f"loom/task-{task_id}"
     ok, output = await asyncio.to_thread(
         _worktree.merge_branch, os.path.expanduser(project.project_path), branch

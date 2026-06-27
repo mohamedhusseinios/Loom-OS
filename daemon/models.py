@@ -195,6 +195,7 @@ class AgentTaskRecord(BaseModel):
     created_at: str
     updated_at: str
     workspace_path: Optional[str] = None
+    result: Optional[str] = None
 
 
 class AgentTaskUpdatePayload(BaseModel):
