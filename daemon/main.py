@@ -73,7 +73,7 @@ def cmd_worker(args):
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     from daemon.worker import Worker
-    Worker(
+    w = Worker(
         project=args.project,
         agent=args.agent,
         project_path=os.path.expanduser(args.project_path),
@@ -81,7 +81,13 @@ def cmd_worker(args):
         model=args.model,
         max_budget_usd=args.max_budget_usd,
         poll_interval=args.poll,
-    ).run()
+    )
+    if args.once:
+        if not args.task:
+            raise SystemExit("--once requires --task <id>")
+        w.run_once(args.task)
+    else:
+        w.run()
 
 
 def cmd_detect_agents(_args):
@@ -171,6 +177,10 @@ def main():
     worker_p.add_argument("--model", default=None, help="Claude model (optional)")
     worker_p.add_argument("--max-budget-usd", type=float, default=5.0, help="Max USD to spend per task")
     worker_p.add_argument("--poll", type=float, default=2.5, help="Poll interval seconds")
+    worker_p.add_argument("--once", action="store_true",
+                          help="Process a single task (with --task) and exit")
+    worker_p.add_argument("--task", default=None,
+                          help="Task id to process when --once is set")
     worker_p.set_defaults(func=cmd_worker)
 
     args = parser.parse_args()

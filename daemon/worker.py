@@ -138,10 +138,10 @@ class Worker:
     def _patch_task(self, task_id: str, body: dict) -> dict:
         return self._api("PATCH", f"/api/projects/{self.project}/tasks/{task_id}", body)
 
-    def _post_progress(self, task_id: str, message: str) -> None:
+    def _post_progress(self, task_id: str, message: str, kind: str = "text") -> None:
         try:
             self._api("POST", f"/api/projects/{self.project}/tasks/{task_id}/progress",
-                      {"message": message})
+                      {"message": message, "kind": kind})
         except Exception:
             pass  # progress is best-effort
 
@@ -171,6 +171,7 @@ class Worker:
             base_branch = current_branch(self.project_path)
             create_worktree(self.project_path, workspace, branch, base_ref=base_branch)
         except RuntimeError as exc:
+            self._post_progress(task_id, f"Worktree failed: {exc}", kind="error")
             self._patch_task(task_id, {
                 "status": "blocked",
                 "result": json.dumps({"branch": branch, "base_branch": "unknown",
@@ -181,6 +182,7 @@ class Worker:
         meta = {"branch": branch, "base_branch": base_branch}
 
         self._patch_task(task_id, {"workspace_path": workspace})
+        self._post_progress(task_id, f"Created worktree on {branch}", kind="milestone")
 
         prompt = instruction
         if criteria:
@@ -193,9 +195,12 @@ class Worker:
         except (ValueError, TypeError):
             resume = None
 
+        self._post_progress(task_id, "Agent started", kind="milestone")
         result = run_claude(
             prompt, cwd=workspace, model=self.model, max_budget_usd=self.max_budget_usd,
-            resume=resume, on_progress=lambda line: self._post_progress(task_id, line),
+            resume=resume,
+            on_progress=lambda line: self._post_progress(
+                task_id, line, kind="tool" if line.startswith("tool:") else "text"),
         )
 
         meta["summary"] = result.text
@@ -203,6 +208,7 @@ class Worker:
 
         if result.is_error:
             meta["error"] = result.text or "claude reported an error"
+            self._post_progress(task_id, meta["error"], kind="error")
             self._patch_task(task_id, {
                 "status": "blocked", "result": json.dumps(meta),
                 "workspace_path": workspace,
@@ -211,6 +217,8 @@ class Worker:
 
         commit_all(workspace, f"loom task {task_id}: {title}")
         self._write_finding(task_id, title, result.text)
+        self._post_progress(task_id, result.text or "(no output)", kind="summary")
+        self._post_progress(task_id, "Task complete", kind="milestone")
         self._patch_task(task_id, {
             "status": "done", "result": json.dumps(meta),
             "workspace_path": workspace,
@@ -224,6 +232,17 @@ class Worker:
             finally:
                 self._inflight.discard(task["id"])
             return  # one task per tick (V1)
+
+    def run_once(self, task_id: str) -> None:
+        """Process a single Running task by id, then return (no poll loop)."""
+        self.ensure_registered()
+        task = next(
+            (t for t in self._get_running_tasks() if t.get("id") == task_id), None
+        )
+        if task is None:
+            logger.info("task %s not in Running; nothing to do", task_id)
+            return
+        self.process_task(task)
 
     def _heartbeat(self) -> None:
         inbox = os.path.expanduser(f"~/.loom/inbox/{self.project}")
