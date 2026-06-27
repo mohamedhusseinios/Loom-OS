@@ -665,7 +665,7 @@ async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayl
     return {"ok": True}
 
 
-def _task_base_branch(record) -> str:
+def _task_base_branch(record: AgentTaskRecord) -> str:
     try:
         return _json.loads(record.result or "{}").get("base_branch", "main")
     except (ValueError, TypeError):

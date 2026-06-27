@@ -583,3 +583,24 @@ def test_task_diff_uses_base_branch_from_result(client, monkeypatch):
     assert res.status_code == 200
     assert res.json()["diff"] == "diff-text"
     assert captured["base_branch"] == "dev"
+
+
+def test_task_diff_404_for_unknown_project(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    # workspace_path must be set so the diff endpoint reaches the project lookup
+    # (otherwise it returns an empty diff early, before the 404 branch).
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+    res = client.get(f"/api/projects/missing/tasks/{task_id}/diff")
+    assert res.status_code == 404
+
+
+def test_task_merge_no_worktree(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
+    assert res.status_code == 200
+    assert res.json() == {"merged": False, "output": "No worktree assigned to this task"}
