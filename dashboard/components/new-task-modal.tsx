@@ -69,7 +69,7 @@ export function NewTaskModal({ open, onClose, projectId, agents, tasks, onCreate
       ref={ref}
       onClose={() => { if (open) onClose(); }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="rounded-xl p-0 bg-transparent max-w-none"
+      className="fixed inset-0 m-auto h-fit w-fit rounded-xl p-0 bg-transparent max-w-none"
     >
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-[520px] p-6">
         <h2 className="text-lg font-bold text-zinc-100 mb-4">{t("heading")}</h2>
