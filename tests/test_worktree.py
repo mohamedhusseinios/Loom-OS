@@ -54,3 +54,15 @@ def test_commit_all_returns_false_when_no_changes(repo, tmp_path):
     ws = tmp_path / "ws" / "task-empty"
     worktree.create_worktree(str(repo), str(ws), "loom/task-empty", base_ref="main")
     assert worktree.commit_all(str(ws), "noop") is False
+
+
+def test_list_branches_shape_and_exclusions(repo):
+    _git(repo, "branch", "develop")
+    _git(repo, "branch", "loom/task-zzz")
+    data = worktree.list_branches(str(repo))
+    assert data["current"] == "main"
+    names = [b["name"] for b in data["branches"]]
+    assert "main" in names
+    assert "develop" in names
+    assert "loom/task-zzz" not in names          # task branches excluded
+    assert all(b["remote"] is False for b in data["branches"])  # no remotes here

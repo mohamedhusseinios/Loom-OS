@@ -7,7 +7,10 @@ calls — async callers should wrap these in ``asyncio.to_thread``.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -58,6 +61,29 @@ def merge_branch(repo_path: str, branch: str) -> tuple[bool, str]:
     proc = _run(repo_path, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
     out = (proc.stdout + proc.stderr).strip()
     return proc.returncode == 0, out
+
+
+def list_branches(repo_path: str) -> dict:
+    """Local + remote branches for choosing a merge target.
+
+    Returns ``{"current": str, "branches": [{"name": str, "remote": bool}]}``.
+    Excludes ``loom/task-*`` branches and ``*/HEAD``, and omits a remote
+    branch when a local branch of the same short name already exists.
+    """
+    current = current_branch(repo_path)
+    local_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    remote_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+    local = [n for n in local_proc.stdout.split("\n") if n and not n.startswith("loom/task-")]
+    local_set = set(local)
+    branches = [{"name": n, "remote": False} for n in local]
+    for n in remote_proc.stdout.split("\n"):
+        if not n or n.endswith("/HEAD"):
+            continue
+        short = n.split("/", 1)[1] if "/" in n else n
+        if short in local_set:
+            continue
+        branches.append({"name": n, "remote": True})
+    return {"current": current, "branches": branches}
 
 
 def remove_worktree(repo_path: str, workspace_path: str) -> None:
