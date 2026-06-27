@@ -156,9 +156,16 @@
       "online": "متصل",
       "offline": "غير متصل",
       "working": "يعمل",
-      "pending": "معلَّقة",
-      "completed": "مكتملة",
-      "failed": "فاشلة"
+      "pending": "قيد الانتظار",
+      "completed": "مكتمل",
+      "failed": "فشل",
+      "triage": "فرز",
+      "todo": "قائمة المهام",
+      "ready": "جاهز",
+      "running": "قيد التشغيل",
+      "blocked": "محظور",
+      "done": "تم",
+      "archived": "مؤرشف"
     },
     "priority": {
       "low": "منخفضة",

@@ -22,10 +22,15 @@ export function DispatchHistory({ dispatches }: DispatchHistoryProps) {
 
   const statusBadge = (status: string) => {
     switch (status) {
+      case "done":
       case "completed":
         return "bg-emerald-900/50 text-emerald-300 border-emerald-700";
+      case "running":
       case "pending":
         return "bg-amber-900/50 text-amber-300 border-amber-700";
+      case "ready":
+        return "bg-blue-900/50 text-blue-300 border-blue-700";
+      case "blocked":
       case "failed":
         return "bg-red-900/50 text-red-300 border-red-700";
       default:

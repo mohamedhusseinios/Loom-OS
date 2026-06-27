@@ -72,7 +72,7 @@ export function AgentWiring({ agents, dispatches }: AgentWiringProps) {
       })}
 
       {dispatches
-        .filter((d) => d.status === "pending")
+        .filter((d) => d.status === "ready" || d.status === "running")
         .slice(0, 3)
         .map((d) => (
           <div key={d.task_id} className="flex items-center gap-0">
@@ -83,7 +83,7 @@ export function AgentWiring({ agents, dispatches }: AgentWiringProps) {
               </div>
               <span className="text-[10px] text-zinc-500 mt-1.5">{t("task")}</span>
               <span className="text-[9px] text-zinc-600 truncate max-w-[80px]">{d.target_agent}</span>
-              <span className="text-[8px] text-amber-500 mt-0.5">{t("pending")}</span>
+              <span className="text-[8px] text-amber-500 mt-0.5">{d.status}</span>
             </div>
           </div>
         ))}
