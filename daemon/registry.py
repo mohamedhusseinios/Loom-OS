@@ -333,7 +333,7 @@ class AgentRegistry:
             (task_id,),
         )
         row = await cursor.fetchone()
-        seq = (row["m"] if row else 0) + 1
+        seq = row["m"] + 1
         now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
             "INSERT INTO task_progress (task_id, seq, kind, message, ts)"
