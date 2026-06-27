@@ -1435,7 +1435,575 @@ git commit -m "feat: task detail chat window with worker status and Run/Stop"
 
 ---
 
-## Task 9: End-to-end manual verification
+# Part 2: Unify dispatch ↔ Kanban (route-by-assignee)
+
+> Part 2 builds on Part 1. It folds the legacy dispatch path into the `agent_tasks`
+> system: dispatch creates a **Ready** Kanban task, and entering **Running** routes
+> execution by assignee (loom worker for `claude-code`; inbox drop for external agents).
+> Spec addendum: `docs/superpowers/specs/2026-06-27-agentic-os-live-task-execution-design.md` (Addendum section).
+
+## Task 9: `create_agent_task` accepts an explicit id + status (idempotent)
+
+**Files:**
+- Modify: `daemon/registry.py:254-276` (`create_agent_task`)
+- Test: `tests/test_registry.py`
+
+**Interfaces:**
+- Produces: `create_agent_task(payload, task_id: str | None = None, status: AgentTaskStatus | None = None) -> str` — uses the given id (idempotent `INSERT OR IGNORE`) or a fresh uuid; uses the given status or the existing dependency-based default.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_registry.py`:
+
+```python
+async def test_create_agent_task_explicit_id_is_idempotent(tmp_path):
+    from daemon.registry import AgentRegistry
+    from daemon.models import AgentTaskCreatePayload, AgentTaskStatus
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    payload = AgentTaskCreatePayload(
+        project="noor", title="T", instruction="do", assignee="claude-code-noor")
+    id1 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    id2 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    assert id1 == id2 == "fixed-1"
+    rec = await reg.get_agent_task("fixed-1")
+    assert rec.status == AgentTaskStatus.READY
+    assert rec.assignee == "claude-code-noor"
+    tasks = await reg.list_agent_tasks("noor")
+    assert sum(1 for t in tasks if t.id == "fixed-1") == 1  # only one row
+    await reg.close()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_registry.py::test_create_agent_task_explicit_id_is_idempotent -v`
+Expected: FAIL (`create_agent_task() got an unexpected keyword argument 'task_id'`)
+
+- [ ] **Step 3: Make the id + status optional**
+
+In `daemon/registry.py`, replace `create_agent_task` (lines 254-276) with:
+
+```python
+    async def create_agent_task(
+        self,
+        payload: AgentTaskCreatePayload,
+        task_id: str | None = None,
+        status: AgentTaskStatus | None = None,
+    ) -> str:
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        if task_id is None:
+            task_id = str(uuid.uuid4())[:12]
+
+        if status is None:
+            status = AgentTaskStatus.READY if (
+                payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
+            ) else AgentTaskStatus.TODO
+
+        await self.db.execute(
+            """INSERT OR IGNORE INTO agent_tasks
+               (id, project, title, instruction, status, assignee,
+                priority, dependencies, acceptance_criteria, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                task_id, payload.project, payload.title, payload.instruction,
+                status.value, payload.assignee, payload.priority,
+                json.dumps(payload.dependencies), payload.acceptance_criteria,
+                now, now,
+            ),
+        )
+        await self.db.commit()
+        return task_id
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_registry.py -v`
+Expected: PASS (new test + existing registry tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add daemon/registry.py tests/test_registry.py
+git commit -m "feat: create_agent_task accepts explicit id and status (idempotent)"
+```
+
+---
+
+## Task 10: Route execution by assignee (worker vs inbox)
+
+**Files:**
+- Modify: `daemon/api.py` — add `LOOM_WORKER_AGENTS`, `LOOM_INBOX_BASE`, `_drop_inbox_task`; replace Part 1's `_start_worker_for` with `_route_task_execution`; update the Running hook (transition guard) and `worker_start` to call it
+- Modify: `tests/test_api.py` — fixture redirects `LOOM_INBOX_BASE`; add routing tests
+
+**Interfaces:**
+- Consumes: `WorkerSupervisor`, `registry.get_project`, `registry.append_progress`, `TaskPayload`.
+- Produces: `_route_task_execution(project_id, task: AgentTaskRecord) -> bool`; `_drop_inbox_task(project_id, task_id, target_agent, instruction, priority="medium") -> None`; constants `LOOM_WORKER_AGENTS: set[str]`, `LOOM_INBOX_BASE: str`.
+
+- [ ] **Step 1: Redirect the inbox in tests + write failing tests**
+
+In `tests/test_api.py` `client` fixture, after `api_module.supervisor = None` add:
+
+```python
+    api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
+```
+
+Add tests (the `_FakeSupervisor` from Task 5 is reused):
+
+```python
+def test_running_first_party_spawns_worker(client):
+    import daemon.api as api_module
+    from daemon.router import Router
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "x"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "claude-code-noor"})
+        assert sup.spawned and sup.spawned[0][3] == task_id
+    finally:
+        api_module.router = None
+        api_module.supervisor = None
+
+
+def test_running_external_agent_drops_inbox_file(client, tmp_path):
+    import os, glob
+    import daemon.api as api_module
+    sup = _FakeSupervisor()
+    api_module.supervisor = sup
+    try:
+        res = client.post("/api/projects/noor/tasks",
+                          json={"project": "noor", "title": "T", "instruction": "ship it"})
+        task_id = res.json()["id"]
+        client.patch(f"/api/projects/noor/tasks/{task_id}",
+                     json={"status": "running", "assignee": "hermes-noor"})
+        assert sup.spawned == []  # no loom worker for an external agent
+        files = glob.glob(os.path.join(api_module.LOOM_INBOX_BASE, "noor", "task-*.json"))
+        assert len(files) == 1  # inbox file dropped for filesystem pickup
+    finally:
+        api_module.supervisor = None
+```
+
+> `tmp_path` is function-scoped, so the `client` fixture and the test receive the SAME path — the fixture's `LOOM_INBOX_BASE` is what the test inspects.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_api.py::test_running_external_agent_drops_inbox_file -v`
+Expected: FAIL (no inbox file — external routing not implemented; `LOOM_INBOX_BASE` attribute may be missing)
+
+- [ ] **Step 3: Add the constants + inbox helper**
+
+In `daemon/api.py`, near `WORKER_MAX_BUDGET_USD` (added in Task 5), add:
+
+```python
+LOOM_WORKER_AGENTS = {"claude-code"}        # agent names the loom worker runs via claude -p
+LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
+```
+
+Add the inbox-drop helper (near the other task helpers, before the task routes):
+
+```python
+def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
+                     instruction: str, priority: str = "medium") -> None:
+    """Write a task-<id>.json into the project inbox for filesystem-protocol pickup."""
+    payload = TaskPayload(
+        task_id=task_id, target_agent=target_agent,
+        instruction=instruction, priority=priority,
+    )
+    inbox_dir = os.path.join(LOOM_INBOX_BASE, project_id)
+    os.makedirs(inbox_dir, exist_ok=True)
+    with open(os.path.join(inbox_dir, f"task-{task_id}.json"), "w") as f:
+        f.write(payload.model_dump_json())
+```
+
+- [ ] **Step 4: Replace `_start_worker_for` with `_route_task_execution`**
+
+In `daemon/api.py`, replace the `_start_worker_for` helper (added in Task 5) with:
+
+```python
+async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+    """Route a Running task by assignee. Returns True if execution was started."""
+    if not task.assignee:
+        return False
+    agent = task.assignee.removesuffix(f"-{project_id}")
+    if agent in LOOM_WORKER_AGENTS:
+        if supervisor is None or supervisor.is_running(task.id):
+            return False
+        project = await registry.get_project(project_id)
+        if project is None:
+            return False
+        supervisor.spawn(project_id, agent, project.project_path, task.id,
+                         WORKER_MAX_BUDGET_USD)
+        if router:
+            await router._emit_event("worker:started", project_id, {"id": task.id})
+        return True
+    # External agent → filesystem protocol.
+    _drop_inbox_task(project_id, task.id, agent, task.instruction)
+    seq = await registry.append_progress(
+        task.id, "milestone", f"Dispatched to {agent} via inbox")
+    if router:
+        await router._emit_event("task:progress", project_id, {
+            "id": task.id, "seq": seq, "kind": "milestone",
+            "message": f"Dispatched to {agent} via inbox",
+        })
+        await router._emit_event("agent:dispatched", project_id, {
+            "task_id": task.id, "target_agent": agent, "instruction": task.instruction,
+        })
+    return True
+```
+
+- [ ] **Step 5: Update the Running hook + `worker_start` to route**
+
+In `update_agent_task` (api.py), replace the Task 5 spawn-hook block with a transition-guarded route call (uses `record`, the pre-update row fetched at the top of the handler):
+
+```python
+    if (record.status != AgentTaskStatus.RUNNING
+            and payload.status == AgentTaskStatus.RUNNING and updated.assignee):
+        await _route_task_execution(project_id, updated)
+```
+
+In `worker_start` (api.py, Task 5), replace its body's spawn call so Run routes by assignee:
+
+```python
+@app.post("/api/projects/{project_id}/tasks/{task_id}/worker/start")
+async def worker_start(project_id: str, task_id: str):
+    """Manually (re)start execution for a task with an assignee (routes by assignee)."""
+    record = await registry.get_agent_task(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    if not record.assignee:
+        raise HTTPException(status_code=400, detail="Task has no assignee")
+    started = await _route_task_execution(project_id, record)
+    return {"started": started}
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `pytest tests/test_api.py -v`
+Expected: PASS — including Task 5's `test_patch_to_running_spawns_worker_once` (the transition guard still spawns exactly once) and the two new routing tests.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add daemon/api.py tests/test_api.py
+git commit -m "feat: route task execution by assignee (worker vs inbox drop)"
+```
+
+---
+
+## Task 11: Repoint `/dispatch` and `/dispatches` to the unified table
+
+**Files:**
+- Modify: `daemon/api.py:167-213` (`dispatch_task`, `list_dispatches`)
+- Modify: `tests/test_api.py` — replace `test_dispatch_task`; `test_list_dispatches` keeps passing
+
+**Interfaces:**
+- Consumes: `registry.create_agent_task` (Task 9), `registry.list_agent_tasks`.
+- Produces: `POST /dispatch` creates a Ready `agent_task` and returns `{task_id, status:"ready"}`; `GET /dispatches` returns `{dispatches:[{task_id,target_agent,instruction,status,dispatched_at,priority}]}` from `agent_tasks`.
+
+- [ ] **Step 1: Replace the dispatch test**
+
+In `tests/test_api.py`, replace `test_dispatch_task` (lines 184-193) with:
+
+```python
+def test_dispatch_creates_ready_agent_task(client):
+    res = client.post(
+        "/api/projects/noor/dispatch",
+        json={"target_agent": "claude-code", "instruction": "review auth", "priority": "high"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ready"
+    task_id = data["task_id"]
+    tasks = client.get("/api/projects/noor/tasks").json()
+    t = next(x for x in tasks if x["id"] == task_id)
+    assert t["status"] == "ready"
+    assert t["assignee"] == "claude-code-noor"
+    assert t["title"] == "review auth"
+    assert t["priority"] == 2  # high → 2
+```
+
+(`test_list_dispatches` stays as-is — two medium-priority dispatches still list newest-first `["do B", "do A"]`.)
+
+- [ ] **Step 2: Run tests to verify the new one fails**
+
+Run: `pytest tests/test_api.py::test_dispatch_creates_ready_agent_task -v`
+Expected: FAIL (`data["status"]` is still `"dispatched"`, task not in `agent_tasks`)
+
+- [ ] **Step 3: Repoint the endpoints**
+
+In `daemon/api.py`, add the priority map above the dispatch route, then replace `dispatch_task` (lines 167-207) and `list_dispatches` (lines 209-213):
+
+```python
+_DISPATCH_PRIORITY = {"low": 0, "medium": 1, "high": 2}
+
+
+@app.post("/api/projects/{project_id}/dispatch")
+async def dispatch_task(project_id: str, payload: DispatchRequest):
+    """Dispatch a task to an agent — creates a Ready Kanban task (unified system).
+
+    Execution is deferred until the task enters Running, where it routes by
+    assignee (loom worker for first-party agents, inbox drop for external ones).
+    """
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    task_id = str(uuid.uuid4())[:12]
+    first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]
+    create = AgentTaskCreatePayload(
+        project=project_id,
+        title=first_line[:80] or "Dispatched task",
+        instruction=payload.instruction,
+        assignee=f"{payload.target_agent}-{project_id}",
+        priority=_DISPATCH_PRIORITY.get(payload.priority, 1),
+    )
+    await registry.create_agent_task(create, task_id=task_id, status=AgentTaskStatus.READY)
+    record = await registry.get_agent_task(task_id)
+    if record and router:
+        await router._emit_event("task:created", project_id, record.model_dump())
+    return {"task_id": task_id, "status": "ready"}
+
+
+@app.get("/api/projects/{project_id}/dispatches")
+async def list_dispatches(project_id: str):
+    """List dispatched/Kanban tasks for a project (unified), dispatch-shaped."""
+    tasks = await registry.list_agent_tasks(project_id)
+    return {"dispatches": [
+        {
+            "task_id": t.id,
+            "target_agent": t.assignee or "",
+            "instruction": t.instruction,
+            "status": t.status.value,
+            "dispatched_at": t.created_at,
+            "priority": t.priority,
+        }
+        for t in tasks
+    ]}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_api.py::test_dispatch_creates_ready_agent_task tests/test_api.py::test_list_dispatches -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add daemon/api.py tests/test_api.py
+git commit -m "feat: dispatch creates a Ready Kanban task; /dispatches reads agent_tasks"
+```
+
+---
+
+## Task 12: Watcher `_handle_task` upserts an `agent_task`
+
+**Files:**
+- Modify: `daemon/router.py:14-17` (imports), `daemon/router.py:161-174` (`_handle_task`)
+- Test: `tests/test_router.py` (create if absent)
+
+**Interfaces:**
+- Consumes: `registry.create_agent_task` (Task 9), `registry.get_agent_task`.
+- Produces: a dropped `task-*.json` upserts one `agent_tasks` row (Ready, assignee mapped) and emits `task:created` + `agent:dispatched` only on first creation.
+
+- [ ] **Step 1: Write the failing test**
+
+Create (or append to) `tests/test_router.py`:
+
+```python
+async def test_handle_task_upserts_agent_task(tmp_path):
+    from daemon.registry import AgentRegistry
+    from daemon.graph_engine import GraphEngine
+    from daemon.router import Router
+    from daemon.models import TaskPayload
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    await reg.upsert_project("noor", str(tmp_path / "noor"))
+    router = Router(reg, GraphEngine())
+
+    f = tmp_path / "task-abc123.json"
+    f.write_text(TaskPayload(task_id="abc123", target_agent="hermes",
+                             instruction="ship it", priority="high").model_dump_json())
+    await router._handle_task("noor", f)
+    rec = await reg.get_agent_task("abc123")
+    assert rec is not None
+    assert rec.status.value == "ready"
+    assert rec.assignee == "hermes-noor"
+
+    await router._handle_task("noor", f)  # idempotent re-handle
+    tasks = await reg.list_agent_tasks("noor")
+    assert sum(1 for t in tasks if t.id == "abc123") == 1
+    await reg.close()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_router.py::test_handle_task_upserts_agent_task -v`
+Expected: FAIL (`get_agent_task` returns None — `_handle_task` still writes the legacy `tasks` table)
+
+- [ ] **Step 3: Upsert into `agent_tasks`**
+
+In `daemon/router.py`, add `AgentTaskCreatePayload, AgentTaskStatus` to the `from daemon.models import (...)` block (lines 14-17). Then replace `_handle_task` (lines 161-174) with:
+
+```python
+    async def _handle_task(self, project: str, path: Path):
+        payload = TaskPayload(**json.loads(path.read_text()))
+        before = await self.registry.get_agent_task(payload.task_id)
+        first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]
+        await self.registry.create_agent_task(
+            AgentTaskCreatePayload(
+                project=project,
+                title=first_line[:80] or "Dispatched task",
+                instruction=payload.instruction,
+                assignee=f"{payload.target_agent}-{project}",
+                priority={"low": 0, "medium": 1, "high": 2}.get(payload.priority, 1),
+            ),
+            task_id=payload.task_id,
+            status=AgentTaskStatus.READY,
+        )
+        if before is None:
+            record = await self.registry.get_agent_task(payload.task_id)
+            await self._emit_event("task:created", project, record.model_dump())
+            await self._emit_event("agent:dispatched", project, {
+                "task_id": payload.task_id,
+                "target_agent": payload.target_agent,
+                "instruction": payload.instruction,
+            })
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_router.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add daemon/router.py tests/test_router.py
+git commit -m "feat: watcher upserts inbox tasks into the unified agent_tasks table"
+```
+
+---
+
+## Task 13: Dashboard — lifecycle badges in dispatch views
+
+**Files:**
+- Modify: `dashboard/components/dispatch-history.tsx` (`statusBadge`)
+- Modify: `dashboard/components/agent-wiring.tsx` (filter + label)
+- Modify: `dashboard/messages/en.json` + `dashboard/messages/ar.json` (`Common.status`)
+
+**Interfaces:**
+- Consumes: `/dispatches` now returns lifecycle statuses (`todo|ready|running|blocked|done|triage|archived`).
+
+- [ ] **Step 1: Add lifecycle status labels (both locales)**
+
+In `dashboard/messages/en.json`, replace the `Common.status` block (lines 155-162) with:
+
+```json
+    "status": {
+      "online": "online",
+      "offline": "offline",
+      "working": "working",
+      "pending": "pending",
+      "completed": "completed",
+      "failed": "failed",
+      "triage": "triage",
+      "todo": "to do",
+      "ready": "ready",
+      "running": "running",
+      "blocked": "blocked",
+      "done": "done",
+      "archived": "archived"
+    },
+```
+
+In `dashboard/messages/ar.json`, replace its `Common.status` block with the same keys, Arabic values:
+
+```json
+    "status": {
+      "online": "متصل",
+      "offline": "غير متصل",
+      "working": "يعمل",
+      "pending": "قيد الانتظار",
+      "completed": "مكتمل",
+      "failed": "فشل",
+      "triage": "فرز",
+      "todo": "قائمة المهام",
+      "ready": "جاهز",
+      "running": "قيد التشغيل",
+      "blocked": "محظور",
+      "done": "تم",
+      "archived": "مؤرشف"
+    },
+```
+
+> Validate JSON: `node -e "require('./dashboard/messages/en.json'); require('./dashboard/messages/ar.json')"`.
+
+- [ ] **Step 2: Badge the lifecycle statuses**
+
+In `dashboard/components/dispatch-history.tsx`, replace `statusBadge` (lines 23-34) with:
+
+```tsx
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case "done":
+      case "completed":
+        return "bg-emerald-900/50 text-emerald-300 border-emerald-700";
+      case "running":
+      case "pending":
+        return "bg-amber-900/50 text-amber-300 border-amber-700";
+      case "ready":
+        return "bg-blue-900/50 text-blue-300 border-blue-700";
+      case "blocked":
+      case "failed":
+        return "bg-red-900/50 text-red-300 border-red-700";
+      default:
+        return "bg-zinc-800 text-zinc-400 border-zinc-700";
+    }
+  };
+```
+
+- [ ] **Step 3: Fix the agent-wiring filter**
+
+In `dashboard/components/agent-wiring.tsx`, change the dispatch filter (line 75) from `status === "pending"` to active lifecycle states, and render the real status (line 86):
+
+```tsx
+      {dispatches
+        .filter((d) => d.status === "ready" || d.status === "running")
+        .slice(0, 3)
+        .map((d) => (
+          <div key={d.task_id} className="flex items-center gap-0">
+            <div className="flex items-center text-zinc-700 text-lg mx-1 rtl:-scale-x-100">━━━▶</div>
+            <div className="flex flex-col items-center mx-3">
+              <div className="w-12 h-12 rounded-xl bg-zinc-900 border-2 border-dashed border-zinc-600 flex items-center justify-center text-zinc-500 text-xs">
+                📋
+              </div>
+              <span className="text-[10px] text-zinc-500 mt-1.5">{t("task")}</span>
+              <span className="text-[9px] text-zinc-600 truncate max-w-[80px]">{d.target_agent}</span>
+              <span className="text-[8px] text-amber-500 mt-0.5">{d.status}</span>
+            </div>
+          </div>
+        ))}
+```
+
+- [ ] **Step 4: Lint + build**
+
+Run: `cd dashboard && npm run lint && npm run build`
+Expected: lint clean, build succeeds.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add dashboard/components/dispatch-history.tsx dashboard/components/agent-wiring.tsx dashboard/messages/en.json dashboard/messages/ar.json
+git commit -m "feat: show unified lifecycle statuses in dispatch history and wiring"
+```
+
+---
+
+## Task 14: End-to-end manual verification & finish
 
 **Files:** none (verification only).
 
@@ -1458,7 +2026,17 @@ Expected: passes (daemon boots, agent registers, API responds).
 5. Reload the page, reopen the task → confirm the transcript **persists** (loaded from `GET …/progress`).
 6. Drag a task to Running for an agent with **no live worker scenario** (e.g. stop the daemon's child by clicking **Stop** mid-run) → confirm the **"Queued, but nothing is running it"** banner + a working **Run** button.
 
-- [ ] **Step 4: Commit any fixes, then finish the branch**
+- [ ] **Step 4: Verify the unified dispatch (Part 2)**
+
+1. On the **Agents** tab, click **Dispatch task**, target `claude-code`, submit → confirm the
+   task now appears on the **Tasks** board in **Ready** (not a separate dispatch list), and in
+   **Dispatch history** with status `ready`.
+2. Move it to **Running** → confirm the loom worker runs it with the chat-window transcript.
+3. Dispatch to an **external** agent (e.g. `hermes`), move to Running → confirm a
+   `~/.loom/inbox/<project>/task-*.json` file is written and the transcript shows
+   "Dispatched to hermes via inbox" (no loom worker spawned).
+
+- [ ] **Step 5: Commit any fixes, then finish the branch**
 
 Use superpowers:finishing-a-development-branch to open a PR or merge `feat/live-task-execution-view`.
 
@@ -1466,5 +2044,17 @@ Use superpowers:finishing-a-development-branch to open a PR or merge `feat/live-
 
 ## Coverage check (self-review)
 
-- Spec "persist progress" → Tasks 1-2. "WorkerSupervisor" → Task 3. "worker one-shot mode + milestones" → Task 4. "spawn hook + control/status endpoints" → Task 5. "dashboard client" → Task 6. "worker-liveness tracking" → Task 7. "chat window + banner + i18n" → Task 8. "error handling (stop→blocked, orphan recovery)" → Task 5 stop endpoint + Task 4 resume path. "testing strategy" → Tasks 1-5 pytest, Task 9 manual.
-- The one spec item intentionally deferred: per-card live dot on the board (spec "Out of Scope / Future"). Not implemented here.
+**Part 1 (live execution view):** "persist progress" → Tasks 1-2. "WorkerSupervisor" → Task 3.
+"worker one-shot mode + milestones" → Task 4. "spawn hook + control/status endpoints" → Task 5.
+"dashboard client" → Task 6. "worker-liveness tracking" → Task 7. "chat window + banner + i18n"
+→ Task 8. "error handling (stop→blocked, orphan recovery)" → Task 5 stop + Task 4 resume.
+
+**Part 2 (dispatch ↔ Kanban unification):** "create_agent_task explicit id" → Task 9.
+"route by assignee (worker vs inbox)" → Task 10. "dispatch creates Ready task / `/dispatches`
+mapped" → Task 11. "watcher upserts agent_tasks" → Task 12. "lifecycle badges + i18n" → Task 13.
+"legacy `tasks` table deprecated in place" → no task (intentional non-action; left unused).
+
+**Testing:** Tasks 1-5, 9-12 pytest; Tasks 6-8, 13 lint+build; Task 14 manual (both parts).
+
+**Intentionally deferred** (spec "Out of scope"): per-card live dot on the board;
+auto-complete external tasks from findings; destructive migration of legacy `tasks` rows.

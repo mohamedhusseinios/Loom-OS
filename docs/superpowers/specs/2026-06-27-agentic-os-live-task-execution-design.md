@@ -293,3 +293,92 @@ worker-status models, new WS event names).
 types if typed centrally), `messages/en.json` + `messages/ar.json` (new strings).
 
 **Tests:** `tests/test_worker.py`, `tests/test_supervisor.py` (new), `tests/test_api.py`.
+
+---
+
+# Addendum (2026-06-27): Unify dispatch ↔ Kanban (route-by-assignee)
+
+**Why:** The repo has two parallel task systems — the legacy **dispatch** path (the
+`tasks` table, `POST /dispatch` + `GET /dispatches`, used by `dispatch-modal` /
+`dispatch-history` / `agent-wiring` on the Agents page) and the **Kanban** path (the
+`agent_tasks` table, the Tasks board, and everything Part 1 builds). They have separate
+storage, separate status vocabularies, and separate lifecycles. This addendum folds
+dispatch into the Kanban system so there is **one** task store, board, lifecycle, and
+detail/chat view.
+
+## Decisions (confirmed in brainstorming)
+
+| Decision | Choice |
+|----------|--------|
+| Storage | Dispatch creates an `agent_tasks` row. The legacy `tasks` table is **deprecated in place** — left intact, no destructive migration; the unified UI no longer reads it. |
+| Dispatch timing | Dispatch lands the task in **Ready** (not auto-run). Nothing executes until the task enters Running. No surprise `claude` spend. |
+| Execution routing | On entering **Running**, route by assignee: first-party agents (name ∈ `LOOM_WORKER_AGENTS`, default `{"claude-code"}`) run via the loom worker (Part 1); all other (external) agents get an inbox `task-<id>.json` dropped for filesystem-protocol pickup. |
+| Identity mapping | Dispatch `target_agent` is an agent **name** (e.g. `hermes`); the unified task's `assignee` is the agent **id** `{name}-{project}`. |
+| Inbox unification | The watcher's `_handle_task` upserts an `agent_tasks` row idempotently (by id), so any `task-*.json` dropped on the inbox also appears on the board. |
+
+## Flow
+
+```
+Agents page → Dispatch modal → POST /dispatch
+   → registry.create_agent_task(task_id, assignee={name}-{project}, status=ready,
+                                title=first line of instruction, priority=map(low/med/high))
+   → emit task:created                              (card appears on the board, Ready)
+
+Move to Running (drag a card, or click Run) → PATCH /tasks/{id} {status:running}
+   → _route_task_execution(task):
+       • first-party (agent ∈ LOOM_WORKER_AGENTS) → supervisor.spawn(...) + worker:started
+       • external (hermes, …)                     → _drop_inbox_task(...) + progress milestone
+                                                     ("Dispatched to <agent> via inbox")
+```
+
+`_route_task_execution` **supersedes** Part 1's `_start_worker_for` (the worker-spawn
+branch is unchanged; the external branch is new). The PATCH→running hook and the
+`worker/start` endpoint both call it.
+
+## API / data changes
+
+- **`POST /dispatch`** — creates an `agent_tasks` row (status **Ready**) assigned to
+  `{target_agent}-{project}`; derives `title` from the first line of the instruction;
+  maps priority `low/medium/high → 0/1/2`. Returns `{task_id, status: "ready"}`. **No
+  inbox drop at dispatch time** (the drop now happens during external routing on Running).
+- **`GET /dispatches`** — returns `agent_tasks` for the project mapped to the existing
+  `DispatchInfo` shape `{task_id, target_agent, instruction, status, dispatched_at, priority}`
+  so `dispatch-history` + `agent-wiring` keep working; `status` is now the 7-state lifecycle,
+  `target_agent` is the `assignee`, `dispatched_at` is `created_at`.
+- **`registry.create_agent_task`** — accepts an optional explicit `task_id` and an optional
+  `status` override; idempotent on the id (`INSERT OR IGNORE`).
+- **Router `_handle_task`** — upserts an `agent_tasks` row idempotently (replacing the
+  legacy `create_task` call); preserves the dual-write idempotency contract on `agent_tasks`.
+- **`LOOM_INBOX_BASE`** — the inbox root (`~/.loom/inbox`) becomes a module global in
+  `api.py` so tests redirect it to a temp dir (external routing writes a real file).
+
+## Chat-window semantics for external-agent tasks
+
+- The worker pill reads **"external: <agent>"** (no live subprocess).
+- **Run** = (re)drop the inbox `task-*.json`; **Stop** is hidden — you cannot kill an
+  autonomous external agent; the user can move the card to Blocked manually.
+- The transcript shows the dispatch milestone plus any findings the agent writes that
+  reference this `task_id` (findings already carry `task_id`; surfacing them in the feed
+  is a follow-up, see Out of scope).
+
+## Out of scope (this addendum)
+
+- Auto-completing an external task when a matching finding arrives (today: manual move to
+  Done). Future: `_handle_finding` flips the `agent_task` to Done when the finding's
+  `task_id` matches.
+- Destructive migration of legacy `tasks` rows into `agent_tasks` (the legacy table is
+  abandoned, not migrated).
+- A configuration UI for `LOOM_WORKER_AGENTS` (a constant for now).
+
+## Files touched (addendum)
+
+**Daemon:** `daemon/api.py` (`/dispatch` repointed, `/dispatches` mapped,
+`_route_task_execution`, `_drop_inbox_task`, `LOOM_WORKER_AGENTS`, `LOOM_INBOX_BASE`),
+`daemon/registry.py` (`create_agent_task` optional `task_id`/`status`),
+`daemon/router.py` (`_handle_task` upserts `agent_tasks`).
+**Dashboard:** `components/dispatch-history.tsx` + `components/agent-wiring.tsx` (lifecycle
+status badges / filter), `messages/{en,ar}.json` (lifecycle status labels). The dispatch
+modal is unchanged (still POSTs to `/dispatch`).
+**Tests:** `tests/test_api.py` (dispatch-creates-agent-task, `/dispatches` mapping,
+route-by-assignee external/first-party, fixture redirects `LOOM_INBOX_BASE`),
+`tests/test_router.py` (handle_task upsert), `tests/test_registry.py` (explicit-id create).
