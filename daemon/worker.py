@@ -216,6 +216,25 @@ class Worker:
             "workspace_path": workspace,
         })
 
+    def poll_once(self) -> None:
+        for task in self.eligible(self._get_running_tasks()):
+            self._inflight.add(task["id"])
+            try:
+                self.process_task(task)
+            finally:
+                self._inflight.discard(task["id"])
+            return  # one task per tick (V1)
+
+    def run(self) -> None:
+        self.ensure_registered()
+        logger.info("worker %s online for project %s", self.agent_id, self.project)
+        while not self._stop:
+            try:
+                self.poll_once()
+            except Exception as exc:  # never let the loop die
+                logger.warning("poll error: %s", exc)
+            time.sleep(self.poll_interval)
+
     def ensure_registered(self) -> None:
         try:
             agents = self._api("GET", f"/api/projects/{self.project}/agents")

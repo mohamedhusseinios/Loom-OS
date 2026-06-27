@@ -93,3 +93,19 @@ def test_claude_result_fields():
     assert r.text == "ok"
     assert r.session_id is None
     assert r.is_error is False
+
+
+def test_poll_once_processes_one_eligible_task(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    monkeypatch.setattr(
+        w, "_get_running_tasks",
+        lambda: [
+            {"id": "a", "assignee": "claude-code-noor", "title": "A", "instruction": "x", "result": None},
+            {"id": "b", "assignee": "other", "title": "B", "instruction": "y", "result": None},
+        ],
+    )
+    processed = []
+    monkeypatch.setattr(w, "process_task", lambda task: processed.append(task["id"]))
+
+    w.poll_once()
+    assert processed == ["a"]  # only the assigned one, one at a time

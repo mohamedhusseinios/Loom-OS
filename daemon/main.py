@@ -66,6 +66,24 @@ def cmd_unregister(args):
     print(f"\nOr use the dashboard: open the project's Agents page and click the trash icon.")
 
 
+def cmd_worker(args):
+    """Run a Loom worker that executes Running tasks with Claude Code."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    from daemon.worker import Worker
+    Worker(
+        project=args.project,
+        agent=args.agent,
+        project_path=os.path.expanduser(args.project_path),
+        base_url=args.base_url,
+        model=args.model,
+        max_budget_usd=args.max_budget_usd,
+        poll_interval=args.poll,
+    ).run()
+
+
 def cmd_detect_agents(_args):
     """List coding agents detected on this machine."""
     from daemon.known_agents import get_known_agents, detect_installed
@@ -102,7 +120,7 @@ def main():
     # but with start flags), silently insert "start" so they don't get the
     # confusing "invalid choice: '127.0.0.1'" error.
     # Don't intercept --help / -h — let the main parser show all subcommands.
-    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents"}
+    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents", "worker"}
     if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
         pass
     elif len(sys.argv) > 1 and sys.argv[1] not in KNOWN_SUBCOMMANDS and not sys.argv[1].startswith("-"):
@@ -143,6 +161,17 @@ def main():
     # ---- loom detect-agents ----
     detect_p = sub.add_parser("detect-agents", help="List coding agents detected on this machine")
     detect_p.set_defaults(func=cmd_detect_agents)
+
+    # ---- loom worker ----
+    worker_p = sub.add_parser("worker", help="Run a worker that executes Running tasks with Claude Code")
+    worker_p.add_argument("--project", required=True, help="Project identifier")
+    worker_p.add_argument("--agent", default="claude-code", help="Agent name (default: claude-code)")
+    worker_p.add_argument("--project-path", required=True, help="Absolute path to the git project")
+    worker_p.add_argument("--base-url", default="http://127.0.0.1:8472", help="Daemon base URL")
+    worker_p.add_argument("--model", default=None, help="Claude model (optional)")
+    worker_p.add_argument("--max-budget-usd", type=float, default=5.0, help="Max USD to spend per task")
+    worker_p.add_argument("--poll", type=float, default=2.5, help="Poll interval seconds")
+    worker_p.set_defaults(func=cmd_worker)
 
     args = parser.parse_args()
 
