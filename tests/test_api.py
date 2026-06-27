@@ -206,16 +206,21 @@ def test_create_project_duplicate_returns_409(client):
     assert "detail" in res.json()
 
 
-def test_dispatch_task(client):
-    """POST /dispatch persists a task and returns its id."""
+def test_dispatch_creates_ready_agent_task(client):
     res = client.post(
         "/api/projects/noor/dispatch",
         json={"target_agent": "claude-code", "instruction": "review auth", "priority": "high"},
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "dispatched"
-    assert "task_id" in data
+    assert data["status"] == "ready"
+    task_id = data["task_id"]
+    tasks = client.get("/api/projects/noor/tasks").json()
+    t = next(x for x in tasks if x["id"] == task_id)
+    assert t["status"] == "ready"
+    assert t["assignee"] == "claude-code-noor"
+    assert t["title"] == "review auth"
+    assert t["priority"] == 2  # high → 2
 
 
 def test_dispatch_task_unknown_project_404(client):

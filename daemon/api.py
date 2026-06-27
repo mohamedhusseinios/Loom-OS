@@ -173,53 +173,51 @@ async def query_graph(project_id: str, q: str = ""):
     result = await graph_engine.query(project.project_path, q)
     return result.model_dump()
 
+_DISPATCH_PRIORITY = {"low": 0, "medium": 1, "high": 2}
+
+
 @app.post("/api/projects/{project_id}/dispatch")
 async def dispatch_task(project_id: str, payload: DispatchRequest):
-    """Dispatch a task to an agent.
+    """Dispatch a task to an agent — creates a Ready Kanban task (unified system).
 
-    Persistence is owned here: we write the inbox file (so an offline agent /
-    the watcher can pick it up) AND insert the registry row atomically. The
-    watcher's ``_handle_task`` is idempotent, so reprocessing the dropped file
-    is a no-op rather than a duplicate insert / duplicate broadcast.
+    Execution is deferred until the task enters Running, where it routes by
+    assignee (loom worker for first-party agents, inbox drop for external ones).
     """
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    task_id = str(uuid.uuid4())
-    task_payload = TaskPayload(
-        task_id=task_id,
-        target_agent=payload.target_agent,
+    task_id = str(uuid.uuid4())[:12]
+    first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]
+    create = AgentTaskCreatePayload(
+        project=project_id,
+        title=first_line[:80] or "Dispatched task",
         instruction=payload.instruction,
-        priority=payload.priority,
+        assignee=f"{payload.target_agent}-{project_id}",
+        priority=_DISPATCH_PRIORITY.get(payload.priority, 1),
     )
+    await registry.create_agent_task(create, task_id=task_id, status=AgentTaskStatus.READY)
+    record = await registry.get_agent_task(task_id)
+    if record and router:
+        await router._emit_event("task:created", project_id, record.model_dump())
+    return {"task_id": task_id, "status": "ready"}
 
-    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
-    os.makedirs(inbox_dir, exist_ok=True)
-    task_path = os.path.join(inbox_dir, f"task-{task_id}.json")
-    with open(task_path, "w") as f:
-        f.write(task_payload.model_dump_json())
-
-    created = await registry.create_task(
-        task_id, project_id, payload.target_agent, payload.instruction, payload.priority
-    )
-
-    # Only emit on the first creation — the watcher path (and any retry)
-    # returns False from create_task and stays silent.
-    if created and router:
-        await router._emit_event("agent:dispatched", project_id, {
-            "task_id": task_id,
-            "target_agent": payload.target_agent,
-            "instruction": payload.instruction,
-        })
-
-    return {"task_id": task_id, "status": "dispatched"}
 
 @app.get("/api/projects/{project_id}/dispatches")
 async def list_dispatches(project_id: str):
-    """List task dispatches for a project."""
-    tasks = await registry.list_tasks(project_id)
-    return {"dispatches": tasks}
+    """List dispatched/Kanban tasks for a project (unified), dispatch-shaped."""
+    tasks = await registry.list_agent_tasks(project_id)
+    return {"dispatches": [
+        {
+            "task_id": t.id,
+            "target_agent": t.assignee or "",
+            "instruction": t.instruction,
+            "status": t.status.value,
+            "dispatched_at": t.created_at,
+            "priority": t.priority,
+        }
+        for t in tasks
+    ]}
 
 
 @app.post("/api/projects/{project_id}/register-agent")
