@@ -73,6 +73,10 @@ def list_branches(repo_path: str) -> dict:
     current = current_branch(repo_path)
     local_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads")
     remote_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+    if local_proc.returncode != 0:
+        raise RuntimeError(f"git for-each-ref (heads) failed: {local_proc.stderr.strip()}")
+    if remote_proc.returncode != 0:
+        raise RuntimeError(f"git for-each-ref (remotes) failed: {remote_proc.stderr.strip()}")
     local = [n for n in local_proc.stdout.split("\n") if n and not n.startswith("loom/task-")]
     local_set = set(local)
     branches = [{"name": n, "remote": False} for n in local]
@@ -80,6 +84,8 @@ def list_branches(repo_path: str) -> dict:
         if not n or n.endswith("/HEAD"):
             continue
         short = n.split("/", 1)[1] if "/" in n else n
+        if short.startswith("loom/task-"):
+            continue
         if short in local_set:
             continue
         branches.append({"name": n, "remote": True})
@@ -112,7 +118,9 @@ def merge_branch_into(repo_path: str, source_branch: str, target: str,
         proc = _run(wt, "merge", "--no-ff", "-m", f"Merge {source_branch}", source_branch)
         out = (proc.stdout + proc.stderr).strip()
         if proc.returncode != 0:
-            _run(wt, "merge", "--abort")
+            abort = _run(wt, "merge", "--abort")
+            if abort.returncode != 0:
+                out = f"{out}\n(merge --abort failed: {(abort.stdout + abort.stderr).strip()})"
             return False, out
         return True, out
     finally:

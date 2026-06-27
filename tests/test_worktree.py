@@ -108,3 +108,32 @@ def test_merge_branch_into_conflict_aborts(repo, tmp_path):
     assert _git(repo, "status", "--porcelain").strip() == ""
     assert "loom-merge" not in _git(repo, "worktree", "list")
     worktree.remove_worktree(str(repo), str(ws))
+
+
+def test_merge_branch_into_remote_target_creates_local_no_push(repo, tmp_path):
+    # Bare remote cloned from repo, with a 'feature' branch at main's commit
+    # (shared history, so the later merge is clean rather than "unrelated").
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "--bare", str(repo), str(bare)],
+                   check=True, capture_output=True, text=True)
+    _git(bare, "branch", "feature", "main")
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "fetch", "origin")
+    # Task branch forks from main and adds a file.
+    ws = tmp_path / "ws" / "task-r"
+    worktree.create_worktree(str(repo), str(ws), "loom/task-r", base_ref="main")
+    (ws / "feature.txt").write_text("remote work\n")
+    worktree.commit_all(str(ws), "task r")
+
+    ok, _out = worktree.merge_branch_into(
+        str(repo), "loom/task-r", "origin/feature", target_is_remote=True
+    )
+    assert ok is True
+    # A local 'feature' branch was created and contains the merged file.
+    assert "feature" in _git(repo, "branch", "--list", "feature")
+    assert "remote work" in _git(repo, "show", "feature:feature.txt")
+    # Nothing was pushed: the bare remote's 'feature' has no feature.txt.
+    pushed = subprocess.run(["git", "-C", str(bare), "show", "feature:feature.txt"],
+                            capture_output=True, text=True)
+    assert pushed.returncode != 0
+    worktree.remove_worktree(str(repo), str(ws))
