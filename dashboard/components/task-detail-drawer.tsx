@@ -84,7 +84,14 @@ export function TaskDetailDrawer({
     const taskId = task.id;
     let cancelled = false;
     getTaskProgress(projectId, taskId)
-      .then((p) => { if (!cancelled) setProgress(p.items); })
+      .then((p) => {
+        if (cancelled) return;
+        setProgress((live) =>
+          live.length === 0
+            ? p.items
+            : [...p.items, ...live.filter((l) => !p.items.some((h) => h.seq === l.seq))],
+        );
+      })
       .catch(() => {});
     const unsub = subscribe("task:progress", (event) => {
       const d = event.data as { id: string; seq: number; kind: string; message: string };
@@ -100,7 +107,7 @@ export function TaskDetailDrawer({
 
   // Auto-scroll the feed to the newest line.
   useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    if (feedRef.current && progress.length > 0) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [progress]);
 
   if (!task) return null;
