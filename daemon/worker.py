@@ -221,7 +221,7 @@ class Worker:
         meta["session_id"] = result.session_id
 
         if result.is_error:
-            meta["error"] = result.text or "claude reported an error"
+            meta["error"] = result.text or f"{self.agent} reported an error"
             self._post_progress(task_id, meta["error"], kind="error")
             self._patch_task(task_id, {
                 "status": "blocked", "result": json.dumps(meta),
