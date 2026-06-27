@@ -85,13 +85,23 @@ export function TaskDetailDrawer({
   }
 
   async function handleStatus(status: AgentTaskStatus) {
-    await updateAgentTask(projectId, task.id, { status });
-    onChanged();
+    try {
+      await updateAgentTask(projectId, task.id, { status });
+    } catch {
+      // ignore — the finally re-syncs from server state
+    } finally {
+      onChanged();
+    }
   }
 
   async function handleAssignee(assignee: string) {
-    await updateAgentTask(projectId, task.id, { assignee: assignee || null });
-    onChanged();
+    try {
+      await updateAgentTask(projectId, task.id, { assignee: assignee || null });
+    } catch {
+      // ignore — the finally re-syncs from server state
+    } finally {
+      onChanged();
+    }
   }
 
   return (
@@ -104,8 +114,9 @@ export function TaskDetailDrawer({
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         <div>
-          <label className="text-zinc-500 block mb-1">{t("status")}</label>
+          <label htmlFor="task-status" className="text-zinc-500 block mb-1">{t("status")}</label>
           <select
+            id="task-status"
             value={task.status}
             onChange={(e) => handleStatus(e.target.value as AgentTaskStatus)}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-200"
@@ -118,8 +129,9 @@ export function TaskDetailDrawer({
           </select>
         </div>
         <div>
-          <label className="text-zinc-500 block mb-1">{t("assignee")}</label>
+          <label htmlFor="task-assignee" className="text-zinc-500 block mb-1">{t("assignee")}</label>
           <select
+            id="task-assignee"
             value={task.assignee || ""}
             onChange={(e) => handleAssignee(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-200"
@@ -148,7 +160,7 @@ export function TaskDetailDrawer({
             <p className="text-zinc-300 whitespace-pre-wrap">{parseSummary(task.result)}</p>
           </div>
         )}
-        {diff && (
+        {(task.status === "done" || task.status === "blocked") && diff && (
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-zinc-500">{t("diff")}</label>
