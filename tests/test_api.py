@@ -427,27 +427,26 @@ def test_task_create_and_update_emit_ws_events(client):
     from daemon.router import Router
     import daemon.api as api_module
 
-    # The fixture sets router=None; inject a real Router so endpoints emit.
     api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        res = client.post(
+            "/api/projects/noor/tasks",
+            json={"project": "noor", "title": "T", "instruction": "do", "priority": 0},
+        )
+        assert res.status_code == 201
+        task_id = res.json()["id"]
 
-    res = client.post(
-        "/api/projects/noor/tasks",
-        json={"project": "noor", "title": "T", "instruction": "do", "priority": 0},
-    )
-    assert res.status_code == 201
-    task_id = res.json()["id"]
+        created = api_module.router.events.get_nowait()
+        assert created.event == "task:created"
+        assert created.data["id"] == task_id
 
-    created = api_module.router.events.get_nowait()
-    assert created.event == "task:created"
-    assert created.data["id"] == task_id
-
-    res = client.patch(
-        f"/api/projects/noor/tasks/{task_id}",
-        json={"status": "running", "assignee": "claude-code-noor"},
-    )
-    assert res.status_code == 200
-    updated = api_module.router.events.get_nowait()
-    assert updated.event == "task:updated"
-    assert updated.data["status"] == "running"
-
-    api_module.router = None  # reset for other tests
+        res = client.patch(
+            f"/api/projects/noor/tasks/{task_id}",
+            json={"status": "running", "assignee": "claude-code-noor"},
+        )
+        assert res.status_code == 200
+        updated = api_module.router.events.get_nowait()
+        assert updated.event == "task:updated"
+        assert updated.data["status"] == "running"
+    finally:
+        api_module.router = None  # always reset, even on failure
