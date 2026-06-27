@@ -157,6 +157,65 @@ class Worker:
                 f"# Task complete: {title}\n\n{text}\n"
             )
 
+    def process_task(self, task: dict) -> None:
+        task_id = task["id"]
+        title = task.get("title", "")
+        instruction = task.get("instruction", "")
+        criteria = task.get("acceptance_criteria") or ""
+        branch = f"loom/task-{task_id}"
+        workspace = os.path.join(self.workspaces_dir, self.project, f"task-{task_id}")
+
+        # current_branch() + create_worktree() both require a git repo; a
+        # misconfigured project_path must block the task, not crash the loop.
+        try:
+            base_branch = current_branch(self.project_path)
+            create_worktree(self.project_path, workspace, branch, base_ref=base_branch)
+        except RuntimeError as exc:
+            self._patch_task(task_id, {
+                "status": "blocked",
+                "result": json.dumps({"branch": branch, "base_branch": "unknown",
+                                      "error": f"worktree failed: {exc}"}),
+            })
+            return
+
+        meta = {"branch": branch, "base_branch": base_branch}
+
+        self._patch_task(task_id, {"workspace_path": workspace})
+
+        prompt = instruction
+        if criteria:
+            prompt = f"{instruction}\n\nAcceptance criteria:\n{criteria}"
+
+        resume = None
+        try:
+            prior = json.loads(task.get("result") or "{}")
+            resume = prior.get("session_id")
+        except (ValueError, TypeError):
+            resume = None
+
+        result = run_claude(
+            prompt, cwd=workspace, model=self.model, max_budget_usd=self.max_budget_usd,
+            resume=resume, on_progress=lambda line: self._post_progress(task_id, line),
+        )
+
+        meta["summary"] = result.text
+        meta["session_id"] = result.session_id
+
+        if result.is_error:
+            meta["error"] = result.text or "claude reported an error"
+            self._patch_task(task_id, {
+                "status": "blocked", "result": json.dumps(meta),
+                "workspace_path": workspace,
+            })
+            return
+
+        commit_all(workspace, f"loom task {task_id}: {title}")
+        self._write_finding(task_id, title, result.text)
+        self._patch_task(task_id, {
+            "status": "done", "result": json.dumps(meta),
+            "workspace_path": workspace,
+        })
+
     def ensure_registered(self) -> None:
         try:
             agents = self._api("GET", f"/api/projects/{self.project}/agents")

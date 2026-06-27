@@ -1,3 +1,4 @@
+import daemon.worker as worker_mod
 from daemon.worker import Worker, ClaudeResult
 
 
@@ -6,6 +7,68 @@ def _worker(**kw):
         project="noor", agent="claude-code",
         project_path="/tmp/noor", base_url="http://x", **kw,
     )
+
+
+class _CaptureWorker(Worker):
+    """Captures PATCH/finding/progress instead of doing real I/O."""
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.patches = []
+        self.findings = []
+        self.progress = []
+    def _patch_task(self, task_id, body):
+        self.patches.append((task_id, body)); return {}
+    def _post_progress(self, task_id, message):
+        self.progress.append((task_id, message))
+    def _write_finding(self, task_id, title, text):
+        self.findings.append((task_id, title, text))
+
+
+def _patch_git_and_claude(monkeypatch, claude_result):
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+    monkeypatch.setattr(worker_mod, "create_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(worker_mod, "commit_all", lambda *a, **k: True)
+    monkeypatch.setattr(worker_mod, "run_claude", lambda *a, **k: claude_result)
+
+
+def test_process_task_success_marks_done_and_writes_finding(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    _patch_git_and_claude(monkeypatch, ClaudeResult("did the work", "sess-1", False))
+
+    w.process_task({"id": "t1", "title": "Fix bug", "instruction": "fix it",
+                    "acceptance_criteria": "", "result": None})
+
+    final = w.patches[-1]
+    assert final[0] == "t1"
+    assert final[1]["status"] == "done"
+    body = __import__("json").loads(final[1]["result"])
+    assert body["session_id"] == "sess-1"
+    assert body["branch"] == "loom/task-t1"
+    assert body["base_branch"] == "main"
+    assert w.findings and w.findings[0][2] == "did the work"
+
+
+def test_process_task_claude_error_marks_blocked(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    _patch_git_and_claude(monkeypatch, ClaudeResult("boom", "sess-2", True))
+
+    w.process_task({"id": "t2", "title": "T", "instruction": "x",
+                    "acceptance_criteria": "", "result": None})
+
+    assert w.patches[-1][1]["status"] == "blocked"
+    assert w.findings == []  # no finding on failure
+
+
+def test_process_task_worktree_failure_marks_blocked(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+    def _boom(*a, **k):
+        raise RuntimeError("not a git repo")
+    monkeypatch.setattr(worker_mod, "create_worktree", _boom)
+
+    w.process_task({"id": "t3", "title": "T", "instruction": "x", "result": None})
+    assert w.patches[-1][1]["status"] == "blocked"
+    assert "not a git repo" in w.patches[-1][1]["result"]
 
 
 def test_agent_id_matches_daemon_convention():
