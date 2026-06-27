@@ -133,3 +133,29 @@ async def test_recall_integration_preserves_existing_behavior(tmp_path):
     agent = await reg.get_agent("test-agent-test-proj")
     assert agent is not None
     await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_handle_task_upserts_agent_task(tmp_path):
+    from daemon.registry import AgentRegistry
+    from daemon.graph_engine import GraphEngine
+    from daemon.router import Router
+    from daemon.models import TaskPayload
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    await reg.upsert_project("noor", str(tmp_path / "noor"))
+    router = Router(reg, GraphEngine())
+
+    f = tmp_path / "task-abc123.json"
+    f.write_text(TaskPayload(task_id="abc123", target_agent="hermes",
+                             instruction="ship it", priority="high").model_dump_json())
+    await router._handle_task("noor", f)
+    rec = await reg.get_agent_task("abc123")
+    assert rec is not None
+    assert rec.status.value == "ready"
+    assert rec.assignee == "hermes-noor"
+
+    await router._handle_task("noor", f)  # idempotent re-handle
+    tasks = await reg.list_agent_tasks("noor")
+    assert sum(1 for t in tasks if t.id == "abc123") == 1
+    await reg.close()

@@ -14,6 +14,7 @@ from daemon.graph_engine import GraphEngine
 from daemon.models import (
     RegisterPayload, HeartbeatPayload, FindingFrontmatter,
     AgentInfo, AgentStatus, FindingType, WsEvent, TaskPayload,
+    AgentTaskCreatePayload, AgentTaskStatus,
 )
 
 if TYPE_CHECKING:
@@ -160,13 +161,22 @@ class Router:
 
     async def _handle_task(self, project: str, path: Path):
         payload = TaskPayload(**json.loads(path.read_text()))
-        # Idempotent: if the API already persisted this task, don't
-        # re-insert or re-broadcast. create_task returns False on collision.
-        created = await self.registry.create_task(
-            payload.task_id, project, payload.target_agent,
-            payload.instruction, payload.priority,
+        before = await self.registry.get_agent_task(payload.task_id)
+        first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]
+        await self.registry.create_agent_task(
+            AgentTaskCreatePayload(
+                project=project,
+                title=first_line[:80] or "Dispatched task",
+                instruction=payload.instruction,
+                assignee=f"{payload.target_agent}-{project}",
+                priority={"low": 0, "medium": 1, "high": 2}.get(payload.priority, 1),
+            ),
+            task_id=payload.task_id,
+            status=AgentTaskStatus.READY,
         )
-        if created:
+        if before is None:
+            record = await self.registry.get_agent_task(payload.task_id)
+            await self._emit_event("task:created", project, record.model_dump())
             await self._emit_event("agent:dispatched", project, {
                 "task_id": payload.task_id,
                 "target_agent": payload.target_agent,
