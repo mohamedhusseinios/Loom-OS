@@ -14,19 +14,15 @@ import subprocess
 import time
 import urllib.request
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from daemon.worktree import create_worktree, commit_all, current_branch
+from daemon.runners import AgentResult, RUNNERS, run_stdout
 
 logger = logging.getLogger("loom.worker")
 
-
-@dataclass
-class ClaudeResult:
-    text: str
-    session_id: str | None
-    is_error: bool
+# Back-compat alias: run_claude still returns this; tests import ClaudeResult.
+ClaudeResult = AgentResult
 
 
 def _summarize_event(event: dict) -> str:
@@ -85,6 +81,24 @@ def run_claude(prompt, cwd, model=None, max_budget_usd=5.0, resume=None, on_prog
         if not final["text"]:
             final["text"] = (proc.stderr.read() or "claude exited non-zero").strip()
     return ClaudeResult(final["text"], final["session_id"], final["is_error"])
+
+
+def run_agent(agent, prompt, cwd, model=None, max_budget_usd=5.0,
+              resume=None, on_progress=None) -> AgentResult:
+    """Dispatch to the right runner for ``agent`` (a canonical name).
+
+    Claude keeps its rich stream-json path (run_claude); every other registered
+    agent runs through the generic stdout runner. Unknown agents raise — the API
+    spawn gate (daemon.api.LOOM_WORKER_AGENTS) only routes registered agents here.
+    """
+    if agent == "claude-code":
+        return run_claude(prompt, cwd, model=model,
+                          max_budget_usd=max_budget_usd, resume=resume,
+                          on_progress=on_progress)
+    spec = RUNNERS.get(agent)
+    if spec is None:
+        raise ValueError(f"no runner for agent {agent!r}")
+    return run_stdout(spec, prompt, cwd, on_progress=on_progress)
 
 
 class Worker:
@@ -196,9 +210,9 @@ class Worker:
             resume = None
 
         self._post_progress(task_id, "Agent started", kind="milestone")
-        result = run_claude(
-            prompt, cwd=workspace, model=self.model, max_budget_usd=self.max_budget_usd,
-            resume=resume,
+        result = run_agent(
+            self.agent, prompt, cwd=workspace, model=self.model,
+            max_budget_usd=self.max_budget_usd, resume=resume,
             on_progress=lambda line: self._post_progress(
                 task_id, line, kind="tool" if line.startswith("tool:") else "text"),
         )
@@ -207,7 +221,7 @@ class Worker:
         meta["session_id"] = result.session_id
 
         if result.is_error:
-            meta["error"] = result.text or "claude reported an error"
+            meta["error"] = result.text or f"{self.agent} reported an error"
             self._post_progress(task_id, meta["error"], kind="error")
             self._patch_task(task_id, {
                 "status": "blocked", "result": json.dumps(meta),

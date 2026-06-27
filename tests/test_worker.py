@@ -1,3 +1,5 @@
+import pytest
+
 import daemon.worker as worker_mod
 from daemon.worker import Worker, ClaudeResult
 
@@ -185,3 +187,40 @@ def test_process_task_posts_milestones_and_summary(monkeypatch):
     kinds = [k for (_tid, k, _m) in w.progress]
     assert "milestone" in kinds
     assert "summary" in kinds
+
+
+from daemon.runners import AgentResult
+
+
+def test_run_agent_routes_claude_to_run_claude(monkeypatch):
+    monkeypatch.setattr(worker_mod, "run_claude",
+                        lambda *a, **k: AgentResult("c", "s", False))
+    r = worker_mod.run_agent("claude-code", "p", "/tmp")
+    assert r.text == "c" and r.session_id == "s"
+
+
+def test_run_agent_unknown_raises():
+    with pytest.raises(ValueError):
+        worker_mod.run_agent("nonesuch", "p", "/tmp")
+
+
+def test_process_task_uses_run_stdout_for_non_claude(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="hermes",
+                       project_path="/tmp/noor", base_url="http://x")
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+    monkeypatch.setattr(worker_mod, "create_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(worker_mod, "commit_all", lambda *a, **k: True)
+    captured = {}
+
+    def fake_run_stdout(spec, prompt, cwd, on_progress=None):
+        captured["binary"] = spec.binary
+        return AgentResult("hermes did it", None, False)
+
+    monkeypatch.setattr(worker_mod, "run_stdout", fake_run_stdout)
+    w.process_task({"id": "h1", "title": "T", "instruction": "x",
+                    "acceptance_criteria": "", "result": None})
+
+    assert captured["binary"] == "hermes"
+    assert w.patches[-1][1]["status"] == "done"
+    body = __import__("json").loads(w.patches[-1][1]["result"])
+    assert body["summary"] == "hermes did it"

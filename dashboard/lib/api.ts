@@ -203,6 +203,10 @@ export async function listKnownAgents(): Promise<{ agents: KnownAgent[] }> {
   return fetchApi("/api/agents/known");
 }
 
+export async function listRunnableAgents(): Promise<{ agents: string[] }> {
+  return fetchApi("/api/agents/runnable");
+}
+
 // --- Knowledge Sources ---
 export interface KnowledgeSourceResult {
   source_type: string;

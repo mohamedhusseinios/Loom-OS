@@ -243,6 +243,8 @@
     "run": "Run",
     "stop": "Stop",
     "noWorkerTitle": "Queued, but nothing is running it",
-    "noWorkerBody": "This task is in Running, but no worker is attached. Click Run to start one."
+    "noWorkerBody": "This task is in Running, but no worker is attached. Click Run to start one.",
+    "externalAgentTitle": "External agent — can't run from here",
+    "externalAgentBody": "{agent} runs in its own process and can't be started from the dashboard. Assign a runnable agent (e.g. claude-code) to run this task here."
   }
 }
