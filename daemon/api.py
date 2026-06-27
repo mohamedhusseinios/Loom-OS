@@ -659,10 +659,20 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/progress")
 async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayload):
-    """Relay a live progress line from the worker to WebSocket clients."""
+    """Persist a progress line and relay it to WebSocket clients."""
+    seq = await registry.append_progress(task_id, payload.kind, payload.message)
     if router:
-        await router._emit_event("task:progress", project_id, {"id": task_id, "message": payload.message})
-    return {"ok": True}
+        await router._emit_event("task:progress", project_id, {
+            "id": task_id, "seq": seq, "kind": payload.kind, "message": payload.message,
+        })
+    return {"ok": True, "seq": seq}
+
+
+@app.get("/api/projects/{project_id}/tasks/{task_id}/progress")
+async def get_task_progress(project_id: str, task_id: str):
+    """Return the persisted progress transcript for a task, ordered by seq."""
+    items = await registry.list_progress(task_id)
+    return {"items": [i.model_dump() for i in items]}
 
 
 def _task_base_branch(record: AgentTaskRecord) -> str:

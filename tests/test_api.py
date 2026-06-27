@@ -506,9 +506,28 @@ def test_task_progress_endpoint_emits_event(client):
         assert res.status_code == 200
         ev = api_module.router.events.get_nowait()
         assert ev.event == "task:progress"
-        assert ev.data == {"id": task_id, "message": "running tool: Edit"}
+        assert ev.data == {
+            "id": task_id, "seq": 1, "kind": "text", "message": "running tool: Edit",
+        }
     finally:
         api_module.router = None
+
+
+def test_task_progress_persisted_and_listed(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "do"})
+    task_id = res.json()["id"]
+    client.post(f"/api/projects/noor/tasks/{task_id}/progress",
+                json={"message": "worktree created", "kind": "milestone"})
+    client.post(f"/api/projects/noor/tasks/{task_id}/progress",
+                json={"message": "tool: Edit"})
+    res = client.get(f"/api/projects/noor/tasks/{task_id}/progress")
+    assert res.status_code == 200
+    items = res.json()["items"]
+    assert [i["seq"] for i in items] == [1, 2]
+    assert items[0]["kind"] == "milestone"
+    assert items[0]["message"] == "worktree created"
+    assert items[1]["kind"] == "text"
 
 
 def test_update_persists_workspace_path(client):
