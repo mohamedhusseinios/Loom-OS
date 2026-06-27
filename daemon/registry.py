@@ -265,17 +265,24 @@ class AgentRegistry:
     # Agent task CRUD (Kanban board — Feature 2)
     # ----------------------------------------------------------------
 
-    async def create_agent_task(self, payload: AgentTaskCreatePayload) -> str:
+    async def create_agent_task(
+        self,
+        payload: AgentTaskCreatePayload,
+        task_id: str | None = None,
+        status: AgentTaskStatus | None = None,
+    ) -> str:
         import uuid
         now = datetime.now(timezone.utc).isoformat()
-        task_id = str(uuid.uuid4())[:12]
+        if task_id is None:
+            task_id = str(uuid.uuid4())[:12]
 
-        status = AgentTaskStatus.READY if (
-            payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
-        ) else AgentTaskStatus.TODO
+        if status is None:
+            status = AgentTaskStatus.READY if (
+                payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
+            ) else AgentTaskStatus.TODO
 
         await self.db.execute(
-            """INSERT INTO agent_tasks
+            """INSERT OR IGNORE INTO agent_tasks
                (id, project, title, instruction, status, assignee,
                 priority, dependencies, acceptance_criteria, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",

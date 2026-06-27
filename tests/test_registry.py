@@ -126,3 +126,22 @@ async def test_append_and_list_progress(tmp_path):
     # isolation between tasks
     assert await reg.list_progress("other") == []
     await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_create_agent_task_explicit_id_is_idempotent(tmp_path):
+    from daemon.registry import AgentRegistry
+    from daemon.models import AgentTaskCreatePayload, AgentTaskStatus
+    reg = AgentRegistry(str(tmp_path / "t.db"))
+    await reg.initialize()
+    payload = AgentTaskCreatePayload(
+        project="noor", title="T", instruction="do", assignee="claude-code-noor")
+    id1 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    id2 = await reg.create_agent_task(payload, task_id="fixed-1", status=AgentTaskStatus.READY)
+    assert id1 == id2 == "fixed-1"
+    rec = await reg.get_agent_task("fixed-1")
+    assert rec.status == AgentTaskStatus.READY
+    assert rec.assignee == "claude-code-noor"
+    tasks = await reg.list_agent_tasks("noor")
+    assert sum(1 for t in tasks if t.id == "fixed-1") == 1  # only one row
+    await reg.close()
