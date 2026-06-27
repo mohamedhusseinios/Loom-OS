@@ -256,12 +256,12 @@ class Worker:
 
     def ensure_registered(self) -> None:
         try:
-            agents = self._api("GET", f"/api/projects/{self.project}/agents")
+            resp = self._api("GET", f"/api/projects/{self.project}/agents")
+            agents = resp.get("agents", []) if isinstance(resp, dict) else (resp or [])
         except Exception:
             agents = []
         if self.agent_id not in {a.get("agent_id") for a in agents}:
             self._api("POST", f"/api/projects/{self.project}/register-agent", {
                 "agent": self.agent, "version": "1.0",
-                "project_path": self.project_path,
-                "capabilities": ["task-execution"],
+                "project_path": self.project_path, "capabilities": ["task-execution"],
             })

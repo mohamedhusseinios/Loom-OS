@@ -109,3 +109,40 @@ def test_poll_once_processes_one_eligible_task(monkeypatch):
 
     w.poll_once()
     assert processed == ["a"]  # only the assigned one, one at a time
+
+
+# ---------------------------------------------------------------------------
+# ensure_registered dedup tests
+# ---------------------------------------------------------------------------
+
+class _RegWorker(Worker):
+    def __init__(self, existing, **kw):
+        super().__init__(**kw)
+        self._existing = existing
+        self.posts = []
+
+    def _api(self, method, path, body=None):
+        if method == "GET" and path.endswith("/agents"):
+            return {"agents": self._existing}
+        if method == "POST":
+            self.posts.append((path, body))
+        return {}
+
+
+def test_ensure_registered_skips_when_already_registered():
+    w = _RegWorker(
+        [{"agent_id": "claude-code-noor"}],
+        project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x",
+    )
+    w.ensure_registered()
+    assert w.posts == []  # already present → no register POST
+
+
+def test_ensure_registered_registers_when_absent():
+    w = _RegWorker(
+        [],
+        project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x",
+    )
+    w.ensure_registered()
+    assert len(w.posts) == 1
+    assert "register-agent" in w.posts[0][0]
