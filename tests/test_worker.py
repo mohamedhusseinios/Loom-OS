@@ -32,7 +32,7 @@ def _patch_git_and_claude(monkeypatch, claude_result):
 
 
 def test_process_task_success_marks_done_and_writes_finding(monkeypatch):
-    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
     _patch_git_and_claude(monkeypatch, ClaudeResult("did the work", "sess-1", False))
 
     w.process_task({"id": "t1", "title": "Fix bug", "instruction": "fix it",
@@ -45,11 +45,12 @@ def test_process_task_success_marks_done_and_writes_finding(monkeypatch):
     assert body["session_id"] == "sess-1"
     assert body["branch"] == "loom/task-t1"
     assert body["base_branch"] == "main"
+    assert body["summary"] == "did the work"
     assert w.findings and w.findings[0][2] == "did the work"
 
 
 def test_process_task_claude_error_marks_blocked(monkeypatch):
-    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
     _patch_git_and_claude(monkeypatch, ClaudeResult("boom", "sess-2", True))
 
     w.process_task({"id": "t2", "title": "T", "instruction": "x",
@@ -60,7 +61,7 @@ def test_process_task_claude_error_marks_blocked(monkeypatch):
 
 
 def test_process_task_worktree_failure_marks_blocked(monkeypatch):
-    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor")
+    w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
     monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
     def _boom(*a, **k):
         raise RuntimeError("not a git repo")
