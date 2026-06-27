@@ -306,10 +306,26 @@ export async function getTaskDiff(projectId: string, taskId: string): Promise<{ 
   return fetchApi(`/api/projects/${projectId}/tasks/${taskId}/diff`);
 }
 
-export async function mergeTask(projectId: string, taskId: string): Promise<{ merged: boolean; output: string }> {
-  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/merge`, { method: "POST" });
+export async function mergeTask(
+  projectId: string,
+  taskId: string,
+  target?: string,
+  remote?: boolean,
+): Promise<{ merged: boolean; output: string; target: string }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target, remote }),
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+export async function getBranches(projectId: string): Promise<{
+  current: string;
+  branches: { name: string; remote: boolean }[];
+}> {
+  return fetchApi(`/api/projects/${projectId}/branches`);
 }
 
 export interface TaskProgressItem {
