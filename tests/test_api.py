@@ -453,23 +453,34 @@ def test_task_create_and_update_emit_ws_events(client):
 
 
 def test_dependency_repromotion_on_parent_done(client):
-    """A todo child auto-promotes to ready when its parent is marked done."""
-    res = client.post(
-        "/api/projects/noor/tasks",
-        json={"project": "noor", "title": "Parent", "instruction": "x"},
-    )
+    """A todo child auto-promotes to ready when its parent is marked done,
+    and a task:updated event is emitted for the promoted child."""
+    from daemon.router import Router
+    import daemon.api as api_module
+
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "Parent", "instruction": "x"})
     parent_id = res.json()["id"]
-
-    res = client.post(
-        "/api/projects/noor/tasks",
-        json={"project": "noor", "title": "Child", "instruction": "y",
-              "dependencies": [parent_id]},
-    )
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "Child", "instruction": "y",
+                            "dependencies": [parent_id]})
     child_id = res.json()["id"]
-    assert res.json()["status"] == "todo"  # parent not done yet
+    assert res.json()["status"] == "todo"
 
-    # Mark parent done — child must re-promote to ready.
-    client.patch(f"/api/projects/noor/tasks/{parent_id}", json={"status": "done"})
+    api_module.router = Router(api_module.registry, api_module.graph_engine)
+    try:
+        client.patch(f"/api/projects/noor/tasks/{parent_id}", json={"status": "done"})
+
+        events = []
+        while not api_module.router.events.empty():
+            events.append(api_module.router.events.get_nowait())
+        promoted = [e for e in events
+                    if e.event == "task:updated"
+                    and e.data["id"] == child_id
+                    and e.data["status"] == "ready"]
+        assert promoted, "expected a task:updated(ready) event for the promoted child"
+    finally:
+        api_module.router = None
 
     res = client.get("/api/projects/noor/tasks")
     child = next(t for t in res.json() if t["id"] == child_id)

@@ -400,7 +400,15 @@ class AgentRegistry:
             conn.close()
 
     async def promote_ready_dependents(self, task_id: str) -> list[str]:
-        """Promote todo tasks whose deps are all done to ready. Returns ids."""
+        """Promote todo tasks whose deps are all done to ready. Returns ids.
+
+        Invoked from the PATCH /tasks handler when a task transitions to
+        ``done`` — the only path that moves an agent_task to ``done`` (the
+        inbox watcher's ``_handle_task`` operates on the legacy ``tasks``
+        table, not ``agent_tasks``). Safe no-op (returns ``[]``) for an
+        unknown ``task_id``: the project subquery yields NULL and matches no
+        rows; callers already 404 before reaching here.
+        """
         cursor = await self.db.execute(
             "SELECT id, dependencies FROM agent_tasks"
             " WHERE project = (SELECT project FROM agent_tasks WHERE id = ?)"
