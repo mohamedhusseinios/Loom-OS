@@ -47,9 +47,9 @@ class Worker:
         self.model = model
         self.max_turns = max_turns
         self.poll_interval = poll_interval
-        self.workspaces_dir = os.path.expanduser("~/.loom/workspaces")
+        self.workspaces_dir: str = os.path.expanduser("~/.loom/workspaces")
         self._inflight: set[str] = set()
-        self._stop = False
+        self._stop: bool = False
 
     @property
     def agent_id(self) -> str:
@@ -58,5 +58,5 @@ class Worker:
     def eligible(self, tasks: list[dict]) -> list[dict]:
         return [
             t for t in tasks
-            if t.get("assignee") == self.agent_id and t["id"] not in self._inflight
+            if t.get("assignee") == self.agent_id and t.get("id") not in self._inflight
         ]

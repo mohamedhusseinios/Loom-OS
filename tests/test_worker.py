@@ -22,3 +22,10 @@ def test_eligible_filters_by_assignee_and_inflight():
     w._inflight.add("3")
     eligible = w.eligible(tasks)
     assert [t["id"] for t in eligible] == ["1"]
+
+
+def test_claude_result_fields():
+    r = ClaudeResult(text="ok", session_id=None, is_error=False)
+    assert r.text == "ok"
+    assert r.session_id is None
+    assert r.is_error is False
