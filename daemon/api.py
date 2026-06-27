@@ -18,7 +18,7 @@ from daemon.snapshots import SnapshotManager
 from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPayload, RegisterAgentPayload
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
-    AgentTaskStatus,
+    AgentTaskStatus, TaskProgressPayload,
 )
 
 logger = logging.getLogger(__name__)
@@ -656,11 +656,10 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
 
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/progress")
-async def task_progress(project_id: str, task_id: str, payload: dict):
+async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayload):
     """Relay a live progress line from the worker to WebSocket clients."""
-    message = str(payload.get("message", ""))
     if router:
-        await router._emit_event("task:progress", project_id, {"id": task_id, "message": message})
+        await router._emit_event("task:progress", project_id, {"id": task_id, "message": payload.message})
     return {"ok": True}
 
 

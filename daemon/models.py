@@ -202,3 +202,7 @@ class AgentTaskUpdatePayload(BaseModel):
     assignee: Optional[str] = None
     result: Optional[str] = None
     workspace_path: Optional[str] = None
+
+
+class TaskProgressPayload(BaseModel):
+    message: str
