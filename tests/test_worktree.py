@@ -66,3 +66,45 @@ def test_list_branches_shape_and_exclusions(repo):
     assert "develop" in names
     assert "loom/task-zzz" not in names          # task branches excluded
     assert all(b["remote"] is False for b in data["branches"])  # no remotes here
+
+
+def test_merge_branch_into_non_checked_out_branch(repo, tmp_path):
+    # 'develop' exists but is not checked out (repo is on 'main').
+    _git(repo, "branch", "develop")
+    ws = tmp_path / "ws" / "task-m"
+    worktree.create_worktree(str(repo), str(ws), "loom/task-m", base_ref="main")
+    (ws / "feature.txt").write_text("work\n")
+    worktree.commit_all(str(ws), "task m")
+
+    ok, _out = worktree.merge_branch_into(str(repo), "loom/task-m", "develop")
+    assert ok is True
+    # Main checkout untouched: still on main, no feature.txt in its working tree.
+    assert worktree.current_branch(str(repo)) == "main"
+    assert not (repo / "feature.txt").exists()
+    # 'develop' advanced and now contains the merged file.
+    assert "work" in _git(repo, "show", "develop:feature.txt")
+    # No throwaway merge worktree left behind.
+    assert "loom-merge" not in _git(repo, "worktree", "list")
+    worktree.remove_worktree(str(repo), str(ws))
+
+
+def test_merge_branch_into_conflict_aborts(repo, tmp_path):
+    # Put a conflicting change on 'develop'.
+    _git(repo, "checkout", "-b", "develop")
+    (repo / "README.md").write_text("develop change\n")
+    _git(repo, "commit", "-am", "develop edit")
+    _git(repo, "checkout", "main")
+    # Task branch edits the same file differently.
+    ws = tmp_path / "ws" / "task-c"
+    worktree.create_worktree(str(repo), str(ws), "loom/task-c", base_ref="main")
+    (ws / "README.md").write_text("task change\n")
+    worktree.commit_all(str(ws), "task c")
+
+    ok, out = worktree.merge_branch_into(str(repo), "loom/task-c", "develop")
+    assert ok is False
+    assert "conflict" in out.lower()
+    # Clean state: still on main, working tree clean, no leftover worktree.
+    assert worktree.current_branch(str(repo)) == "main"
+    assert _git(repo, "status", "--porcelain").strip() == ""
+    assert "loom-merge" not in _git(repo, "worktree", "list")
+    worktree.remove_worktree(str(repo), str(ws))

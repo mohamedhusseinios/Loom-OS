@@ -86,5 +86,39 @@ def list_branches(repo_path: str) -> dict:
     return {"current": current, "branches": branches}
 
 
+def merge_branch_into(repo_path: str, source_branch: str, target: str,
+                      *, target_is_remote: bool = False) -> tuple[bool, str]:
+    """Merge ``source_branch`` into ``target`` (no fast-forward).
+
+    If ``target`` is the repo's checked-out branch, merge in place (same as
+    ``merge_branch``). Otherwise the merge runs inside a throwaway worktree so
+    the user's working checkout is never switched. For a remote ``target``
+    (e.g. ``origin/X``) a local branch ``X`` is created from it; nothing is
+    pushed. On conflict the merge is aborted and ``(False, output)`` returned.
+    """
+    if not target_is_remote and target == current_branch(repo_path):
+        return merge_branch(repo_path, source_branch)
+
+    parent = tempfile.mkdtemp(prefix="loom-merge-")
+    wt = os.path.join(parent, "wt")
+    try:
+        if target_is_remote:
+            local_name = target.split("/", 1)[1]
+            add = _run(repo_path, "worktree", "add", "-b", local_name, wt, target)
+        else:
+            add = _run(repo_path, "worktree", "add", wt, target)
+        if add.returncode != 0:
+            return False, (add.stdout + add.stderr).strip()
+        proc = _run(wt, "merge", "--no-ff", "-m", f"Merge {source_branch}", source_branch)
+        out = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            _run(wt, "merge", "--abort")
+            return False, out
+        return True, out
+    finally:
+        _run(repo_path, "worktree", "remove", "--force", wt)
+        shutil.rmtree(parent, ignore_errors=True)
+
+
 def remove_worktree(repo_path: str, workspace_path: str) -> None:
     _run(repo_path, "worktree", "remove", "--force", workspace_path)
