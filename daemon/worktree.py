@@ -7,7 +7,10 @@ calls — async callers should wrap these in ``asyncio.to_thread``.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -58,6 +61,71 @@ def merge_branch(repo_path: str, branch: str) -> tuple[bool, str]:
     proc = _run(repo_path, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
     out = (proc.stdout + proc.stderr).strip()
     return proc.returncode == 0, out
+
+
+def list_branches(repo_path: str) -> dict:
+    """Local + remote branches for choosing a merge target.
+
+    Returns ``{"current": str, "branches": [{"name": str, "remote": bool}]}``.
+    Excludes ``loom/task-*`` branches and ``*/HEAD``, and omits a remote
+    branch when a local branch of the same short name already exists.
+    """
+    current = current_branch(repo_path)
+    local_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    remote_proc = _run(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+    if local_proc.returncode != 0:
+        raise RuntimeError(f"git for-each-ref (heads) failed: {local_proc.stderr.strip()}")
+    if remote_proc.returncode != 0:
+        raise RuntimeError(f"git for-each-ref (remotes) failed: {remote_proc.stderr.strip()}")
+    local = [n for n in local_proc.stdout.split("\n") if n and not n.startswith("loom/task-")]
+    local_set = set(local)
+    branches = [{"name": n, "remote": False} for n in local]
+    for n in remote_proc.stdout.split("\n"):
+        if not n or n.endswith("/HEAD"):
+            continue
+        short = n.split("/", 1)[1] if "/" in n else n
+        if short.startswith("loom/task-"):
+            continue
+        if short in local_set:
+            continue
+        branches.append({"name": n, "remote": True})
+    return {"current": current, "branches": branches}
+
+
+def merge_branch_into(repo_path: str, source_branch: str, target: str,
+                      *, target_is_remote: bool = False) -> tuple[bool, str]:
+    """Merge ``source_branch`` into ``target`` (no fast-forward).
+
+    If ``target`` is the repo's checked-out branch, merge in place (same as
+    ``merge_branch``). Otherwise the merge runs inside a throwaway worktree so
+    the user's working checkout is never switched. For a remote ``target``
+    (e.g. ``origin/X``) a local branch ``X`` is created from it; nothing is
+    pushed. On conflict the merge is aborted and ``(False, output)`` returned.
+    """
+    if not target_is_remote and target == current_branch(repo_path):
+        return merge_branch(repo_path, source_branch)
+
+    parent = tempfile.mkdtemp(prefix="loom-merge-")
+    wt = os.path.join(parent, "wt")
+    try:
+        if target_is_remote:
+            local_name = target.split("/", 1)[1]
+            add = _run(repo_path, "worktree", "add", "-b", local_name, wt, target)
+        else:
+            add = _run(repo_path, "worktree", "add", wt, target)
+        if add.returncode != 0:
+            return False, (add.stdout + add.stderr).strip()
+        proc = _run(wt, "merge", "--no-ff", "-m", f"Merge {source_branch}", source_branch)
+        out = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            abort = _run(wt, "merge", "--abort")
+            if abort.returncode != 0:
+                out = f"{out}\n(merge --abort failed: {(abort.stdout + abort.stderr).strip()})"
+            return False, out
+        return True, out
+    finally:
+        _run(repo_path, "worktree", "remove", "--force", wt)
+        shutil.rmtree(parent, ignore_errors=True)
 
 
 def remove_worktree(repo_path: str, workspace_path: str) -> None:

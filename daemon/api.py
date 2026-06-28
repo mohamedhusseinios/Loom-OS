@@ -9,7 +9,7 @@ import asyncio
 import logging
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
@@ -811,8 +811,13 @@ async def task_diff(project_id: str, task_id: str):
 
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/merge")
-async def task_merge(project_id: str, task_id: str):
-    """Merge a task's worktree branch into the project's current branch."""
+async def task_merge(project_id: str, task_id: str,
+                     payload: dict | None = Body(default=None)):
+    """Merge a task's worktree branch into a chosen target branch.
+
+    Body is optional: ``{"target": "<branch>", "remote": <bool>}``. With no
+    body, merges into the repo's current branch (backward compatible).
+    """
     record = await registry.get_agent_task(task_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Agent task not found")
@@ -820,12 +825,29 @@ async def task_merge(project_id: str, task_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if not record.workspace_path:
-        return {"merged": False, "output": "No worktree assigned to this task"}
+        return {"merged": False, "output": "No worktree assigned to this task",
+                "target": ""}
+    repo = os.path.expanduser(project.project_path)
     branch = f"loom/task-{task_id}"
+    target = (payload or {}).get("target")
+    remote = bool((payload or {}).get("remote", False))
+    if not target:
+        target = await asyncio.to_thread(_worktree.current_branch, repo)
+        remote = False
     ok, output = await asyncio.to_thread(
-        _worktree.merge_branch, os.path.expanduser(project.project_path), branch
+        _worktree.merge_branch_into, repo, branch, target, target_is_remote=remote
     )
-    return {"merged": ok, "output": output}
+    return {"merged": ok, "output": output, "target": target}
+
+
+@app.get("/api/projects/{project_id}/branches")
+async def project_branches(project_id: str):
+    """List local + remote branches the user can merge a task into."""
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repo = os.path.expanduser(project.project_path)
+    return await asyncio.to_thread(_worktree.list_branches, repo)
 
 
 @app.get("/api/projects/{project_id}/search")

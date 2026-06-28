@@ -605,7 +605,11 @@ def test_task_merge_404_for_unknown_project(client):
 
 def test_task_merge_success(client, monkeypatch):
     import daemon.worktree as worktree_mod
-    monkeypatch.setattr(worktree_mod, "merge_branch", lambda repo, branch: (True, "Merged"))
+    monkeypatch.setattr(worktree_mod, "current_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        worktree_mod, "merge_branch_into",
+        lambda repo, source, target, *, target_is_remote=False: (True, "Merged"),
+    )
     res = client.post("/api/projects/noor/tasks",
                       json={"project": "noor", "title": "T", "instruction": "x"})
     task_id = res.json()["id"]
@@ -613,7 +617,7 @@ def test_task_merge_success(client, monkeypatch):
                  json={"workspace_path": "/tmp/ws/task-x"})
     res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
     assert res.status_code == 200
-    assert res.json() == {"merged": True, "output": "Merged"}
+    assert res.json() == {"merged": True, "output": "Merged", "target": "main"}
 
 
 def test_task_diff_uses_base_branch_from_result(client, monkeypatch):
@@ -652,7 +656,7 @@ def test_task_merge_no_worktree(client):
     task_id = res.json()["id"]
     res = client.post(f"/api/projects/noor/tasks/{task_id}/merge")
     assert res.status_code == 200
-    assert res.json() == {"merged": False, "output": "No worktree assigned to this task"}
+    assert res.json() == {"merged": False, "output": "No worktree assigned to this task", "target": ""}
 
 
 def test_patch_to_running_spawns_worker_once(client):
@@ -807,3 +811,42 @@ def test_running_transition_spawns_worker_for_runnable_agent(client):
         assert any(agent == "hermes" for (_proj, agent, _path, _tid) in fake.spawned)
     finally:
         api_module.supervisor = None
+
+
+def test_task_merge_with_target(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    captured = {}
+
+    def fake_merge(repo, source, target, *, target_is_remote=False):
+        captured["target"] = target
+        captured["remote"] = target_is_remote
+        return True, "ok"
+
+    monkeypatch.setattr(worktree_mod, "merge_branch_into", fake_merge)
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge",
+                      json={"target": "origin/dev", "remote": True})
+    assert res.status_code == 200
+    assert res.json() == {"merged": True, "output": "ok", "target": "origin/dev"}
+    assert captured == {"target": "origin/dev", "remote": True}
+
+
+def test_project_branches_success(client, monkeypatch):
+    import daemon.worktree as worktree_mod
+    fake = {"current": "main", "branches": [
+        {"name": "main", "remote": False},
+        {"name": "origin/dev", "remote": True},
+    ]}
+    monkeypatch.setattr(worktree_mod, "list_branches", lambda repo: fake)
+    res = client.get("/api/projects/noor/branches")
+    assert res.status_code == 200
+    assert res.json() == fake
+
+
+def test_project_branches_404_for_unknown_project(client):
+    res = client.get("/api/projects/missing/branches")
+    assert res.status_code == 404
