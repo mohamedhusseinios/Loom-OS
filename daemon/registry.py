@@ -27,6 +27,7 @@ class AgentRegistry:
     async def initialize(self):
         import os
         expanded = os.path.expanduser(self.db_path)
+        self.db_path = expanded  # store the resolved path; ~ is not auto-expanded by sqlite3
         os.makedirs(os.path.dirname(expanded), exist_ok=True)
         self.db = await aiosqlite.connect(expanded)
         self.db.row_factory = aiosqlite.Row
@@ -278,7 +279,7 @@ class AgentRegistry:
 
         if status is None:
             status = AgentTaskStatus.READY if (
-                payload.dependencies and self._all_agent_task_deps_done(payload.dependencies)
+                payload.dependencies and await self._all_agent_task_deps_done(payload.dependencies)
             ) else AgentTaskStatus.TODO
 
         await self.db.execute(
@@ -440,19 +441,15 @@ class AgentRegistry:
         rows = await cursor.fetchall()
         return [self._row_to_agent_task(r) for r in rows]
 
-    def _all_agent_task_deps_done(self, dep_ids: list[str]) -> bool:
-        import sqlite3
-        conn = sqlite3.connect(self.db_path)
-        try:
-            for dep_id in dep_ids:
-                row = conn.execute(
-                    "SELECT status FROM agent_tasks WHERE id = ?", (dep_id,)
-                ).fetchone()
-                if row is None or row[0] != AgentTaskStatus.DONE.value:
-                    return False
-            return True
-        finally:
-            conn.close()
+    async def _all_agent_task_deps_done(self, dep_ids: list[str]) -> bool:
+        for dep_id in dep_ids:
+            cursor = await self.db.execute(
+                "SELECT status FROM agent_tasks WHERE id = ?", (dep_id,)
+            )
+            row = await cursor.fetchone()
+            if row is None or row["status"] != AgentTaskStatus.DONE.value:
+                return False
+        return True
 
     async def promote_ready_dependents(self, task_id: str) -> list[str]:
         """Promote todo tasks whose deps are all done to ready. Returns ids.
@@ -474,7 +471,7 @@ class AgentRegistry:
         promoted: list[str] = []
         for row in rows:
             deps = json.loads(row["dependencies"] or "[]")
-            if task_id in deps and self._all_agent_task_deps_done(deps):
+            if task_id in deps and await self._all_agent_task_deps_done(deps):
                 await self.db.execute(
                     "UPDATE agent_tasks SET status = ?, updated_at = ? WHERE id = ?",
                     (AgentTaskStatus.READY.value,

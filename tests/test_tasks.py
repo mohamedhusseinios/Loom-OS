@@ -88,6 +88,44 @@ async def test_agent_task_dependency_stays_todo_if_parent_not_done(registry):
 
 
 @pytest.mark.asyncio
+async def test_create_task_with_deps_under_tilde_home(monkeypatch, tmp_path):
+    """Regression: dependency check must use the daemon's real (expanduser'd) DB.
+
+    ``_all_agent_task_deps_done`` previously opened a *second* sqlite3
+    connection with the unexpanded literal path ``~/.loom/state.db``. Under the
+    production default path that resolves to a ``~`` directory relative to the
+    daemon CWD, which does not exist, so ``sqlite3.connect`` raised
+    ``OperationalError: unable to open database file`` -> HTTP 500 on
+    ``POST /tasks`` for any task created with dependencies (the CORS error the
+    browser reported was just the 500 response losing its CORS headers).
+
+    The existing dependency tests miss this because the fixture uses an
+    *absolute* temp path, where the unexpanded second connection happens to hit
+    the same file. This test reproduces the production condition with a
+    ``~``-prefixed db_path under a fake HOME.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    reg = AgentRegistry("~/.loom/state.db")  # tilde path, like the production default
+    await reg.initialize()
+    try:
+        parent = await reg.create_agent_task(
+            AgentTaskCreatePayload(project="p", title="Parent", instruction="x")
+        )
+        await reg.update_agent_task(parent, status=AgentTaskStatus.DONE)
+
+        child = await reg.create_agent_task(
+            AgentTaskCreatePayload(
+                project="p", title="Child", instruction="y", dependencies=[parent]
+            )
+        )
+        record = await reg.get_agent_task(child)
+        assert record is not None
+        assert record.status == AgentTaskStatus.READY
+    finally:
+        await reg.close()
+
+
+@pytest.mark.asyncio
 async def test_list_agent_tasks_by_project(registry):
     """Listing tasks is filtered by project and excludes archived."""
     await registry.create_agent_task(
