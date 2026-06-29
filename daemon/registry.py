@@ -43,6 +43,14 @@ class AgentRegistry:
                 registered_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        # Migration: add structured_capabilities column if it doesn't exist.
+        cursor = await self.db.execute("PRAGMA table_info(agents)")
+        cols = [r[1] for r in await cursor.fetchall()]
+        if "structured_capabilities" not in cols:
+            await self.db.execute(
+                "ALTER TABLE agents ADD COLUMN structured_capabilities TEXT DEFAULT '[]'"
+            )
+        await self.db.commit()
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 project_id TEXT PRIMARY KEY,
@@ -113,14 +121,16 @@ class AgentRegistry:
     async def upsert_agent(self, agent: AgentInfo):
         await self.db.execute(
             """INSERT OR REPLACE INTO agents
-               (agent_id, agent_name, version, project, capabilities, status, last_heartbeat, registered_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (agent_id, agent_name, version, project, capabilities,
+                structured_capabilities, status, last_heartbeat, registered_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 agent.agent_id,
                 agent.agent_name,
                 agent.version,
                 agent.project,
                 json.dumps(agent.capabilities),
+                json.dumps([c.model_dump() for c in agent.structured_capabilities]),
                 agent.status.value,
                 agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
                 agent.registered_at.isoformat(),
@@ -150,6 +160,28 @@ class AgentRegistry:
         rows = await cursor.fetchall()
         return [self._row_to_agent(r) for r in rows]
 
+    async def match_capability(self, project: str, need: str) -> list[AgentInfo]:
+        """Find agents whose capabilities match the given need (keyword match).
+
+        Searches both flat ``capabilities`` strings and structured
+        ``AgentCapability.name`` / ``.description`` fields. Returns matching
+        agents sorted by status (online first, then working, then offline).
+        """
+        agents = await self.list_agents(project)
+        need_lower = need.lower()
+        matches: list[AgentInfo] = []
+        for a in agents:
+            if any(need_lower in c.lower() for c in a.capabilities):
+                matches.append(a)
+                continue
+            for sc in a.structured_capabilities:
+                if need_lower in sc.name.lower() or need_lower in sc.description.lower():
+                    matches.append(a)
+                    break
+        status_order = {"online": 0, "working": 1, "offline": 2}
+        matches.sort(key=lambda a: status_order.get(a.status.value, 3))
+        return matches
+
     async def delete_agent(self, agent_id: str) -> bool:
         """Remove an agent from the registry. Returns True if a row was deleted."""
         cursor = await self.db.execute(
@@ -160,12 +192,20 @@ class AgentRegistry:
 
     @staticmethod
     def _row_to_agent(row) -> AgentInfo:
+        from daemon.models import AgentCapability
+        keys = row.keys()
+        raw_caps = row["structured_capabilities"] if "structured_capabilities" in keys else "[]"
+        try:
+            sc = [AgentCapability(**c) for c in json.loads(raw_caps or "[]")]
+        except (json.JSONDecodeError, TypeError):
+            sc = []
         return AgentInfo(
             agent_id=row["agent_id"],
             agent_name=row["agent_name"],
             version=row["version"],
             project=row["project"],
             capabilities=json.loads(row["capabilities"]),
+            structured_capabilities=sc,
             status=AgentStatus(row["status"]),
             last_heartbeat=(
                 datetime.fromisoformat(row["last_heartbeat"])

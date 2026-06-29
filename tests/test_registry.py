@@ -1,7 +1,7 @@
 """Tests for the Agent Registry."""
 import pytest
 from daemon.registry import AgentRegistry, ProjectExistsError
-from daemon.models import AgentInfo, AgentStatus
+from daemon.models import AgentInfo, AgentStatus, AgentCapability
 
 
 @pytest.fixture
@@ -145,3 +145,83 @@ async def test_create_agent_task_explicit_id_is_idempotent(tmp_path):
     tasks = await reg.list_agent_tasks("noor")
     assert sum(1 for t in tasks if t.id == "fixed-1") == 1  # only one row
     await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_retrieve_structured_capabilities(tmp_path):
+    registry = AgentRegistry(str(tmp_path / "test.db"))
+    await registry.initialize()
+
+    agent = AgentInfo(
+        agent_id="claude-code-proj",
+        agent_name="claude-code",
+        version="1.0",
+        project="proj",
+        capabilities=["code-analysis"],
+        structured_capabilities=[
+            AgentCapability(name="review", description="PR review", tools=["gh"], models=["claude-sonnet-4"]),
+            AgentCapability(name="test", description="Writes tests", tools=["pytest"]),
+        ],
+    )
+    await registry.upsert_agent(agent)
+    retrieved = await registry.get_agent("claude-code-proj")
+
+    assert len(retrieved.structured_capabilities) == 2
+    assert retrieved.structured_capabilities[0].name == "review"
+    assert retrieved.structured_capabilities[0].tools == ["gh"]
+    assert retrieved.structured_capabilities[1].name == "test"
+
+
+@pytest.mark.asyncio
+async def test_agent_without_structured_capabilities_still_works(tmp_path):
+    registry = AgentRegistry(str(tmp_path / "test.db"))
+    await registry.initialize()
+
+    agent = AgentInfo(
+        agent_id="codex-proj",
+        agent_name="codex",
+        version="1.0",
+        project="proj",
+        capabilities=["code-analysis"],
+    )
+    await registry.upsert_agent(agent)
+    retrieved = await registry.get_agent("codex-proj")
+
+    assert retrieved.structured_capabilities == []
+    assert retrieved.capabilities == ["code-analysis"]
+
+
+@pytest.mark.asyncio
+async def test_match_capability_returns_only_matching_agents(tmp_path):
+    registry = AgentRegistry(str(tmp_path / "test.db"))
+    await registry.initialize()
+
+    await registry.upsert_agent(AgentInfo(
+        agent_id="reviewer-proj", agent_name="reviewer", version="1.0",
+        project="proj", capabilities=["review"],
+        structured_capabilities=[AgentCapability(name="review", description="PR review")],
+    ))
+    await registry.upsert_agent(AgentInfo(
+        agent_id="tester-proj", agent_name="tester", version="1.0",
+        project="proj", capabilities=["testing"],
+        structured_capabilities=[AgentCapability(name="test", description="Writes tests")],
+    ))
+
+    matches = await registry.match_capability("proj", "review")
+    assert len(matches) == 1
+    assert matches[0].agent_name == "reviewer"
+
+
+@pytest.mark.asyncio
+async def test_match_capability_matches_flat_string_capabilities(tmp_path):
+    registry = AgentRegistry(str(tmp_path / "test.db"))
+    await registry.initialize()
+
+    await registry.upsert_agent(AgentInfo(
+        agent_id="codex-proj", agent_name="codex", version="1.0",
+        project="proj", capabilities=["code-analysis", "bug-finding"],
+    ))
+
+    matches = await registry.match_capability("proj", "code-analysis")
+    assert len(matches) == 1
+    assert matches[0].agent_name == "codex"

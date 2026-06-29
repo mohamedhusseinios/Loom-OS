@@ -287,6 +287,15 @@ async def list_agents(project_id: str):
     return {"agents": [a.model_dump() for a in agents]}
 
 
+@app.get("/api/projects/{project_id}/agents/match")
+async def match_agents(project_id: str, need: str = ""):
+    """Find agents whose capabilities match the given need (keyword match)."""
+    if not need:
+        raise HTTPException(status_code=400, detail="Missing query parameter 'need'")
+    matches = await registry.match_capability(project_id, need)
+    return {"matches": [a.model_dump() for a in matches]}
+
+
 @app.delete("/api/projects/{project_id}/agents/{agent_id}")
 async def delete_agent(project_id: str, agent_id: str):
     """Remove an agent from a project."""

@@ -46,12 +46,22 @@ class FindingFrontmatter(BaseModel):
 
 # --- Registry Models ---
 
+class AgentCapability(BaseModel):
+    """Structured capability descriptor for agent discovery/matching."""
+    name: str
+    description: str = ""
+    tools: list[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
+    status: str = "active"  # active | idle | disabled
+
+
 class AgentInfo(BaseModel):
     agent_id: str
     agent_name: str
     version: str
     project: str
     capabilities: list[str]
+    structured_capabilities: list[AgentCapability] = Field(default_factory=list)
     status: AgentStatus = AgentStatus.ONLINE
     last_heartbeat: Optional[datetime] = None
     registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

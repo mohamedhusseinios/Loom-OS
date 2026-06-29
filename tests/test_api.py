@@ -870,3 +870,48 @@ def test_search_hybrid_mode(client, monkeypatch):
     body = resp.json()
     assert body["mode"] == "hybrid"
     assert body["results"][0]["id"] == "AuthService"
+
+
+def test_agent_info_serializes_structured_capabilities(client):
+    """AgentInfo with structured capabilities serializes correctly."""
+    from daemon.models import AgentInfo, AgentCapability
+    agent = AgentInfo(
+        agent_id="test-proj",
+        agent_name="test",
+        version="1.0",
+        project="proj",
+        capabilities=["code-analysis"],
+        structured_capabilities=[
+            AgentCapability(name="code-analysis", description="Reviews code", tools=["gh"], models=["gpt-4o"]),
+        ],
+    )
+    d = agent.model_dump()
+    assert d["structured_capabilities"][0]["name"] == "code-analysis"
+    assert d["structured_capabilities"][0]["tools"] == ["gh"]
+    assert d["capabilities"] == ["code-analysis"]
+
+
+def test_agents_match_endpoint(client):
+    """GET /agents/match?need=code-analysis returns matching agents."""
+    resp = client.get("/api/projects/noor/agents/match?need=code-analysis")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "matches" in body
+    assert len(body["matches"]) >= 1
+    assert body["matches"][0]["agent_name"] == "claude-code"
+
+
+def test_agents_match_endpoint_no_results(client):
+    """GET /agents/match?need=nonexistent returns empty list."""
+    resp = client.get("/api/projects/noor/agents/match?need=nonexistent-capability")
+    assert resp.status_code == 200
+    assert resp.json()["matches"] == []
+
+
+def test_agents_list_includes_structured_capabilities(client):
+    """GET /agents response includes structured_capabilities field."""
+    resp = client.get("/api/projects/noor/agents")
+    assert resp.status_code == 200
+    agents = resp.json()["agents"]
+    assert len(agents) > 0
+    assert "structured_capabilities" in agents[0]
