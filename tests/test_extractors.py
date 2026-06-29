@@ -1,6 +1,6 @@
 """Tests for the LLM knowledge extractor pipeline."""
 import pytest
-from daemon.extractors import RegexExtractor, ExtractorPipeline, ExtractedEntity
+from daemon.extractors import RegexExtractor, ExtractorPipeline, ExtractedEntity, LLMExtractor
 
 
 @pytest.mark.asyncio
@@ -58,3 +58,34 @@ async def test_extractor_pipeline_empty_on_no_extractors():
     pipeline = ExtractorPipeline()
     entities = await pipeline.run("some text")
     assert entities == []
+
+
+@pytest.mark.asyncio
+async def test_llm_extractor_parses_entities_from_injected_backend():
+    # Fake backend returns the structured JSON we expect the prompt to elicit.
+    async def fake_call(prompt: str) -> str:
+        return (
+            '{"entities": ['
+            '{"name": "AuthService", "kind": "class", "confidence": 0.9,'
+            ' "context": "handles login", "relationships": [["uses", "BcryptHasher"]]}'
+            ']}'
+        )
+
+    extractor = LLMExtractor(backend="ollama", call_fn=fake_call)
+    entities = await extractor.extract("AuthService handles login via BcryptHasher")
+
+    assert len(entities) == 1
+    assert isinstance(entities[0], ExtractedEntity)
+    assert entities[0].name == "AuthService"
+    assert entities[0].kind == "class"
+    assert entities[0].confidence == 0.9
+    assert ("uses", "BcryptHasher") in entities[0].relationships
+
+
+@pytest.mark.asyncio
+async def test_llm_extractor_degrades_to_empty_on_bad_json():
+    async def bad_call(prompt: str) -> str:
+        return "the model rambled instead of returning JSON"
+
+    extractor = LLMExtractor(backend="ollama", call_fn=bad_call)
+    assert await extractor.extract("anything") == []

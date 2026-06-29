@@ -15,9 +15,11 @@ Design:
 from __future__ import annotations
 
 import abc
+import json as _json
 import logging
+import os
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
     pass
@@ -183,6 +185,67 @@ class RegexExtractor(Extractor):
         start = max(0, pos - width // 2)
         end = min(len(text), pos + width // 2)
         return text[start:end].replace("\n", " ").strip()
+
+
+# ---------------------------------------------------------------------------
+# LLM-backed extractor (Ollama / OpenAI / Claude)
+# ---------------------------------------------------------------------------
+
+_LLM_PROMPT = """You extract code/architecture entities from an engineering note.
+Return ONLY minified JSON: {"entities": [{"name","kind","confidence","context","relationships"}]}
+- kind is one of: class, function, module, pattern, interface, enum.
+- confidence is 0.0-1.0.
+- relationships is a list of [verb, target] pairs (may be empty).
+NOTE:
+%s
+"""
+
+
+class LLMExtractor(Extractor):
+    """Extract entities via a configurable LLM backend (Ollama/OpenAI/Claude).
+
+    The backend call is injectable (`call_fn`) so tests run with no live model.
+    Any failure (no backend, network error, bad JSON) degrades to an empty list;
+    ExtractorPipeline already swallows extractor exceptions, so extraction never
+    blocks finding ingestion.
+    """
+
+    def __init__(
+        self,
+        backend: str = "ollama",
+        model: str | None = None,
+        call_fn: Callable[[str], Awaitable[str]] | None = None,
+    ):
+        self.backend = os.getenv("LOOM_LLM_BACKEND", backend)
+        self.model = os.getenv("LOOM_LLM_MODEL", model or "")
+        self._call_fn = call_fn  # injected in tests; real backends wired in Task 1.2
+
+    async def extract(self, text: str) -> list[ExtractedEntity]:
+        call = self._call_fn
+        if call is None:
+            return []  # no backend configured -> degrade (regex still runs)
+        try:
+            raw = await call(_LLM_PROMPT % text[:4000])
+            data = _json.loads(raw)
+        except Exception:
+            return []
+        return self._to_entities(data)
+
+    @staticmethod
+    def _to_entities(data: dict) -> list[ExtractedEntity]:
+        out: list[ExtractedEntity] = []
+        for item in data.get("entities", []):
+            if not item.get("name") or not item.get("kind"):
+                continue
+            rels = [tuple(r) for r in item.get("relationships", []) if len(r) == 2]
+            out.append(ExtractedEntity(
+                name=str(item["name"]),
+                kind=str(item["kind"]),
+                confidence=float(item.get("confidence", 0.5)),
+                context=str(item.get("context", "")),
+                relationships=rels,
+            ))
+        return out
 
 
 # ---------------------------------------------------------------------------
