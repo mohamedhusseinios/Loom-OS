@@ -73,6 +73,9 @@ async def lifespan(app: FastAPI):
         _pipeline = ExtractorPipeline()
         _pipeline.add(RegexExtractor())
         _pipeline.add(LLMExtractor())
+        from daemon.plugins import load_into_pipeline
+        loaded_plugins = load_into_pipeline(_pipeline)
+        logger.info("Loaded %d extractor plugins", len(loaded_plugins))
         _extracted_store = ExtractedEdgeStore()
         router = Router(registry, graph_engine,
                         extractor_pipeline=_pipeline, extracted_store=_extracted_store)
@@ -335,6 +338,17 @@ async def list_known_agents():
 async def list_runnable_agents():
     """Canonical names of agents the daemon can run as a worker (registry-derived)."""
     return {"agents": sorted(LOOM_WORKER_AGENTS)}
+
+
+@app.get("/api/plugins")
+async def list_plugins():
+    """List discovered extractor plugins."""
+    from daemon.plugins import discover
+    plugins = discover()
+    return {"plugins": [
+        {"name": p["name"], "loaded": p["extractor"] is not None, "error": p["error"]}
+        for p in plugins
+    ]}
 
 
 @app.get("/api/projects/{project_id}/knowledge")

@@ -908,6 +908,13 @@ def test_agents_match_endpoint_no_results(client):
     assert resp.json()["matches"] == []
 
 
+def test_plugins_endpoint_empty(client):
+    """GET /api/plugins returns empty list when no plugins directory exists."""
+    resp = client.get("/api/plugins")
+    assert resp.status_code == 200
+    assert resp.json() == {"plugins": []}
+
+
 def test_agents_list_includes_structured_capabilities(client):
     """GET /agents response includes structured_capabilities field."""
     resp = client.get("/api/projects/noor/agents")
