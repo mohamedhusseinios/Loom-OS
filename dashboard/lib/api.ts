@@ -116,6 +116,26 @@ export interface GraphTopology {
   edges: { source: string; target: string; kind: string }[];
 }
 
+// --- Extracted (LLM) Edges ---
+// Edges extracted by an LLM agent from project findings, overlaid on the
+// topology graph with a distinctive dashed indigo style in the dashboard.
+
+export interface ExtractedEdge {
+  name: string;
+  kind: string;
+  confidence: number;
+  context: string;
+  relationships: [string, string][];
+  source_file: string;
+  source: string;
+}
+
+export async function getExtractedEdges(
+  projectId: string,
+): Promise<{ edges: ExtractedEdge[] }> {
+  return fetchApi(`/api/projects/${projectId}/extracted-edges`);
+}
+
 export interface CommunityInfo {
   id: string;
   name: string;

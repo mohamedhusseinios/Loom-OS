@@ -116,6 +116,13 @@ export default function GraphCanvasReagraph({
               source: e.source,
               target: e.target,
               label: e.kind,
+              // LLM-extracted edges get a distinct dashed indigo style so they
+              // stand out from structural (Graphify) edges.
+              ...(e.kind.includes("(llm)") && {
+                fill: "#6366f1",
+                dashed: true,
+                dashArray: [4, 2],
+              }),
             }))
         : [];
       return { reaNodes: rn, reaEdges: re, shown: rn.length, total: nodes.length };
@@ -152,6 +159,13 @@ export default function GraphCanvasReagraph({
               source: e.source,
               target: e.target,
               label: e.kind,
+              // LLM-extracted edges get a distinct dashed indigo style so they
+              // stand out from structural (Graphify) edges.
+              ...(e.kind.includes("(llm)") && {
+                fill: "#6366f1",
+                dashed: true,
+                dashArray: [4, 2],
+              }),
             }))
         : [];
       return {

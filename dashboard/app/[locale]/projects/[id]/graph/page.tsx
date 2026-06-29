@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph, rebuildGraph, getProject } from "@/lib/api";
+import { getGraphTopology, getGraphCommunities, getGraphFlows, queryGraph, rebuildGraph, getProject, getExtractedEdges } from "@/lib/api";
 import type { GraphTopology, CommunityInfo, FlowInfo } from "@/lib/api";
 import { GraphCanvas, type GraphLayout } from "@/components/graph-canvas";
 import { GraphControls } from "@/components/graph-controls";
@@ -51,13 +51,35 @@ export default function GraphExplorerPage() {
         getGraphFlows(id),
         getProject(id),
       ]);
-      setNodes(topo.nodes || []);
-      setEdges(topo.edges || []);
+      const topoNodes = topo.nodes || [];
+      setNodes(topoNodes);
       setExpandedCommunity(null); // a fresh graph resets any drill-down
       setCommunities(comms.communities || []);
       setFlows(flws.flows || []);
       setVisibleCommunities(new Set((comms.communities || []).map((c) => String(c.id))));
       setHasAgents((project.agents || []).length > 0);
+
+      // Overlay LLM-extracted edges on top of the structural topology edges.
+      // The endpoint may not exist yet on older daemons — fail silently.
+      const topologyEdges = topo.edges || [];
+      try {
+        const { edges: extractedEdges } = await getExtractedEdges(id);
+        const nodeIds = new Set(topoNodes.map((n) => n.id));
+        const llmEdges = extractedEdges.flatMap((e) =>
+          e.relationships.map(([verb, target]) => ({
+            source: e.name,
+            target,
+            kind: `${verb} (llm)`,
+          })),
+        );
+        const validLlmEdges = llmEdges.filter(
+          (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
+        );
+        setEdges([...topologyEdges, ...validLlmEdges]);
+      } catch {
+        // Extracted-edges endpoint unavailable — use topology edges only.
+        setEdges(topologyEdges);
+      }
     } catch {
       // graph not built yet
     } finally {
