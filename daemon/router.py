@@ -34,10 +34,14 @@ class Router:
         registry: AgentRegistry,
         graph_engine: GraphEngine,
         recall: RecallEngine | None = None,
+        extractor_pipeline=None,
+        extracted_store=None,
     ):
         self.registry = registry
         self.graph = graph_engine
         self.recall = recall
+        self.extractor_pipeline = extractor_pipeline
+        self.extracted_store = extracted_store
         self._last_update: dict[str, float] = {}  # project -> timestamp
         self._event_queue: asyncio.Queue[WsEvent] = asyncio.Queue()
 
@@ -134,6 +138,19 @@ class Router:
             "file": path.name,
             "type": frontmatter.type.value,
         })
+
+        # Run knowledge extraction (regex + optional LLM) and persist edges.
+        if self.extractor_pipeline is not None and self.extracted_store is not None:
+            body = content.split("---", 2)[-1] if content.startswith("---") else content
+            try:
+                entities = await self.extractor_pipeline.run(body)
+                if entities:
+                    await self.extracted_store.add(project, path.name, entities)
+                    await self._emit_event("extraction:completed", project, {
+                        "file": path.name, "entities": len(entities),
+                    })
+            except Exception as exc:
+                logger.warning("Extraction failed for %s: %s", path.name, exc)
 
         # Regenerate shared context so agents see the new finding.
         project_info = await self.registry.get_project(project)

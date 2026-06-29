@@ -68,7 +68,14 @@ async def lifespan(app: FastAPI):
     if not getattr(registry, "db", None):
         await registry.initialize()
     if router is None:
-        router = Router(registry, graph_engine)
+        from daemon.extractors import ExtractorPipeline, RegexExtractor, LLMExtractor
+        from daemon.extracted_store import ExtractedEdgeStore
+        _pipeline = ExtractorPipeline()
+        _pipeline.add(RegexExtractor())
+        _pipeline.add(LLMExtractor())
+        _extracted_store = ExtractedEdgeStore()
+        router = Router(registry, graph_engine,
+                        extractor_pipeline=_pipeline, extracted_store=_extracted_store)
     if trace_capture is None:
         trace_capture = TraceCapture()
     if snapshot_manager is None:

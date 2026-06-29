@@ -159,3 +159,32 @@ async def test_handle_task_upserts_agent_task(tmp_path):
     tasks = await reg.list_agent_tasks("noor")
     assert sum(1 for t in tasks if t.id == "abc123") == 1
     await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_finding_runs_extractor_pipeline_and_persists(tmp_path):
+    """Finding ingestion runs the extractor pipeline and persists extracted edges."""
+    from daemon.extractors import ExtractorPipeline, RegexExtractor
+    from daemon.extracted_store import ExtractedEdgeStore
+
+    # Minimal registry/graph doubles: handler only needs get_project to return None
+    class _Reg:
+        async def get_project(self, p):
+            return None
+    class _Graph:
+        available = False
+
+    pipeline = ExtractorPipeline()
+    pipeline.add(RegexExtractor())
+    store = ExtractedEdgeStore(loom_dir=str(tmp_path))
+
+    router = Router(registry=_Reg(), graph_engine=_Graph(),
+                    extractor_pipeline=pipeline, extracted_store=store)
+
+    finding = tmp_path / "finding-x.md"
+    finding.write_text("---\nagent: a\nproject: proj-1\n---\nThe AuthService class uses a Repository pattern.")
+
+    await router._handle_finding("proj-1", finding)
+
+    rows = await store.load("proj-1")
+    assert any(r["name"] == "AuthService" for r in rows)
