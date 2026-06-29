@@ -850,3 +850,10 @@ def test_project_branches_success(client, monkeypatch):
 def test_project_branches_404_for_unknown_project(client):
     res = client.get("/api/projects/missing/branches")
     assert res.status_code == 404
+
+
+def test_extracted_edges_endpoint_empty(client):
+    """GET /api/projects/{id}/extracted-edges returns empty edges when no data."""
+    resp = client.get("/api/projects/proj-1/extracted-edges")
+    assert resp.status_code == 200
+    assert resp.json() == {"edges": []}

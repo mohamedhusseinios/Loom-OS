@@ -170,6 +170,14 @@ async def get_graph_flows(project_id: str):
     return {"flows": flows}
 
 
+@app.get("/api/projects/{project_id}/extracted-edges")
+async def get_extracted_edges(project_id: str):
+    """Return LLM-extracted (non-AST) edges for overlay on the graph."""
+    from daemon.extracted_store import ExtractedEdgeStore
+    store = ExtractedEdgeStore()
+    return {"edges": await store.load(project_id)}
+
+
 @app.get("/api/projects/{project_id}/query")
 async def query_graph(project_id: str, q: str = ""):
     """Query the project knowledge graph."""
