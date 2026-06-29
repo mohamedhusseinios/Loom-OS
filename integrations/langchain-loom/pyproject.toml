@@ -1,0 +1,28 @@
+[project]
+name = "langchain-loom"
+version = "0.1.0"
+description = "LangChain memory integration for Loom OS"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["loom", "loom-os", "langchain", "agent-memory"]
+authors = [{ name = "Mohamed Hussien" }]
+dependencies = [
+    "loom-client",
+    "langchain-core>=0.3.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["langchain_loom*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
