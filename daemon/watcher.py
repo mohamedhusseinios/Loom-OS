@@ -9,7 +9,43 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifi
 
 logger = logging.getLogger(__name__)
 
-EventHandler = Callable[[str, str], Awaitable[None]]  # (project, filepath)
+EventHandler = Callable[[str, str | None, str], Awaitable[None]]  # (project, user, filepath)
+
+
+def parse_inbox_path(path: str) -> tuple[str, str | None, str]:
+    """Extract (project, user, filename) from an inbox file path.
+
+    Supports both layouts:
+    - Flat:   inbox/<project>/<file>           -> (project, None, file)
+    - User:   inbox/<project>/<user>/<file>    -> (project, user, file)
+
+    Paths under .processed/ are handled correctly (user is still captured).
+    Returns ("unknown", None, filename) if 'inbox' is not in the path.
+    """
+    parts = Path(path).parts
+    try:
+        inbox_idx = parts.index("inbox")
+    except ValueError:
+        return ("unknown", None, Path(path).name)
+
+    remaining = parts[inbox_idx + 1:]
+    if len(remaining) >= 3:
+        project = remaining[0]
+        user = remaining[1]
+        filename = remaining[-1]
+    elif len(remaining) == 2:
+        project = remaining[0]
+        user = None
+        filename = remaining[1]
+    elif len(remaining) == 1:
+        project = remaining[0]
+        user = None
+        filename = ""
+    else:
+        project = "unknown"
+        user = None
+        filename = ""
+    return (project, user, filename)
 
 
 class InboxHandler(FileSystemEventHandler):
@@ -30,16 +66,9 @@ class InboxHandler(FileSystemEventHandler):
         self._dispatch(event.src_path)
 
     def _dispatch(self, filepath: str):
-        path = Path(filepath)
-        # Extract project name from path: inbox/<project>/<file>
-        parts = path.parts
-        try:
-            inbox_idx = parts.index("inbox")
-            project = parts[inbox_idx + 1] if len(parts) > inbox_idx + 1 else "unknown"
-        except ValueError:
-            project = "unknown"
+        project, user, _ = parse_inbox_path(filepath)
         asyncio.run_coroutine_threadsafe(
-            self.callback(project, filepath), self.loop
+            self.callback(project, user, filepath), self.loop
         )
 
 

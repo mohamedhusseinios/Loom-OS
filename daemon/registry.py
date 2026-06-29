@@ -50,6 +50,8 @@ class AgentRegistry:
             await self.db.execute(
                 "ALTER TABLE agents ADD COLUMN structured_capabilities TEXT DEFAULT '[]'"
             )
+        if "user" not in cols:
+            await self.db.execute("ALTER TABLE agents ADD COLUMN user TEXT")
         await self.db.commit()
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS projects (
@@ -122,8 +124,8 @@ class AgentRegistry:
         await self.db.execute(
             """INSERT OR REPLACE INTO agents
                (agent_id, agent_name, version, project, capabilities,
-                structured_capabilities, status, last_heartbeat, registered_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                structured_capabilities, status, last_heartbeat, registered_at, user)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 agent.agent_id,
                 agent.agent_name,
@@ -134,6 +136,7 @@ class AgentRegistry:
                 agent.status.value,
                 agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
                 agent.registered_at.isoformat(),
+                agent.user,
             ),
         )
         await self.db.commit()
@@ -147,8 +150,13 @@ class AgentRegistry:
             return None
         return self._row_to_agent(row)
 
-    async def list_agents(self, project: Optional[str] = None) -> list[AgentInfo]:
-        if project:
+    async def list_agents(self, project: Optional[str] = None, user: Optional[str] = None) -> list[AgentInfo]:
+        if project and user:
+            cursor = await self.db.execute(
+                "SELECT * FROM agents WHERE project = ? AND user = ? ORDER BY registered_at DESC",
+                (project, user),
+            )
+        elif project:
             cursor = await self.db.execute(
                 "SELECT * FROM agents WHERE project = ? ORDER BY registered_at DESC",
                 (project,),
@@ -213,6 +221,7 @@ class AgentRegistry:
                 else None
             ),
             registered_at=datetime.fromisoformat(row["registered_at"]),
+            user=row["user"] if "user" in keys else None,
         )
 
     # --- Project CRUD ---

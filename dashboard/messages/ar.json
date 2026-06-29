@@ -235,6 +235,10 @@
     "cancel": "إلغاء",
     "error": "تعذّر إنشاء المهمة"
   },
+  "TeamStatus": {
+    "teamMode": "وضع الفريق",
+    "soloMode": "الوضع الفردي"
+  },
   "TaskDetail": {
     "status": "الحالة",
     "assignee": "المسؤول",

@@ -45,7 +45,7 @@ class Router:
         self._last_update: dict[str, float] = {}  # project -> timestamp
         self._event_queue: asyncio.Queue[WsEvent] = asyncio.Queue()
 
-    async def handle_file(self, project: str, filepath: str):
+    async def handle_file(self, project: str, filepath: str, user: str | None = None):
         """Route an inbox file to the correct handler."""
         path = Path(filepath)
         filename = path.name.lower()
@@ -56,15 +56,15 @@ class Router:
 
         try:
             if filename == "register.json":
-                await self._handle_register(project, path)
+                await self._handle_register(project, path, user=user)
             elif filename == "heartbeat.json":
-                await self._handle_heartbeat(project, path)
+                await self._handle_heartbeat(project, path, user=user)
             elif filename.startswith("finding-") and filename.endswith(".md"):
-                await self._handle_finding(project, path)
+                await self._handle_finding(project, path, user=user)
             elif filename.startswith("decision-") and filename.endswith(".md"):
-                await self._handle_decision(project, path)
+                await self._handle_decision(project, path, user=user)
             elif filename.startswith("task-") and filename.endswith(".json"):
-                await self._handle_task(project, path)
+                await self._handle_task(project, path, user=user)
             else:
                 logger.debug(f"Ignoring unknown file: {filename}")
                 return
@@ -81,9 +81,11 @@ class Router:
             logger.error(f"Error handling {filepath}: {e}")
             await self._emit_error(project, filepath, str(e))
 
-    async def _handle_register(self, project: str, path: Path):
+    async def _handle_register(self, project: str, path: Path, user: str | None = None):
         payload = RegisterPayload(**json.loads(path.read_text()))
         agent_id = f"{payload.agent}-{project}"
+        if user:
+            agent_id = f"{payload.agent}-{project}-{user}"
 
         agent = AgentInfo(
             agent_id=agent_id,
@@ -93,6 +95,7 @@ class Router:
             capabilities=payload.capabilities,
             status=AgentStatus.ONLINE,
             last_heartbeat=datetime.now(timezone.utc),
+            user=user,
         )
         await self.registry.upsert_agent(agent)
         await self.registry.upsert_project(project, payload.project_path)
@@ -113,7 +116,15 @@ class Router:
             "capabilities": payload.capabilities,
         })
 
-    async def _handle_heartbeat(self, project: str, path: Path):
+        # When a user-scoped registration occurs, emit team event
+        if user:
+            await self._emit_event("team:agent_joined", project, {
+                "agent": payload.agent,
+                "user": user,
+                "capabilities": payload.capabilities,
+            })
+
+    async def _handle_heartbeat(self, project: str, path: Path, user: str | None = None):
         payload = HeartbeatPayload(**json.loads(path.read_text()))
         agent_id = f"{payload.agent}-{project}"
         agent = await self.registry.get_agent(agent_id)
@@ -122,7 +133,7 @@ class Router:
             agent.status = AgentStatus.ONLINE
             await self.registry.upsert_agent(agent)
 
-    async def _handle_finding(self, project: str, path: Path):
+    async def _handle_finding(self, project: str, path: Path, user: str | None = None):
         content = path.read_text()
         frontmatter = self._parse_frontmatter(content)
 
@@ -159,7 +170,7 @@ class Router:
                 self._regenerate_shared_context(project, project_info.project_path)
             )
 
-    async def _handle_decision(self, project: str, path: Path):
+    async def _handle_decision(self, project: str, path: Path, user: str | None = None):
         content = path.read_text()
         frontmatter = self._parse_frontmatter(content)
         frontmatter.type = FindingType.ARCHITECTURE_DECISION
@@ -176,7 +187,7 @@ class Router:
                 self._regenerate_shared_context(project, project_info.project_path)
             )
 
-    async def _handle_task(self, project: str, path: Path):
+    async def _handle_task(self, project: str, path: Path, user: str | None = None):
         payload = TaskPayload(**json.loads(path.read_text()))
         before = await self.registry.get_agent_task(payload.task_id)
         first_line = (payload.instruction.strip().splitlines() or ["Dispatched task"])[0]

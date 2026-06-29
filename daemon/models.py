@@ -65,6 +65,7 @@ class AgentInfo(BaseModel):
     status: AgentStatus = AgentStatus.ONLINE
     last_heartbeat: Optional[datetime] = None
     registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    user: Optional[str] = None
 
 
 class ProjectInfo(BaseModel):

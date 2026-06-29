@@ -10,6 +10,13 @@ import uvicorn
 
 def cmd_start(args):
     """Start the Loom daemon."""
+    # Configure auth token if provided (team mode)
+    if getattr(args, "auth_token", None):
+        import os
+        os.environ["LOOM_AUTH_TOKEN"] = args.auth_token
+        from daemon.auth import configure_auth_token
+        configure_auth_token(args.auth_token)
+
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -161,6 +168,8 @@ def main():
     start_p.add_argument("--port", type=int, default=8472, help="Bind port")
     start_p.add_argument("--reload", action="store_true", help="Enable auto-reload")
     start_p.add_argument("--log-level", default="info", help="Log level")
+    start_p.add_argument("--auth-token", default=None,
+                         help="Enable team mode with token-based auth (optional)")
     start_p.set_defaults(func=cmd_start)
 
     # ---- loom register ----

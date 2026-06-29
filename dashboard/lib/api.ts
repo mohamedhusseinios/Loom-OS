@@ -216,6 +216,15 @@ export async function unregisterAgent(
 }
 
 // --- Agent Capability Matching ---
+export interface TeamStatus {
+  auth_enabled: boolean;
+  users: string[];
+}
+
+export async function getTeamStatus(): Promise<TeamStatus> {
+  return fetchApi("/api/team/status");
+}
+
 export async function matchAgents(
   projectId: string,
   need: string,

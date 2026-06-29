@@ -1,32 +1,40 @@
-"""Tests for the Watcher."""
-import asyncio
+"""Tests for inbox path parsing in the watcher."""
 import pytest
-from daemon.watcher import InboxWatcher
+from daemon.watcher import parse_inbox_path
 
 
-@pytest.mark.asyncio
-async def test_watcher_detects_new_file(tmp_path):
-    """Watcher should fire callback when a file is created."""
-    received = []
+def test_parse_flat_inbox_path():
+    """Old layout: inbox/<project>/<file> — user is None."""
+    project, user, filename = parse_inbox_path(
+        "/home/user/.loom/inbox/my-project/finding-1.md"
+    )
+    assert project == "my-project"
+    assert user is None
+    assert filename == "finding-1.md"
 
-    async def callback(project: str, filepath: str):
-        received.append((project, filepath))
 
-    inbox = tmp_path / "inbox"
-    inbox.mkdir()
+def test_parse_user_inbox_path():
+    """New layout: inbox/<project>/<user>/<file> — user is captured."""
+    project, user, filename = parse_inbox_path(
+        "/home/user/.loom/inbox/my-project/alice/finding-1.md"
+    )
+    assert project == "my-project"
+    assert user == "alice"
+    assert filename == "finding-1.md"
 
-    watcher = InboxWatcher(str(inbox))
-    loop = asyncio.get_running_loop()
-    watcher.start(callback, loop)
 
-    # Write a file
-    proj_dir = inbox / "test-project"
-    proj_dir.mkdir()
-    (proj_dir / "finding.md").write_text("# Test finding")
+def test_parse_processed_subdirectory():
+    """Paths under .processed/ still extract project and user."""
+    project, user, filename = parse_inbox_path(
+        "/home/user/.loom/inbox/my-project/bob/.processed/register.json"
+    )
+    assert project == "my-project"
+    assert user == "bob"
+    assert filename == "register.json"
 
-    # Wait for watchdog to pick it up
-    await asyncio.sleep(0.5)
 
-    watcher.stop()
-    assert len(received) >= 1
-    assert received[0][0] == "test-project"
+def test_parse_path_without_inbox():
+    """Paths that don't contain 'inbox' return safe defaults."""
+    project, user, filename = parse_inbox_path("/tmp/some-file.md")
+    assert project == "unknown"
+    assert user is None

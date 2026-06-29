@@ -235,6 +235,10 @@
     "cancel": "Cancel",
     "error": "Could not create task"
   },
+  "TeamStatus": {
+    "teamMode": "Team mode",
+    "soloMode": "Solo mode"
+  },
   "TaskDetail": {
     "status": "Status",
     "assignee": "Assignee",

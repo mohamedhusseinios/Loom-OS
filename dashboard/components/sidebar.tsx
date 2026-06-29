@@ -8,6 +8,7 @@ import { Home, Plus, Activity, GitGraph, Users, Compass } from "lucide-react";
 import { listProjects } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/api";
 import { AddProjectModal } from "@/components/add-project-modal";
+import { TeamStatus } from "@/components/team-status";
 import { routing, LOCALE_LABELS, type Locale } from "@/i18n/routing";
 
 export function Sidebar() {
@@ -158,6 +159,8 @@ export function Sidebar() {
               })}
             </>
           )}
+
+          <TeamStatus />
 
           <button
             onClick={() => setShowAddModal(true)}

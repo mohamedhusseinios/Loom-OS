@@ -200,11 +200,12 @@ async def _agent_roster(project_id: str, registry) -> str:
             status_icon = {"online": "🟢", "offline": "⚫", "working": "🟡"}.get(
                 a.status.value, "⚫"
             )
-            lines += f"| {status_icon} {a.agent_name} | {a.version} | {', '.join(a.capabilities[:5])} |\n"
+            user = getattr(a, 'user', None) or "—"
+            lines += f"| {status_icon} {a.agent_name} | {user} | {a.version} | {', '.join(a.capabilities[:5])} |\n"
 
         return (
             f"## Agent Roster\n\n"
-            f"| Agent | Version | Capabilities |\n|---|---|---|\n"
+            f"| Agent | User | Version | Capabilities |\n|---|---|---|---|\n"
             f"{lines}\n"
         )
     except Exception as exc:

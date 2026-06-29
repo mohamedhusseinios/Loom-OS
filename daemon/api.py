@@ -281,9 +281,9 @@ async def register_agent(project_id: str, payload: RegisterAgentPayload):
 
 
 @app.get("/api/projects/{project_id}/agents")
-async def list_agents(project_id: str):
-    """List agents for a project."""
-    agents = await registry.list_agents(project_id)
+async def list_agents(project_id: str, user: str = None):
+    """List agents for a project, optionally filtered by user."""
+    agents = await registry.list_agents(project_id, user=user)
     return {"agents": [a.model_dump() for a in agents]}
 
 
@@ -294,6 +294,16 @@ async def match_agents(project_id: str, need: str = ""):
         raise HTTPException(status_code=400, detail="Missing query parameter 'need'")
     matches = await registry.match_capability(project_id, need)
     return {"matches": [a.model_dump() for a in matches]}
+
+
+@app.get("/api/team/status")
+async def team_status():
+    """Return team mode status: auth enabled + active users."""
+    from daemon.auth import is_auth_enabled
+    auth = is_auth_enabled()
+    all_agents = await registry.list_agents()
+    users = sorted(set(a.user for a in all_agents if a.user))
+    return {"auth_enabled": auth, "users": users}
 
 
 @app.delete("/api/projects/{project_id}/agents/{agent_id}")
@@ -1113,7 +1123,12 @@ async def ingest_directory(project_id: str, payload: dict):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket for live event streaming."""
+    """WebSocket for live event streaming. Optional token auth via ?token=."""
+    from daemon.auth import verify_ws_token
+    token = websocket.query_params.get("token")
+    if not verify_ws_token(token):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     await websocket.accept()
     connected_clients.append(websocket)
     try:
