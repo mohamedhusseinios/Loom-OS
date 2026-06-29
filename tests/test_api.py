@@ -857,3 +857,16 @@ def test_extracted_edges_endpoint_empty(client):
     resp = client.get("/api/projects/proj-1/extracted-edges")
     assert resp.status_code == 200
     assert resp.json() == {"edges": []}
+
+
+def test_search_hybrid_mode(client, monkeypatch):
+    """Search with mode=hybrid returns graph-aware results with mode field."""
+    async def fake_hybrid(self, project_path, project, question, **kw):
+        return [{"id": "AuthService", "kind": "class",
+                 "semantic_score": 0.9, "structural_distance": 0}]
+    monkeypatch.setattr("daemon.graph_engine.GraphEngine.hybrid_query", fake_hybrid)
+    resp = client.get("/api/projects/noor/search?q=auth&mode=hybrid")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "hybrid"
+    assert body["results"][0]["id"] == "AuthService"

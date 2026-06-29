@@ -866,12 +866,18 @@ async def project_branches(project_id: str):
 
 
 @app.get("/api/projects/{project_id}/search")
-async def hybrid_search(project_id: str, q: str = ""):
-    """Hybrid search: text + vector cosine similarity over inbox findings."""
+async def hybrid_search(project_id: str, q: str = "", mode: str = "text"):
+    """Hybrid search: text+vector (default) or graph+vector+relational (hybrid)."""
     if not q:
-        return {"results": []}
+        return {"results": [], "mode": mode}
+    if mode == "hybrid":
+        project = await registry.get_project(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        results = await graph_engine.hybrid_query(project.project_path, project_id, q)
+        return {"results": results, "mode": "hybrid"}
     results = await registry.hybrid_search(project_id, q)
-    return {"results": results}
+    return {"results": results, "mode": "text"}
 
 
 @app.post("/api/projects/{project_id}/eval")
