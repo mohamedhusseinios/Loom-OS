@@ -73,3 +73,19 @@ async def test_store_multiple_inserts_and_search(tmp_path):
     assert len(results) == 3
     # doc-3 ("Password hashing security") should be the top match
     assert results[0]["id"] == "doc-3"
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_returns_correct_count():
+    gen = EmbeddingGenerator()
+    texts = ["hello world", "foo bar", "test text"]
+    results = await gen.embed_batch(texts)
+    assert len(results) == 3
+    assert all(len(r) == len(results[0]) for r in results)  # same dim
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_empty_list():
+    gen = EmbeddingGenerator()
+    results = await gen.embed_batch([])
+    assert results == []

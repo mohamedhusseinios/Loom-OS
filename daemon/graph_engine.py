@@ -14,6 +14,13 @@ from daemon.models import BuildResult, GraphStats, QueryResult
 from daemon.embeddings import EmbeddingGenerator
 from daemon.extracted_store import ExtractedEdgeStore
 
+_graph_cache: dict[str, tuple[float, dict]] = {}  # path -> (mtime, data)
+
+
+def clear_graph_cache():
+    """Clear the graph.json cache. For testing."""
+    _graph_cache.clear()
+
 
 def _decode_subprocess_error(e: subprocess.CalledProcessError) -> str:
     """Extract a useful message from a failed graphify subprocess call."""
@@ -112,8 +119,19 @@ class GraphEngine:
 
     @staticmethod
     def _read_graph_json(path: Path) -> dict:
+        """Read graph.json with mtime-based caching.
+
+        Re-reads only when the file's mtime changes, avoiding repeated
+        JSON parsing on every API call (stats, topology, communities, etc).
+        """
+        mtime = path.stat().st_mtime
+        cached = _graph_cache.get(str(path))
+        if cached and cached[0] == mtime:
+            return cached[1]
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        _graph_cache[str(path)] = (mtime, data)
+        return data
 
     async def get_stats(self, project_path: str) -> GraphStats:
         """Read node / edge / community counts from the graph JSON."""

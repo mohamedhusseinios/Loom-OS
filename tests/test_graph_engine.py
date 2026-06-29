@@ -1,7 +1,8 @@
 """Tests for the Graph Engine."""
 import json
+import time
 import pytest
-from daemon.graph_engine import GraphEngine
+from daemon.graph_engine import GraphEngine, _graph_cache, clear_graph_cache
 
 
 @pytest.mark.asyncio
@@ -96,3 +97,34 @@ async def test_hybrid_query_returns_dual_relevance(tmp_path, monkeypatch):
     bcrypt = next(r for r in rows if r["id"] == "BcryptHasher")
     assert bcrypt["structural_distance"] == 1
     assert "semantic_score" in bcrypt
+
+
+def test_graph_json_cache_invalidates_on_mtime_change(tmp_path):
+    """Cache returns same object on repeated reads; invalidates on file change."""
+    clear_graph_cache()
+    graph_path = tmp_path / "graphify-out" / "graph.json"
+    graph_path.parent.mkdir(parents=True)
+    graph_path.write_text('{"nodes": [], "links": []}')
+
+    # First read populates cache
+    data1 = GraphEngine._read_graph_json(graph_path)
+    assert str(graph_path) in _graph_cache
+
+    # Same mtime → cache hit (same object)
+    data2 = GraphEngine._read_graph_json(graph_path)
+    assert data1 is data2
+
+    # Modify file → cache miss
+    graph_path.write_text('{"nodes": [{"id": "x"}], "links": []}')
+    time.sleep(0.01)  # ensure mtime changes
+    data3 = GraphEngine._read_graph_json(graph_path)
+    assert data3["nodes"] == [{"id": "x"}]
+
+    clear_graph_cache()
+
+
+def test_graph_json_cache_handles_missing_file(tmp_path):
+    """Reading a non-existent path raises (same as before caching)."""
+    clear_graph_cache()
+    with pytest.raises(FileNotFoundError):
+        GraphEngine._read_graph_json(tmp_path / "nonexistent.json")

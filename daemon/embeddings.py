@@ -48,6 +48,19 @@ class EmbeddingGenerator:
         embedding = self._model.encode(text)
         return embedding.tolist()
 
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Batch-embed multiple texts in one model call.
+
+        More efficient than calling embed() N times — the model encodes
+        all texts in a single forward pass.
+        """
+        if self._model is None:
+            self._model = self._load_model()
+        if self._model is None:
+            return [[0.0] * _DEFAULT_DIM for _ in texts]
+        embeddings = self._model.encode(texts)
+        return [e.tolist() for e in embeddings]
+
     def _load_model(self):
         """Try to load the sentence-transformer model; return None on failure."""
         try:
