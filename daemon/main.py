@@ -121,12 +121,26 @@ def cmd_detect_agents(_args):
                 print(f"  loom register --agent {agent['name']} --project <project> --project-path <path>")
 
 
+def cmd_init(args):
+    """Bootstrap a project: create the inbox and a starter register.json."""
+    inbox = os.path.expanduser(f"~/.loom/inbox/{args.project}")
+    os.makedirs(inbox, exist_ok=True)
+    payload = {
+        "agent": args.agent, "version": "1.0", "project": args.project,
+        "project_path": os.path.expanduser(args.project_path), "capabilities": [],
+    }
+    with open(os.path.join(inbox, "register.json"), "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"✓ Initialized Loom project '{args.project}'")
+    print("  Next: run `loom start`, then open http://localhost:3000")
+
+
 def main():
     # Backward-compat: if someone runs `loom --host 127.0.0.1` (no subcommand
     # but with start flags), silently insert "start" so they don't get the
     # confusing "invalid choice: '127.0.0.1'" error.
     # Don't intercept --help / -h — let the main parser show all subcommands.
-    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents", "worker"}
+    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents", "worker", "init"}
     if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
         pass
     elif len(sys.argv) > 1 and sys.argv[1] not in KNOWN_SUBCOMMANDS and not sys.argv[1].startswith("-"):
@@ -182,6 +196,13 @@ def main():
     worker_p.add_argument("--task", default=None,
                           help="Task id to process when --once is set")
     worker_p.set_defaults(func=cmd_worker)
+
+    # ---- loom init ----
+    init_p = sub.add_parser("init", help="Bootstrap a Loom project in the current directory")
+    init_p.add_argument("--project", required=True, help="Project identifier")
+    init_p.add_argument("--project-path", default=".", help="Path to the project (default: cwd)")
+    init_p.add_argument("--agent", default="claude-code", help="Initial agent name")
+    init_p.set_defaults(func=cmd_init)
 
     args = parser.parse_args()
 
