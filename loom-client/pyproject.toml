@@ -1,0 +1,23 @@
+[project]
+name = "loom-client"
+version = "0.1.0"
+description = "Client SDK for Loom OS — validated inbox protocol one-liners"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["loom", "loom-os", "agent-memory", "agent-sdk"]
+authors = [{ name = "Mohamed Hussien" }]
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["loom_client*"]
