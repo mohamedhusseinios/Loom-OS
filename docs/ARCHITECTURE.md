@@ -49,6 +49,11 @@ router.py    Router.handle_file dispatches by filename to _handle_* methods,
 registry.py  AgentRegistry: aiosqlite over ~/.loom/state.db. Tables: agents,
              projects, tasks. CRUD + graph-stat persistence.
 graph_engine.py  GraphEngine: build/update/query/stats/topology/communities/flows.
+                 Also: hybrid_query (vector-seeded BFS over AST + extracted edges).
+extractors.py    Knowledge extraction pipeline (RegexExtractor + LLMExtractor).
+                 Injectable LLM backend (Ollama/OpenAI/Claude) — degrades to [].
+extracted_store.py  Sidecar store for LLM-extracted, non-AST graph edges.
+                    Persists per-project JSON; merged at query/render time.
 api.py       FastAPI routes (read module globals) + WebSocket fan-out.
 models.py    All Pydantic schemas (inbox payloads, registry models, WS events).
 ```
@@ -70,6 +75,8 @@ models.py    All Pydantic schemas (inbox payloads, registry models, WS events).
 | `shared_context.py` | Auto-generates `.loom/SHARED_CONTEXT.md` with graph stats and findings |
 | `project_knowledge.py` | Project knowledge aggregation and retrieval |
 | `known_agents.py` | Agent deduplication and recognition across registrations |
+| `extractors.py` | Knowledge extraction pipeline (RegexExtractor + LLMExtractor with injectable backend) |
+| `extracted_store.py` | Sidecar JSON store for LLM-extracted non-AST graph edges |
 | `mcp_server.py` | MCP (Model Context Protocol) server entry point (`loom-mcp`) |
 
 ### Additional Modules (v0.1+)
@@ -129,5 +136,6 @@ Dev: `pytest`, `pytest-asyncio`, `httpx`.
 | `next-intl` | Internationalization (en/ar, RTL) |
 | `shadcn` + `@base-ui/react` | Component primitives |
 | `tailwindcss` (v4) | Utility-first CSS |
-| `cytoscape` + `cytoscape-cose-bilkent` | Graph visualization |
+| `cytoscape` + `cytoscape-cose-bilkent` | Graph visualization (legacy) |
+| `reagraph` | Graph visualization (WebGL/Three.js, current) |
 | `lucide-react` | Icon library |

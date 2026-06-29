@@ -9,8 +9,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/mohamedhusseinios/agentic-os.git
-cd agentic-os
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
 
 # Python daemon
 python3 -m venv .venv && source .venv/bin/activate

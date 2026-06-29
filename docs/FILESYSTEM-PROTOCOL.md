@@ -64,7 +64,7 @@ timestamp: 2026-06-25T14:35:00Z
 The auth pipeline uses JWT with Redis-backed session storage...
 ```
 
-Free-form markdown with YAML frontmatter. If `files` references code files, it triggers an incremental graph update (rate-limited to one per project per 30s).
+Free-form markdown with YAML frontmatter. If `files` references code files, it triggers an incremental graph update (rate-limited to one per project per 30s). The daemon also runs the **extractor pipeline** (RegexExtractor + optional LLMExtractor) on the finding body and persists any extracted entities/relationships to the `ExtractedEdgeStore` sidecar. An `extraction:completed` WebSocket event is emitted when extraction produces results.
 
 ### `decision-*.md` — Architecture decisions
 
