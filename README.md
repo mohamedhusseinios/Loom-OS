@@ -10,14 +10,14 @@
 
 **Loom OS** is a unified agent memory fabric that weaves multiple AI coding agents — Claude Code, Codex, Hermes, Cursor, and more — into one shared, [Graphify](https://github.com/nousresearch/graphify)-powered knowledge graph per project. Agents talk to Loom OS **only through the filesystem**: they drop files into a per-project inbox and the daemon does the rest. There is no SDK, no API client, and no auth. A Next.js dashboard is the control plane for browsing the graph, managing agents, and dispatching work.
 
-> **Naming.** The product is **Loom OS**. The installable package and CLI are **`loom`** (`pip install loom`). The repository directory and design/plan docs are named **`agentic-os`**. They all refer to the same project.
+> **Naming.** The product is **Loom OS**. The installable package is **`loom-os`** (`pip install loom-os`); the CLI command is **`loom`**. The repository directory and design/plan docs are named **`agentic-os`**. They all refer to the same project.
 
 ---
 
 ## Quick Start
 
 ```bash
-pip install loom                            # base install — no LLM keys required
+pip install loom-os                         # base install — no LLM keys required
 loom start                                  # starts daemon on http://127.0.0.1:8472
 loom init --project my-app --project-path . # bootstraps inbox + starter register.json
 # (or register a specific agent instead of init):
@@ -39,7 +39,7 @@ cd dashboard && npm install && npm run dev   # http://localhost:3000
 **Prerequisites:** Python 3.11+, Node.js 20+. Graphify ships as a dependency (`graphifyy`).
 
 > Want optional LLM-powered extraction (Ollama / OpenAI / Claude)?  
-> `pip install loom[llm]` — the base install works without any LLM.
+> `pip install loom-os[llm]` — the base install works without any LLM.
 
 ---
 
@@ -50,7 +50,7 @@ cd dashboard && npm install && npm run dev   # http://localhost:3000
 - **Next.js dashboard** — interactive graph visualization (reagraph/cytoscape), agent management with live status, a Kanban task board (Todo · Ready · Running · Blocked · Done), project CRUD, knowledge-source discovery, and hybrid search. Bilingual (en/ar) with RTL support.
 - **Task dispatch + worker execution** — dispatch tasks from the dashboard; a `loom worker` process picks up Running tasks, executes them in an isolated **git worktree**, and enforces a per-task USD budget cap. Results flow back as findings.
 - **Hybrid search** — text (FTS) + vector embeddings + graph traversal in a single query path.
-- **Optional LLM backends** — Ollama (default, local), OpenAI, or Anthropic Claude. Install with `pip install loom[llm]`. The base package needs no LLM at all.
+- **Optional LLM backends** — Ollama (default, local), OpenAI, or Anthropic Claude. Install with `pip install loom-os[llm]`. The base package needs no LLM at all.
 - **MCP server** — `loom-mcp` exposes graph queries and finding ingestion over the Model Context Protocol so any MCP-aware agent can read from and write to Loom OS.
 - **Single-process daemon, zero infrastructure** — no Docker, no Neo4j, no cloud. One Python process (FastAPI + uvicorn) plus the Next.js dashboard. State lives in SQLite (`~/.loom/state.db`).
 

@@ -1,5 +1,5 @@
 [project]
-name = "loom"
+name = "loom-os"
 version = "0.2.0"
 description = "Loom OS — unified agent memory fabric for multi-agent coding"
 readme = "README.md"

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is **Loom OS** — a unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project. Agents talk to Loom OS **only through the filesystem** (drop files in an inbox); there is no SDK, API client, or auth. A Next.js dashboard is the control plane.
 
-Naming drift to be aware of: the product is **Loom OS**, but the package/CLI is **`loom`** (`pyproject.toml`, the `loom` command), and the repo directory and all design/plan docs are named **`agentic-os`** (e.g. `docs/superpowers/specs/2026-06-25-agentic-os-design.md`). They refer to the same project. The README also links to some `*-loom-*` doc paths that don't exist — the real files use the `agentic-os` prefix.
+Naming drift to be aware of: the product is **Loom OS**, but the package is **`loom-os`** (`pip install loom-os`), the CLI command is **`loom`**, and the repo directory and all design/plan docs are named **`agentic-os`** (e.g. `docs/superpowers/specs/2026-06-25-agentic-os-design.md`). They refer to the same project.
 
 ## Commands
 
