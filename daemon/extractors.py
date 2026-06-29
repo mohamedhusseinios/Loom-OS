@@ -221,15 +221,46 @@ class LLMExtractor(Extractor):
         self._call_fn = call_fn  # injected in tests; real backends wired in Task 1.2
 
     async def extract(self, text: str) -> list[ExtractedEntity]:
-        call = self._call_fn
-        if call is None:
-            return []  # no backend configured -> degrade (regex still runs)
+        call = self._call_fn or self._default_call
         try:
             raw = await call(_LLM_PROMPT % text[:4000])
             data = _json.loads(raw)
-        except Exception:
+        except Exception as exc:
+            logger.debug("LLMExtractor degraded (%s): %s", self.backend, exc)
             return []
         return self._to_entities(data)
+
+    async def _default_call(self, prompt: str) -> str:
+        """Call the configured backend. All client imports are lazy/optional."""
+        if self.backend == "ollama":
+            import httpx  # part of dev deps; ollama exposes HTTP on 11434
+            model = self.model or "llama3.1"
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    "http://127.0.0.1:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "format": "json", "stream": False},
+                )
+                resp.raise_for_status()
+                return resp.json().get("response", "")
+        if self.backend == "openai":
+            from openai import AsyncOpenAI  # optional dep
+            client = AsyncOpenAI()
+            r = await client.chat.completions.create(
+                model=self.model or "gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            return r.choices[0].message.content or ""
+        if self.backend in ("claude", "anthropic"):
+            from anthropic import AsyncAnthropic  # optional dep
+            client = AsyncAnthropic()
+            r = await client.messages.create(
+                model=self.model or "claude-haiku-4-5-20251001",
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "".join(b.text for b in r.content if getattr(b, "type", "") == "text")
+        raise RuntimeError(f"unknown LLM backend: {self.backend}")
 
     @staticmethod
     def _to_entities(data: dict) -> list[ExtractedEntity]:

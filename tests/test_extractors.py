@@ -89,3 +89,10 @@ async def test_llm_extractor_degrades_to_empty_on_bad_json():
 
     extractor = LLMExtractor(backend="ollama", call_fn=bad_call)
     assert await extractor.extract("anything") == []
+
+
+@pytest.mark.asyncio
+async def test_llm_extractor_unknown_backend_degrades():
+    extractor = LLMExtractor(backend="does-not-exist")  # no call_fn injected
+    # No client available -> extract returns [] rather than raising.
+    assert await extractor.extract("AuthService handles login") == []
