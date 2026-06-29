@@ -4,7 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { usePathname as useNextPathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Home, Plus, Activity, GitGraph, Users } from "lucide-react";
+import { Home, Plus, Activity, GitGraph, Users, Compass } from "lucide-react";
 import { listProjects } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/api";
 import { AddProjectModal } from "@/components/add-project-modal";
@@ -140,6 +140,16 @@ export function Sidebar() {
                           }`}
                         >
                           <Users className="w-3 h-3" /> {t("agents")}
+                        </Link>
+                        <Link
+                          href={`/projects/${p.project_id}/directory`}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] transition-colors ${
+                            pathname.includes("/directory")
+                              ? "text-zinc-200 bg-zinc-800/50"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          <Compass className="w-3 h-3" /> {t("directory")}
                         </Link>
                       </div>
                     )}

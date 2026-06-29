@@ -11,6 +11,7 @@
     "overview": "Overview",
     "graph": "Graph",
     "agents": "Agents",
+    "directory": "Directory",
     "addProject": "Add Project"
   },
   "ProjectsPage": {
@@ -42,6 +43,15 @@
     "empty": "No agents registered yet. Agents appear when they write register.json to {path}",
     "agentWiring": "Agent Wiring",
     "dispatchHistory": "Dispatch History"
+  },
+  "AgentDirectory": {
+    "heading": "Agent Directory",
+    "subtitle": "{count, plural, one {# agent} other {# agents}} registered",
+    "loading": "Loading...",
+    "notFound": "Project not found",
+    "searchPlaceholder": "Search capabilities... (e.g. 'review', 'testing')",
+    "searching": "Searching...",
+    "noAgents": "No agents found"
   },
   "GraphExplorer": {
     "loading": "Loading graph...",

@@ -10,6 +10,7 @@ interface SearchResult {
   text: string;
   score: number;
   source: string;
+  kind?: string;
   semantic_score?: number;
   structural_distance?: number;
 }

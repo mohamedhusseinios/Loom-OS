@@ -26,6 +26,13 @@ export interface AgentInfo {
   version: string;
   project: string;
   capabilities: string[];
+  structured_capabilities: {
+    name: string;
+    description: string;
+    tools: string[];
+    models: string[];
+    status: string;
+  }[];
   status: "online" | "offline" | "working";
   last_heartbeat: string | null;
   registered_at: string;
@@ -206,6 +213,14 @@ export async function unregisterAgent(
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+// --- Agent Capability Matching ---
+export async function matchAgents(
+  projectId: string,
+  need: string,
+): Promise<{ matches: AgentInfo[] }> {
+  return fetchApi(`/api/projects/${projectId}/agents/match?need=${encodeURIComponent(need)}`);
 }
 
 // --- Known Agents ---

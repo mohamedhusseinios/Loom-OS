@@ -11,6 +11,7 @@
     "overview": "نظرة عامة",
     "graph": "الرسم البياني",
     "agents": "الوكلاء",
+    "directory": "الدليل",
     "addProject": "إضافة مشروع"
   },
   "ProjectsPage": {
@@ -42,6 +43,15 @@
     "empty": "لا يوجد وكلاء مسجَّلون بعد. يظهر الوكلاء عند كتابة register.json إلى {path}",
     "agentWiring": "توصيلات الوكلاء",
     "dispatchHistory": "سجل الإرسالات"
+  },
+  "AgentDirectory": {
+    "heading": "دليل الوكلاء",
+    "subtitle": "{count, plural, one {وكيل واحد} other {# وكلاء}} مسجلون",
+    "loading": "جارٍ التحميل...",
+    "notFound": "المشروع غير موجود",
+    "searchPlaceholder": "ابحث عن القدرات... (مثل 'مراجعة'، 'اختبار')",
+    "searching": "جارٍ البحث...",
+    "noAgents": "لا يوجد وكلاء"
   },
   "GraphExplorer": {
     "loading": "جارٍ تحميل الرسم البياني...",
