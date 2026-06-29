@@ -1,4 +1,5 @@
 """Tests for the Graph Engine."""
+import json
 import pytest
 from daemon.graph_engine import GraphEngine
 
@@ -67,3 +68,31 @@ async def test_build_without_graphify_returns_failed():
         result = await engine.build_project("/tmp/test")
         assert result.status == "failed"
         assert "not installed" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_hybrid_query_returns_dual_relevance(tmp_path, monkeypatch):
+    """hybrid_query returns nodes with both semantic_score and structural_distance."""
+    # Minimal graph.json with two connected nodes.
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps({
+        "nodes": [{"id": "AuthService", "kind": "class"},
+                  {"id": "BcryptHasher", "kind": "class"}],
+        "edges": [{"source": "AuthService", "target": "BcryptHasher", "kind": "uses"}],
+    }))
+
+    # Deterministic embedding: vector = [len(text)] so 'AuthService' seeds first.
+    async def fake_embed(self, text):
+        return [float(len(text)), 1.0]
+    monkeypatch.setattr("daemon.embeddings.EmbeddingGenerator.embed", fake_embed, raising=False)
+
+    engine = GraphEngine()
+    rows = await engine.hybrid_query(str(tmp_path), "proj-1", "AuthService", depth=1)
+
+    ids = [r["id"] for r in rows]
+    assert "AuthService" in ids                       # vector seed
+    assert "BcryptHasher" in ids                      # reached via BFS
+    bcrypt = next(r for r in rows if r["id"] == "BcryptHasher")
+    assert bcrypt["structural_distance"] == 1
+    assert "semantic_score" in bcrypt

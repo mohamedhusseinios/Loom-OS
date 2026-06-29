@@ -6,9 +6,13 @@ Zero external dependencies — no API keys, no local LLM servers required.
 
 import asyncio
 import json
+import math
 import subprocess
+from collections import deque
 from pathlib import Path
 from daemon.models import BuildResult, GraphStats, QueryResult
+from daemon.embeddings import EmbeddingGenerator
+from daemon.extracted_store import ExtractedEdgeStore
 
 
 def _decode_subprocess_error(e: subprocess.CalledProcessError) -> str:
@@ -249,3 +253,66 @@ class GraphEngine:
         )
         lines = result.stdout.strip().split("\n")
         return [{"text": line} for line in lines if line.strip()]
+
+    async def hybrid_query(self, project_path: str, project: str, question: str,
+                           depth: int = 2, top_k: int = 10) -> list[dict]:
+        """Vector-seed the graph, then BFS along AST + extracted edges.
+
+        Returns rows carrying BOTH semantic (cosine) and structural (BFS depth)
+        relevance — the graph+vector(+relational) join Cognee charges for.
+        """
+        graph_path = Path(project_path) / "graphify-out" / "graph.json"
+        if not graph_path.exists():
+            return []
+        graph = await asyncio.to_thread(self._read_graph_json, graph_path)
+        nodes = {n.get("id") or n.get("name"): n for n in graph.get("nodes", [])}
+        adj: dict[str, list[str]] = {}
+        for e in graph.get("links", graph.get("edges", [])):
+            adj.setdefault(e.get("source"), []).append(e.get("target"))
+        # Merge extracted (relational) edges so the join spans non-AST links too.
+        for row in await ExtractedEdgeStore().load(project):
+            for _verb, target in row.get("relationships", []):
+                adj.setdefault(row["name"], []).append(target)
+
+        gen = EmbeddingGenerator()
+        q_vec = await gen.embed(question)
+        # Seed: cosine similarity of question vs each node id/label.
+        seeds: list[tuple[str, float]] = []
+        for nid in nodes:
+            score = self._cosine(q_vec, await gen.embed(str(nid)))
+            seeds.append((nid, score))
+        seeds.sort(key=lambda s: s[1], reverse=True)
+
+        # BFS from top seeds, recording structural distance.
+        results: dict[str, dict] = {}
+        for nid, sem in seeds[:max(3, top_k // 2)]:
+            dq = deque([(nid, 0)])
+            seen = {nid}
+            while dq:
+                cur, dist = dq.popleft()
+                if cur not in results:
+                    results[cur] = {
+                        "id": cur,
+                        "kind": (nodes.get(cur) or {}).get("kind", "unknown"),
+                        "semantic_score": self._cosine(q_vec, await gen.embed(str(cur))),
+                        "structural_distance": dist,
+                    }
+                if dist < depth:
+                    for nxt in adj.get(cur, []):
+                        if nxt not in seen:
+                            seen.add(nxt)
+                            dq.append((nxt, dist + 1))
+
+        ranked = sorted(
+            results.values(),
+            key=lambda r: (r["semantic_score"] - 0.1 * r["structural_distance"]),
+            reverse=True,
+        )
+        return ranked[:top_k]
+
+    @staticmethod
+    def _cosine(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(y * y for y in b))
+        return dot / (na * nb + 1e-8)
