@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<!--
+  Loom OS — landing page (drop-in for mabdulrahman.com)
+  ────────────────────────────────────────────────────
+  BEFORE PUBLISHING, replace 3 placeholders:
+   1. BOOKING_URL   → your Cal.com / Calendly link  (search: BOOKING_URL)
+   2. DEMO_URL      → your 90-sec demo video embed/link (search: DEMO_URL)
+   3. (optional) tweak prices in the "Work with me" section
+  Host at: loom.mabdulrahman.com  OR  mabdulrahman.com/loom
+  Self-contained: no build step, no dependencies except Google Fonts.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loom OS — Own your agents' memory. Don't rent it.</title>
+<meta name="description" content="Loom OS is a local-first memory fabric that gives Claude Code, Codex, Cursor and your in-house agents one shared knowledge graph per project. No SDK, no cloud, no lock-in." />
+<meta property="og:title" content="Loom OS — Own your agents' memory. Don't rent it." />
+<meta property="og:description" content="A local-first, multi-agent memory fabric. One shared knowledge graph for every coding agent on your machine." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#141414; --paper:#ffffff;
+    --grey:#6f6f6f; --line:#e5e5e5; --wash:#f7f7f7;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{font-family:"Space Grotesk",sans-serif;letter-spacing:-0.035em;line-height:1.08;margin:0}
+  a{color:inherit}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .eyebrow{font-family:"Space Grotesk";font-size:13px;font-weight:600;letter-spacing:.02em;
+    text-transform:uppercase;color:var(--grey)}
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:15px;
+    padding:13px 22px;border-radius:10px;text-decoration:none;border:1.5px solid var(--ink);transition:.15s}
+  .btn-primary{background:var(--ink);color:var(--paper)}
+  .btn-primary:hover{transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:var(--ink)}
+  .btn-ghost:hover{background:var(--ink);color:var(--paper)}
+  /* header */
+  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.85);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:700;
+    font-size:19px;letter-spacing:-0.035em;text-decoration:none}
+  .mark{width:26px;height:26px;border:2px solid var(--ink);border-radius:6px;display:grid;place-items:center;
+    font-size:14px;font-weight:700}
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;font-weight:500}
+  .nav-links a{text-decoration:none;color:var(--grey)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links .btn{padding:9px 16px;font-size:14px}
+  @media(max-width:760px){.nav-links a:not(.btn){display:none}}
+  /* hero */
+  .hero{padding:84px 0 64px}
+  .hero h1{font-size:clamp(38px,6vw,68px);font-weight:700;max-width:14ch}
+  .hero .sub{font-size:clamp(17px,2.2vw,21px);color:#333;max-width:60ch;margin:24px 0 0}
+  .hero .cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:34px}
+  .trust{margin-top:22px;font-size:13.5px;color:var(--grey);font-family:"Space Grotesk";font-weight:500}
+  .trust b{color:var(--ink);font-weight:600}
+  /* sections */
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  .sec-head{max-width:62ch}
+  .sec-head h2{font-size:clamp(27px,3.6vw,40px);font-weight:600}
+  .sec-head p{color:var(--grey);font-size:17px;margin-top:14px}
+  /* problem */
+  .lead{font-size:clamp(20px,2.6vw,27px);font-weight:500;font-family:"Space Grotesk";
+    letter-spacing:-0.02em;max-width:24ch;line-height:1.25}
+  .two{display:grid;grid-template-columns:1fr 1.1fr;gap:48px;align-items:center}
+  @media(max-width:760px){.two{grid-template-columns:1fr;gap:24px}}
+  /* feature grid */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:36px}
+  @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:540px){.grid{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:14px;padding:24px;background:var(--paper);transition:.15s}
+  .card:hover{border-color:var(--ink);transform:translateY(-2px)}
+  .card .ic{width:34px;height:34px;border:1.5px solid var(--ink);border-radius:8px;display:grid;
+    place-items:center;font-size:17px;margin-bottom:14px}
+  .card h3{font-size:17px;font-weight:600;margin-bottom:6px}
+  .card p{font-size:14.5px;color:var(--grey);margin:0}
+  /* who */
+  .who{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:32px}
+  @media(max-width:760px){.who{grid-template-columns:1fr}}
+  .who .card h3{font-family:"Space Grotesk";font-size:18px}
+  /* narrative band */
+  .band{background:var(--ink);color:var(--paper);border-radius:18px;padding:48px}
+  .band .eyebrow{color:#9a9a9a}
+  .band h2{font-size:clamp(26px,3.4vw,38px);font-weight:600;margin-top:10px;max-width:20ch}
+  .band p{color:#cfcfcf;font-size:17.5px;max-width:64ch;margin-top:18px}
+  /* offer / pricing */
+  .offers{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:34px}
+  @media(max-width:760px){.offers{grid-template-columns:1fr}}
+  .offer{border:1px solid var(--line);border-radius:14px;padding:26px;display:flex;flex-direction:column;gap:6px}
+  .offer.flag{border:1.5px solid var(--ink);box-shadow:0 8px 30px rgba(0,0,0,.06)}
+  .offer .tag{font-family:"Space Grotesk";font-size:12px;font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em;color:var(--grey)}
+  .offer h3{font-size:21px;font-weight:600;font-family:"Space Grotesk"}
+  .offer .price{font-family:"Space Grotesk";font-weight:700;font-size:26px;letter-spacing:-0.03em;margin:4px 0}
+  .offer p{font-size:14.5px;color:var(--grey);margin:0}
+  /* about */
+  .about{display:grid;grid-template-columns:1fr 1.4fr;gap:40px;align-items:start}
+  @media(max-width:760px){.about{grid-template-columns:1fr;gap:20px}}
+  .about .card{padding:28px}
+  .stat{font-family:"Space Grotesk";font-weight:700;font-size:30px;letter-spacing:-0.03em}
+  .stat-row{display:flex;gap:34px;flex-wrap:wrap;margin-top:8px}
+  .stat-row small{display:block;color:var(--grey);font-size:13px;font-family:Inter;font-weight:500}
+  /* final cta */
+  .final{text-align:center;padding:80px 0}
+  .final h2{font-size:clamp(30px,4.4vw,50px);font-weight:700;max-width:18ch;margin:0 auto}
+  .final p{color:var(--grey);font-size:18px;margin:18px auto 30px;max-width:54ch}
+  /* footer */
+  footer{border-top:1px solid var(--line);padding:40px 0;color:var(--grey);font-size:14px}
+  .foot{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;align-items:center}
+  .foot a{color:var(--grey);text-decoration:none;margin-right:18px}
+  .foot a:hover{color:var(--ink)}
+  .demo{margin-top:30px;border:1px dashed var(--line);border-radius:14px;background:var(--wash);
+    aspect-ratio:16/9;display:grid;place-items:center;text-align:center;color:var(--grey);font-size:14.5px;padding:20px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><span class="mark">L</span> Loom OS</a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#who">Who it's for</a>
+      <a href="#work">Work with me</a>
+      <a class="btn btn-primary" href="BOOKING_URL">Book a teardown</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <div class="hero wrap">
+    <p class="eyebrow">Local-first · multi-agent memory fabric</p>
+    <h1>Own your agents' memory. Don't rent it.</h1>
+    <p class="sub">Loom OS gives Claude Code, Codex, Cursor, and your in-house agents <b>one shared knowledge graph per project</b> — running on your machine. No SDK, no cloud, no vendor lock-in.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="BOOKING_URL">Book a 30-min teardown →</a>
+      <a class="btn btn-ghost" href="https://github.com/mohamedhusseinios/Loom-OS">View on GitHub</a>
+    </div>
+    <p class="trust">MIT-licensed · <b>single process</b> (no Docker, no Neo4j) · runs <b>100% local</b></p>
+  </div>
+
+  <!-- PROBLEM -->
+  <section id="problem">
+    <div class="wrap two">
+      <p class="lead">Your team runs five coding agents. None of them share a brain.</p>
+      <div>
+        <p style="font-size:17.5px;color:#333;margin:0">Every agent — Claude Code, Codex, Cursor, your own scripts — builds its own private context and forgets everything the others learned. Knowledge scatters across tools and teammates. And the more you lean on a proprietary assistant, the more your context quietly lives inside <em>their</em> product instead of yours.</p>
+        <p style="font-size:17.5px;color:#333;margin:16px 0 0">Loom OS is the layer that fixes both: a shared, code-aware memory every agent reads from and writes to — that you fully own.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">How it works</p>
+        <h2>A memory fabric, not another cloud subscription.</h2>
+        <p>Agents drop a file into a per-project inbox. The daemon weaves every finding, decision, and code change into one live knowledge graph — visible and governable from a dashboard.</p>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="ic">⌥</div><h3>Filesystem inbox</h3><p>Any agent connects by writing a file. Zero SDK, zero auth, zero API keys. The simplest possible integration surface.</p></div>
+        <div class="card"><div class="ic">◰</div><h3>Single-process daemon</h3><p><code>pip install</code> and run. No Docker, no Neo4j, no external database, no cloud account.</p></div>
+        <div class="card"><div class="ic">⌗</div><h3>Code-aware graph</h3><p>Parses your codebase AST into files, functions, classes, and call flows — then enriches it with what agents learn.</p></div>
+        <div class="card"><div class="ic">◳</div><h3>Dashboard control plane</h3><p>Browse the graph, watch agents live, search across everything, and dispatch work — all from one UI.</p></div>
+        <div class="card"><div class="ic">⇄</div><h3>MCP + hybrid search</h3><p>An MCP server any agent can query, plus graph + vector + relational search in a single call.</p></div>
+        <div class="card"><div class="ic">▣</div><h3>Sandboxed task board</h3><p>Dispatch tasks to agents that run in isolated git worktrees with a per-task budget cap. Review the diff, then merge.</p></div>
+      </div>
+
+      <!-- DEMO placeholder -->
+      <div class="demo">▶ &nbsp;Drop your 90-second demo here — replace <code>DEMO_URL</code> (install → register 2 agents → shared graph → dispatch a task)</div>
+    </div>
+  </section>
+
+  <!-- WHO -->
+  <section id="who">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Who it's for</p>
+        <h2>Built for teams drowning in agent sprawl.</h2>
+      </div>
+      <div class="who">
+        <div class="card"><h3>AI dev agencies</h3><p>Run many agents across many client projects without losing context — and offer "shared agent memory" as a service of your own.</p></div>
+        <div class="card"><h3>Engineering teams</h3><p>5–50 devs each running their own assistants. Give them one shared, governed brain per repo and full visibility.</p></div>
+        <div class="card"><h3>Local-first builders</h3><p>You value privacy and control and refuse to rent your context to a cloud vendor. Loom keeps everything on your machine.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NARRATIVE BAND -->
+  <section>
+    <div class="wrap">
+      <div class="band">
+        <p class="eyebrow">The thesis</p>
+        <h2>The model is now a commodity. Your context is the moat.</h2>
+        <p>AI models keep getting cheaper and more interchangeable. What you actually pay for — and get locked into — is the context woven around them. Proprietary assistants quietly absorb your codebase and decisions until leaving is painful. Loom OS flips that: a local-first memory fabric that keeps your multi-agent context <b style="color:#fff">yours</b>, portable across whichever models win next.</p>
+        <div class="cta" style="margin-top:28px">
+          <a class="btn" style="background:#fff;color:#141414;border-color:#fff" href="BOOKING_URL">Talk through your setup →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORK WITH ME / OFFERS -->
+  <section id="work">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Work with me</p>
+        <h2>I'll get your agents sharing one brain — fast.</h2>
+        <p>I built Loom OS, so I set it up faster than anyone. Start with a free teardown; most teams move straight to a fixed-scope setup sprint.</p>
+      </div>
+      <div class="offers">
+        <div class="offer flag">
+          <span class="tag">Start here · free</span>
+          <h3>Agent workflow teardown</h3>
+          <div class="price">30 min · $0</div>
+          <p>A live look at how your team uses AI agents today, where context is leaking, and what owning it would save you. No pitch.</p>
+          <a class="btn btn-primary" style="margin-top:14px" href="BOOKING_URL">Book the teardown</a>
+        </div>
+        <div class="offer">
+          <span class="tag">Paid foot-in-door</span>
+          <h3>Workflow audit</h3>
+          <div class="price">$2,000</div>
+          <p>A written assessment of your current agent stack, the context gaps, and a concrete Loom rollout plan. 1–2 days.</p>
+        </div>
+        <div class="offer">
+          <span class="tag">Most popular</span>
+          <h3>Setup sprint — done for you</h3>
+          <div class="price">$6k–$12k</div>
+          <p>Loom installed, your agents wired in, shared graph + dashboard live, governance set, team trained. Fixed price, 1–2 weeks.</p>
+        </div>
+        <div class="offer">
+          <span class="tag">Ongoing</span>
+          <h3>Support retainer</h3>
+          <div class="price">$1.5k–$3k / mo</div>
+          <p>Upgrades, tuning, new-agent onboarding, and priority support as your setup grows. Plus custom integrations on request.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="wrap about">
+      <div class="sec-head">
+        <p class="eyebrow">Who's behind it</p>
+        <h2 style="font-size:clamp(24px,3vw,34px);font-weight:600">Mohamed Hussein Abdulrahman</h2>
+        <div class="stat-row">
+          <div><div class="stat">9 yrs</div><small>shipping developer tools</small></div>
+          <div><div class="stat">Local-first</div><small>allergic to cloud lock-in</small></div>
+        </div>
+      </div>
+      <div class="card">
+        <p style="margin:0;font-size:16.5px;color:#333">I'm a Cairo-based developer building AI-powered tools for people who value privacy, locality, and control — MCP servers, local inference, and agent orchestration. Loom OS is the memory fabric I wanted for my own multi-agent work: no cloud, no lock-in, fully yours. If your team is juggling more than one coding agent, I can get them sharing one brain in a couple of weeks.</p>
+        <div class="cta" style="margin-top:20px">
+          <a class="btn btn-ghost" href="https://www.mabdulrahman.com/">More of my work →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <div class="final wrap">
+    <h2>Stop renting your context.</h2>
+    <p>Book a 30-minute teardown. Worst case, you leave with a clear picture of where your agents are leaking knowledge.</p>
+    <a class="btn btn-primary" href="BOOKING_URL">Book a 30-min teardown →</a>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>© 2026 Mohamed Hussein Abdulrahman · Loom OS is MIT-licensed</div>
+    <div>
+      <a href="https://github.com/mohamedhusseinios/Loom-OS">GitHub</a>
+      <a href="https://www.mabdulrahman.com/">Site</a>
+      <a href="mailto:hello@mabdulrahman.com">hello@mabdulrahman.com</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

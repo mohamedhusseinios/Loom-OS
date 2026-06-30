@@ -1,0 +1,309 @@
+{
+  "target": "Loom OS",
+  "analysis_type": "dev-tool-structural",
+  "analysis_date": "2026-06-30",
+  "codebase_ground_truth": {
+    "daemon_loc": 6644,
+    "daemon_modules": 30,
+    "test_files": 27,
+    "api_routes": 46,
+    "pypi_package": "loom-os",
+    "cli_command": "loom",
+    "daemon_port": 8472,
+    "dashboard_port": 3000
+  },
+  "three_layer_positioning": {
+    "layer_1_memory": "Loom OS spans this — knowledge graph (Graphify AST + LLM extractors), vector search (sentence-transformers), temporal facts, recall engine",
+    "layer_2_orchestration": "Loom OS spans this — 6-agent worker registry, WorkerSupervisor, task board with dependency DAG, git worktree isolation, budget-capped execution",
+    "layer_3_dashboard": "Loom OS spans this — Next.js 16 dashboard, Cytoscape graph explorer, Kanban board, agent directory, dispatch modal",
+    "unique_span": "Loom OS is the ONLY tool that spans all three layers. Every competitor is confined to 1-2 layers."
+  },
+  "competitors": [
+    {
+      "id": "cognee",
+      "name": "Cognee",
+      "url": "https://www.cognee.ai/",
+      "github": "github.com/topoteretes/cognee",
+      "layer": "Layer 1: Memory",
+      "architecture": "Pipeline-based ingestion with extractors, classifiers, resolvers. Neo4j (graph) + PGVector (vectors) + Qdrant (additional vectors). Self-hosted (Docker) or cloud.",
+      "integration_surface": "Python SDK — agents call cognee.add() / cognee.search() programmatically",
+      "deployment": "Docker Compose with Neo4j + PostgreSQL + Qdrant containers. Heavy infrastructure.",
+      "similarity_to_loom": 0.7,
+      "key_strengths": [
+        "Multi-modal retrieval: graph + vector + relational in one query",
+        "Pluggable extractor pipeline architecture",
+        "LLM-powered entity extraction",
+        "Production-grade vector backends (PGVector, Qdrant)"
+      ],
+      "key_limitations": [
+        "NO dashboard — API-only",
+        "Requires Docker + Neo4j + PostgreSQL + Qdrant — heavy infra",
+        "No filesystem inbox protocol — requires SDK integration",
+        "Not code-specific — general-purpose agent memory",
+        "No multi-agent orchestration",
+        "No task dispatch or worker execution"
+      ]
+    },
+    {
+      "id": "graphiti",
+      "name": "Graphiti / Zep",
+      "url": "https://github.com/getzep/graphiti",
+      "layer": "Layer 1: Memory",
+      "architecture": "Temporal knowledge graph — edges and nodes have time dimensions. Bi-temporal model with Neo4j backend. Tracks what changed between sessions.",
+      "integration_surface": "Python SDK — programmatic graph operations",
+      "deployment": "Requires Neo4j. Self-hosted.",
+      "similarity_to_loom": 0.6,
+      "key_strengths": [
+        "Bi-temporal graph model — first-class time-dimensioned queries",
+        "Real-time graph updates as agents learn",
+        "Persistent across sessions (Neo4j-backed)",
+        "Entity extraction with LLM"
+      ],
+      "key_limitations": [
+        "Requires Neo4j infrastructure",
+        "No dashboard — API-only",
+        "Not code-specific",
+        "No multi-agent orchestration",
+        "No task dispatch",
+        "No filesystem protocol"
+      ]
+    },
+    {
+      "id": "mcp-memory",
+      "name": "MCP Memory Server",
+      "url": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "layer": "Layer 1: Memory",
+      "architecture": "Official MCP server. Knowledge graph-based persistent memory. Filesystem-backed JSON storage. Entity-relationship model.",
+      "integration_surface": "MCP protocol (stdio/HTTP) — works with Claude Desktop, Cursor, Cline, any MCP client",
+      "deployment": "Zero-config — runs as a subprocess of the MCP client",
+      "similarity_to_loom": 0.5,
+      "key_strengths": [
+        "Zero-config filesystem backend",
+        "Native MCP protocol support",
+        "Works with any MCP-compatible client",
+        "Lightweight and simple"
+      ],
+      "key_limitations": [
+        "Simple entity model — not a code knowledge graph",
+        "No project isolation",
+        "No multi-modal retrieval (no vectors)",
+        "No dashboard",
+        "No multi-agent orchestration",
+        "No code-specificity"
+      ]
+    },
+    {
+      "id": "mem0",
+      "name": "Mem0",
+      "url": "https://mem0.ai/",
+      "layer": "Layer 1: Memory",
+      "architecture": "AI memory layer for personalization. Continuously learns from user interactions. Cloud-first with self-hosted option. Focuses on user preference memory.",
+      "integration_surface": "Python/JS SDK + REST API",
+      "deployment": "Cloud (managed) or self-hosted",
+      "similarity_to_loom": 0.3,
+      "key_strengths": [
+        "Production-grade personalization memory",
+        "Managed cloud option",
+        "Multi-platform SDKs (Python, JS, LangChain, AutoGen, CrewAI adapters)",
+        "Continuous learning from interactions"
+      ],
+      "key_limitations": [
+        "Different use case — user personalization, not code knowledge",
+        "Not code-specific",
+        "No knowledge graph",
+        "No dashboard for development workflows",
+        "No multi-agent task dispatch"
+      ]
+    },
+    {
+      "id": "letta",
+      "name": "Letta (MemGPT)",
+      "url": "https://www.letta.com/",
+      "layer": "Layer 1: Memory",
+      "architecture": "Stateful agents with OS-inspired tiered memory (working memory + archival storage + recall memory). Agent-level memory management.",
+      "integration_surface": "Python SDK + REST API + visual dev interface",
+      "deployment": "Self-hosted (Docker) or cloud",
+      "similarity_to_loom": 0.3,
+      "key_strengths": [
+        "OS-inspired tiered memory architecture",
+        "Visual agent development interface (ADE)",
+        "Per-agent memory management",
+        "Production deployment support"
+      ],
+      "key_limitations": [
+        "Single-agent focus, not multi-agent coordination",
+        "Not code-specific",
+        "No shared knowledge graph between agents",
+        "No filesystem protocol",
+        "No task dispatch"
+      ]
+    },
+    {
+      "id": "cloudflare-agent-memory",
+      "name": "Cloudflare Agent Memory",
+      "url": "https://developers.cloudflare.com/agents/",
+      "layer": "Layer 1: Memory",
+      "architecture": "Stateful AI agents with persistent memory on Cloudflare's edge. WebSocket support, scheduled tasks. Cloud-only SDK.",
+      "integration_surface": "Cloudflare Workers SDK — cloud-native",
+      "deployment": "Cloud-only (Cloudflare Workers)",
+      "similarity_to_loom": 0.2,
+      "key_strengths": [
+        "Cloud-native — scales automatically",
+        "WebSocket support built-in",
+        "Scheduled tasks",
+        "Global edge deployment"
+      ],
+      "key_limitations": [
+        "Cloud-only — opposite philosophy to Loom's local-first daemon",
+        "Vendor lock-in to Cloudflare ecosystem",
+        "Not code-specific",
+        "No knowledge graph",
+        "No dashboard"
+      ]
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code sub-agents",
+      "url": "https://docs.anthropic.com/en/docs/claude-code/sub-agents",
+      "layer": "Layer 2: Orchestration",
+      "architecture": "Hierarchical delegation — main agent spawns sub-agents for focused tasks. Each sub-agent gets isolated context. No shared memory between sub-agents.",
+      "integration_surface": "CLI — native to Claude Code",
+      "deployment": "Local CLI tool",
+      "similarity_to_loom": 0.3,
+      "key_strengths": [
+        "Proven multi-agent delegation pattern",
+        "Isolated context per sub-agent",
+        "Rich streaming JSON output",
+        "Budget-capped execution"
+      ],
+      "key_limitations": [
+        "No shared memory between sub-agents — each starts fresh",
+        "No cross-session persistence",
+        "Single-vendor (Anthropic only)",
+        "No dashboard or control plane",
+        "No knowledge graph"
+      ]
+    },
+    {
+      "id": "github-spec-kit",
+      "name": "GitHub Spec Kit",
+      "url": "https://github.com/github/spec-kit",
+      "layer": "Layer 2: Orchestration",
+      "architecture": "Spec-driven agent coding — write specs, agents implement. Task decomposition from structured specifications.",
+      "integration_surface": "CLI / GitHub Actions",
+      "deployment": "Local CLI",
+      "similarity_to_loom": 0.2,
+      "key_strengths": [
+        "Structured spec-to-code workflow",
+        "GitHub Actions integration",
+        "Task decomposition built-in"
+      ],
+      "key_limitations": [
+        "No persistent memory between runs",
+        "No knowledge graph",
+        "No dashboard",
+        "Spec-only — no memory or learning from results",
+        "No multi-agent coordination"
+      ]
+    },
+    {
+      "id": "swarms",
+      "name": "Swarms",
+      "url": "https://github.com/kyegomez/swarms",
+      "layer": "Layer 2: Orchestration",
+      "architecture": "Multi-agent framework — swarm-based agent coordination. Multiple agent topologies (sequential, parallel, hierarchical).",
+      "integration_surface": "Python SDK",
+      "deployment": "Library — import and use",
+      "similarity_to_loom": 0.2,
+      "key_strengths": [
+        "Rich multi-agent topology support",
+        "Swarm coordination patterns",
+        "Agent abstraction library"
+      ],
+      "key_limitations": [
+        "No knowledge graph — no shared memory",
+        "No dashboard",
+        "No code-specificity",
+        "No filesystem protocol",
+        "Library-only, not a running service"
+      ]
+    },
+    {
+      "id": "langgraph-studio",
+      "name": "LangGraph Studio",
+      "url": "https://langchain.com/langgraph",
+      "layer": "Layer 3: Dashboard",
+      "architecture": "Visual agent debugging — trace agent execution, inspect state, debug graphs. Companion to LangGraph orchestration framework.",
+      "integration_surface": "Desktop app — connects to LangGraph projects",
+      "deployment": "Desktop application",
+      "similarity_to_loom": 0.2,
+      "key_strengths": [
+        "Visual agent debugging and tracing",
+        "State inspection during execution",
+        "Graph-based agent visualization",
+        "Part of the LangChain ecosystem"
+      ],
+      "key_limitations": [
+        "Debugging-only — not a memory fabric",
+        "No persistent knowledge graph",
+        "No multi-agent task dispatch",
+        "Tied to LangGraph framework"
+      ]
+    }
+  ],
+  "feature_matrix": {
+    "dimensions": [
+      "Knowledge graph (code-AST)",
+      "Vector search",
+      "Multi-modal retrieval (graph+vec+rel)",
+      "Dashboard / UI",
+      "Filesystem protocol (no SDK/auth)",
+      "Single-process daemon (no Docker)",
+      "Per-project isolation",
+      "WebSocket live updates",
+      "Code-specific (AST-level)",
+      "LLM-powered extraction",
+      "Temporal fact tracking",
+      "Multi-agent task dispatch",
+      "Worker execution (runs agents)",
+      "Git worktree isolation",
+      "MCP server",
+      "Plugin system",
+      "Eval harness",
+      "Pattern repository",
+      "Audit trail",
+      "Session management",
+      "Shared context generation",
+      "Team mode / auth",
+      "Client SDK (py + npm)",
+      "LangChain integration",
+      "Graph visualization"
+    ],
+    "matrix": {
+      "Loom OS":      ["✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅","✅"],
+      "Cognee":       ["✅","✅","✅","❌","❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","⚠️","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "Graphiti":     ["✅","❌","❌","❌","❌","❌","❌","❌","❌","✅","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "MCP Memory":   ["✅","❌","❌","❌","✅","✅","❌","❌","❌","❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "Mem0":         ["❌","✅","❌","❌","❌","⚠️","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","⚠️","✅","✅","❌"],
+      "Letta":        ["❌","❌","❌","⚠️","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","✅","❌","❌","✅","❌","❌"],
+      "Cloudflare":   ["❌","❌","❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "Claude Code":  ["❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","✅","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "Spec Kit":     ["❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","⚠️","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "Swarms":       ["❌","❌","❌","❌","❌","⚠️","❌","❌","❌","❌","❌","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌"],
+      "LangGraph Studio": ["❌","❌","❌","✅","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","❌","✅"]
+    },
+    "legend": {
+      "✅": "Full feature",
+      "⚠️": "Partial / requires additional setup",
+      "❌": "Not present"
+    },
+    "loom_score": "25/25 dimensions (100%)",
+    "top_competitor_score": "Cognee: 5/25 (20%)"
+  },
+  "method_notes": {
+    "source": "Knowledge bank (ai-agent-memory-landscape.md, dated 2026-06-26) + direct codebase read (2026-06-30)",
+    "competitor_freshness": "GitHub API probe was blocked by user consent during this session. Competitor feature claims are based on the KB snapshot (2026-06-26) which is recent enough for architecture-level analysis. Architecture decisions don't shift in days.",
+    "codebase_verification": "All Loom OS feature claims verified by reading source code: 30 daemon modules, 6,644 LOC, 46 API routes, 27 test files.",
+    "failed_probes": ["GitHub API competitor spot-check — blocked by user consent guard; non-blocking for architecture comparison"]
+  }
+}

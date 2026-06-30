@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1782479190963,
+  "lastScanned": 1782844270157,
   "projectRoot": "/Users/mohamedabdulrahman/Mohamed-Hussien/my-projects/agentic-os",
   "techStack": {
     "languages": [
@@ -46,64 +46,125 @@
     "workspaces": [],
     "mainDirectories": [
       "docs",
+      "examples",
       "scripts",
       "tests"
     ],
-    "gitBranches": null
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
   },
   "customNotes": [],
   "directoryMap": {
-    "agentic_os.egg-info": {
-      "path": "agentic_os.egg-info",
+    "benchmarks": {
+      "path": "benchmarks",
       "purpose": null,
-      "fileCount": 6,
-      "lastAccessed": 1782479190955,
+      "fileCount": 3,
+      "lastAccessed": 1782844270090,
       "keyFiles": [
-        "PKG-INFO",
-        "SOURCES.txt",
-        "dependency_links.txt",
-        "entry_points.txt",
-        "requires.txt"
+        "__init__.py",
+        "harness.py",
+        "report.py"
       ]
+    },
+    "clients": {
+      "path": "clients",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1782844270092,
+      "keyFiles": []
     },
     "daemon": {
       "path": "daemon",
       "purpose": null,
-      "fileCount": 8,
-      "lastAccessed": 1782479190955,
+      "fileCount": 30,
+      "lastAccessed": 1782844270096,
       "keyFiles": [
         "__init__.py",
         "api.py",
-        "graph_engine.py",
-        "main.py",
-        "models.py"
+        "audit.py",
+        "auth.py",
+        "embeddings.py"
       ]
     },
     "dashboard": {
       "path": "dashboard",
       "purpose": null,
-      "fileCount": 14,
-      "lastAccessed": 1782479190956,
+      "fileCount": 13,
+      "lastAccessed": 1782844270106,
       "keyFiles": [
         "AGENTS.md",
         "CLAUDE.md",
-        "README.md",
         "components.json",
-        "eslint.config.mjs"
+        "eslint.config.mjs",
+        "next-env.d.ts"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 2,
+      "lastAccessed": 1782844270111,
+      "keyFiles": [
+        "loom_os-0.2.0-py3-none-any.whl",
+        "loom_os-0.2.0.tar.gz"
       ]
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
-      "fileCount": 1,
-      "lastAccessed": 1782479190956,
+      "fileCount": 8,
+      "lastAccessed": 1782844270112,
+      "keyFiles": [
+        "AGENT-LIFECYCLE.md",
+        "API.md",
+        "ARCHITECTURE.md",
+        "DASHBOARD.md",
+        "DEVELOPMENT.md"
+      ]
+    },
+    "examples": {
+      "path": "examples",
+      "purpose": "Example code",
+      "fileCount": 0,
+      "lastAccessed": 1782844270112,
       "keyFiles": []
     },
-    "loom.egg-info": {
-      "path": "loom.egg-info",
+    "graphify-out": {
+      "path": "graphify-out",
       "purpose": null,
       "fileCount": 6,
-      "lastAccessed": 1782479190957,
+      "lastAccessed": 1782844270113,
+      "keyFiles": [
+        "GRAPH_REPORT.md",
+        "graph.html",
+        "graph.json",
+        "manifest.json"
+      ]
+    },
+    "integrations": {
+      "path": "integrations",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1782844270117,
+      "keyFiles": []
+    },
+    "loom-client": {
+      "path": "loom-client",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1782844270118,
+      "keyFiles": [
+        "README.md",
+        "pyproject.toml"
+      ]
+    },
+    "loom_os.egg-info": {
+      "path": "loom_os.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1782844270149,
       "keyFiles": [
         "PKG-INFO",
         "SOURCES.txt",
@@ -116,7 +177,7 @@
       "path": "scripts",
       "purpose": "Build/utility scripts",
       "fileCount": 1,
-      "lastAccessed": 1782479190957,
+      "lastAccessed": 1782844270149,
       "keyFiles": [
         "smoke-test.sh"
       ]
@@ -124,21 +185,21 @@
     "tests": {
       "path": "tests",
       "purpose": "Test files",
-      "fileCount": 5,
-      "lastAccessed": 1782479190958,
+      "fileCount": 27,
+      "lastAccessed": 1782844270150,
       "keyFiles": [
         "test_api.py",
-        "test_graph_engine.py",
-        "test_registry.py",
-        "test_router.py",
-        "test_watcher.py"
+        "test_audit.py",
+        "test_auth.py",
+        "test_cli.py",
+        "test_embeddings.py"
       ]
     },
     "dashboard/app": {
       "path": "dashboard/app",
       "purpose": "Application code",
       "fileCount": 3,
-      "lastAccessed": 1782479190959,
+      "lastAccessed": 1782844270153,
       "keyFiles": [
         "favicon.ico",
         "globals.css",
@@ -148,314 +209,143 @@
     "dashboard/components": {
       "path": "dashboard/components",
       "purpose": "UI components",
-      "fileCount": 13,
-      "lastAccessed": 1782479190959,
+      "fileCount": 28,
+      "lastAccessed": 1782844270154,
       "keyFiles": [
         "activity-feed.tsx",
         "add-project-modal.tsx",
         "agent-badge.tsx"
       ]
+    },
+    "loom-client/examples": {
+      "path": "loom-client/examples",
+      "purpose": "Example code",
+      "fileCount": 2,
+      "lastAccessed": 1782844270156,
+      "keyFiles": [
+        "python_example.py",
+        "shell_example.sh"
+      ]
+    },
+    "loom-client/tests": {
+      "path": "loom-client/tests",
+      "purpose": "Test files",
+      "fileCount": 3,
+      "lastAccessed": 1782844270157,
+      "keyFiles": [
+        "test_client.py",
+        "test_models.py",
+        "test_roundtrip.py"
+      ]
     }
   },
   "hotPaths": [
     {
-      "path": ".superpowers/sdd/progress.md",
-      "accessCount": 45,
-      "lastAccessed": 1782533961165,
+      "path": "daemon/registry.py",
+      "accessCount": 8,
+      "lastAccessed": 1782662173552,
       "type": "file"
     },
     {
       "path": "daemon/api.py",
-      "accessCount": 31,
-      "lastAccessed": 1782533549792,
-      "type": "file"
-    },
-    {
-      "path": "tests/test_api.py",
-      "accessCount": 19,
-      "lastAccessed": 1782528142818,
-      "type": "file"
-    },
-    {
-      "path": "daemon/registry.py",
-      "accessCount": 16,
-      "lastAccessed": 1782527776605,
-      "type": "file"
-    },
-    {
-      "path": "daemon/router.py",
-      "accessCount": 10,
-      "lastAccessed": 1782533500052,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/app/[locale]/projects/[id]/graph/page.tsx",
-      "accessCount": 9,
-      "lastAccessed": 1782531998901,
-      "type": "file"
-    },
-    {
-      "path": "daemon/models.py",
-      "accessCount": 9,
-      "lastAccessed": 1782533500908,
-      "type": "file"
-    },
-    {
-      "path": "CLAUDE.md",
-      "accessCount": 7,
-      "lastAccessed": 1782533232343,
-      "type": "file"
-    },
-    {
-      "path": "docs/superpowers/plans/2026-06-27-kanban-task-board.md",
       "accessCount": 6,
-      "lastAccessed": 1782524258016,
-      "type": "file"
-    },
-    {
-      "path": "daemon/main.py",
-      "accessCount": 6,
-      "lastAccessed": 1782530000548,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/lib/api.ts",
-      "accessCount": 5,
-      "lastAccessed": 1782531550442,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/messages/en.json",
-      "accessCount": 5,
-      "lastAccessed": 1782532836655,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/messages/ar.json",
-      "accessCount": 5,
-      "lastAccessed": 1782532855757,
-      "type": "file"
-    },
-    {
-      "path": ".superpowers/sdd/task-A1-report.md",
-      "accessCount": 4,
-      "lastAccessed": 1782525407817,
-      "type": "file"
-    },
-    {
-      "path": ".superpowers/sdd/task-A2-report.md",
-      "accessCount": 4,
-      "lastAccessed": 1782525936524,
-      "type": "file"
-    },
-    {
-      "path": "README.md",
-      "accessCount": 4,
-      "lastAccessed": 1782533214719,
-      "type": "file"
-    },
-    {
-      "path": "docs/superpowers/specs/2026-06-27-agentic-os-kanban-task-board-design.md",
-      "accessCount": 4,
-      "lastAccessed": 1782533465825,
-      "type": "file"
-    },
-    {
-      "path": "daemon/graph_engine.py",
-      "accessCount": 3,
-      "lastAccessed": 1782498641466,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/components/dispatch-modal.tsx",
-      "accessCount": 3,
-      "lastAccessed": 1782531551052,
+      "lastAccessed": 1782664083334,
       "type": "file"
     },
     {
       "path": "dashboard/lib/use-websocket.tsx",
       "accessCount": 3,
-      "lastAccessed": 1782533501405,
+      "lastAccessed": 1782665036656,
       "type": "file"
     },
     {
-      "path": "tests/test_graph_engine.py",
+      "path": "tests/test_tasks.py",
       "accessCount": 2,
-      "lastAccessed": 1782498627924,
+      "lastAccessed": 1782662134233,
       "type": "file"
     },
     {
-      "path": "dashboard/app/[locale]/layout.tsx",
+      "path": "dashboard/lib/api.ts",
       "accessCount": 2,
-      "lastAccessed": 1782499811106,
+      "lastAccessed": 1782663929450,
       "type": "file"
     },
     {
-      "path": "dashboard/components/graph-canvas-reagraph.tsx",
+      "path": "daemon/router.py",
       "accessCount": 2,
-      "lastAccessed": 1782500800986,
+      "lastAccessed": 1782738904681,
       "type": "file"
     },
     {
-      "path": "dashboard/components/graph-canvas.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1782500820737,
+      "path": "CONTEXT.md",
+      "accessCount": 1,
+      "lastAccessed": 1782654397245,
       "type": "file"
     },
     {
-      "path": "dashboard/package.json",
-      "accessCount": 2,
-      "lastAccessed": 1782523469388,
+      "path": "daemon/models.py",
+      "accessCount": 1,
+      "lastAccessed": 1782661603303,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/task-0.1-brief.md",
-      "accessCount": 2,
-      "lastAccessed": 1782524795590,
+      "path": "dashboard/components/new-task-modal.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782661765907,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/task-0.1-report.md",
-      "accessCount": 2,
-      "lastAccessed": 1782524795907,
+      "path": "dashboard/components/task-detail-drawer.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782663889035,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/task-A1-brief.md",
-      "accessCount": 2,
-      "lastAccessed": 1782525183521,
+      "path": "dashboard/components/task-board.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782663890553,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/task-A1-review.md",
-      "accessCount": 2,
-      "lastAccessed": 1782525272184,
-      "type": "file"
-    },
-    {
-      "path": ".superpowers/sdd/task-A2-brief.md",
-      "accessCount": 2,
-      "lastAccessed": 1782525671579,
+      "path": "dashboard/app/[locale]/projects/[id]/tasks/page.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1782663929224,
       "type": "file"
     },
     {
       "path": "daemon/worktree.py",
-      "accessCount": 2,
-      "lastAccessed": 1782526527528,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/components/graph-controls.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1782530911677,
-      "type": "file"
-    },
-    {
-      "path": "pyproject.toml",
       "accessCount": 1,
-      "lastAccessed": 1782479234380,
-      "type": "file"
-    },
-    {
-      "path": "scripts/smoke-test.sh",
-      "accessCount": 1,
-      "lastAccessed": 1782479257472,
-      "type": "file"
-    },
-    {
-      "path": "daemon/watcher.py",
-      "accessCount": 1,
-      "lastAccessed": 1782479287113,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/next.config.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782479288369,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/proxy.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782479288601,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/i18n/routing.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782479302518,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/i18n/request.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782479303287,
-      "type": "file"
-    },
-    {
-      "path": "daemon/shared_context.py",
-      "accessCount": 1,
-      "lastAccessed": 1782497961202,
-      "type": "file"
-    },
-    {
-      "path": "daemon/project_knowledge.py",
-      "accessCount": 1,
-      "lastAccessed": 1782497961598,
-      "type": "file"
-    },
-    {
-      "path": "daemon/known_agents.py",
-      "accessCount": 1,
-      "lastAccessed": 1782497962244,
-      "type": "file"
-    },
-    {
-      "path": "daemon/ingest.py",
-      "accessCount": 1,
-      "lastAccessed": 1782497993704,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/components/knowledge-sources.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1782497994755,
-      "type": "file"
-    },
-    {
-      "path": "dashboard/components/register-agent-modal.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1782498002609,
+      "lastAccessed": 1782664082436,
       "type": "file"
     },
     {
       "path": "docs/plans/2026-06-26-competitor-gap-closure-implementation.md",
       "accessCount": 1,
-      "lastAccessed": 1782520942039,
+      "lastAccessed": 1782738160327,
       "type": "file"
     },
     {
-      "path": "tests/test_worktree.py",
+      "path": "daemon/extractors.py",
       "accessCount": 1,
-      "lastAccessed": 1782524642963,
+      "lastAccessed": 1782738454259,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/review-72cbb46..c1bc82d.diff",
+      "path": "daemon/main.py",
       "accessCount": 1,
-      "lastAccessed": 1782524804170,
+      "lastAccessed": 1782738454736,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/review-c1bc82d..b66be53.diff",
+      "path": "docs/superpowers/specs/2026-06-29-loom-post-parity-roadmap-design.md",
       "accessCount": 1,
-      "lastAccessed": 1782525190604,
+      "lastAccessed": 1782738667043,
       "type": "file"
     },
     {
-      "path": ".superpowers/sdd/review-465bfb6..74359fa.diff",
+      "path": "docs/plans/2026-06-29-post-parity-roadmap-implementation.md",
       "accessCount": 1,
-      "lastAccessed": 1782525677369,
+      "lastAccessed": 1782739182881,
       "type": "file"
     }
   ],
