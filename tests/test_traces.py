@@ -118,3 +118,28 @@ async def test_trace_capture_limit(capture):
     ids = [s.name for s in capture._spans]
     assert "s0" not in ids
     assert "s9" in ids
+
+
+@pytest.mark.asyncio
+async def test_finish_span_is_idempotent():
+    cap = TraceCapture()
+    span = await cap.start_span("t", SpanKind.TOOL, "p", "a1")
+    await cap.finish_span(span.id, output_data={"n": 1})
+    first_latency = span.latency_ms
+    first_output = span.output_data
+    # second finish must be a no-op (don't overwrite latency/output)
+    await cap.finish_span(span.id, output_data={"n": 2})
+    assert span.latency_ms == first_latency
+    assert span.output_data == first_output
+
+
+@pytest.mark.asyncio
+async def test_eviction_clamps_and_keeps_newest():
+    cap = TraceCapture(max_spans=0)          # must clamp to >=1, not self-evict
+    s = await cap.start_span("t", SpanKind.TOOL, "p", "a1")
+    assert (await cap.get_spans(project="p"))[0].id == s.id   # retained
+    cap2 = TraceCapture(max_spans=2)
+    ids = [(await cap2.start_span(f"s{i}", SpanKind.TOOL, "p", "a1")).id for i in range(3)]
+    kept = {sp.id for sp in await cap2.get_spans(project="p")}
+    assert kept == set(ids[1:])              # only the newest 2, oldest evicted
+    assert ids[0] not in cap2._by_id         # _by_id stays in sync (no orphan)
