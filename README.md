@@ -110,6 +110,19 @@ worker.py         Worker: executes Running tasks in git-worktree isolation.
 
 ---
 
+## Benchmarks
+
+[`BENCHMARKS.md`](BENCHMARKS.md) has reproducible, self-measured numbers for Loom OS
+(build time, node/edge counts, query latency) against the repo's own commit SHA — see
+[`benchmarks/README.md`](benchmarks/README.md) for the full reproduction runbook.
+
+**Competitor numbers (Cognee, Graphiti) are not yet measured.** Both require a Docker +
+Neo4j stack that hasn't been stood up in a controlled benchmark environment yet, so their
+rows honestly render `not measured` rather than an estimate — Loom does not publish
+competitor numbers it hasn't run itself.
+
+---
+
 ## CLI Reference
 
 | Command | Description |
@@ -152,6 +165,7 @@ See the [Development Guide](docs/DEVELOPMENT.md) for project structure, test pat
 | [Task Board & Worker](docs/TASK-BOARD.md) | Kanban lifecycle, worker execution model, git worktree isolation |
 | [Agent Lifecycle](docs/AGENT-LIFECYCLE.md) | Registration → contribution → dispatch flow, agent status, shared context |
 | [Development Guide](docs/DEVELOPMENT.md) | Setup, project structure, test suite, daemon patterns, contribution conventions |
+| [Benchmarks](BENCHMARKS.md) | Reproducible head-to-head numbers; [runbook](benchmarks/README.md) to regenerate them |
 
 ### Design specs & implementation plans
 
