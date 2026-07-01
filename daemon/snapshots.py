@@ -65,7 +65,7 @@ class SnapshotManager:
     """
 
     def __init__(self, max_snapshots: int = _DEFAULT_MAX_SNAPSHOTS):
-        self._max = max_snapshots
+        self._max = max(1, max_snapshots)
         self._snapshots: dict[str, list[StateSnapshot]] = {}
 
     async def capture(
