@@ -294,10 +294,16 @@ class GraphEngine:
 
         gen = EmbeddingGenerator()
         q_vec = await gen.embed(question)
+        # Batch-embed all node ids ONCE and cache — avoids the O(nodes) per-query
+        # embed() calls that made hybrid_query O(nodes x queries) unbatched.
+        node_keys = list(nodes)                       # preserve current iteration order
+        node_vecs = await gen.embed_batch([str(k) for k in node_keys])
+        vec_by_id = {k: v for k, v in zip(node_keys, node_vecs)}
+
         # Seed: cosine similarity of question vs each node id/label.
         seeds: list[tuple[str, float]] = []
         for nid in nodes:
-            score = self._cosine(q_vec, await gen.embed(str(nid)))
+            score = self._cosine(q_vec, vec_by_id[nid])
             seeds.append((nid, score))
         seeds.sort(key=lambda s: s[1], reverse=True)
 
@@ -309,10 +315,13 @@ class GraphEngine:
             while dq:
                 cur, dist = dq.popleft()
                 if cur not in results:
+                    cur_vec = vec_by_id.get(cur)
+                    if cur_vec is None:
+                        cur_vec = await gen.embed(str(cur))
                     results[cur] = {
                         "id": cur,
                         "kind": (nodes.get(cur) or {}).get("kind", "unknown"),
-                        "semantic_score": self._cosine(q_vec, await gen.embed(str(cur))),
+                        "semantic_score": self._cosine(q_vec, cur_vec),
                         "structural_distance": dist,
                     }
                 if dist < depth:
