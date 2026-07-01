@@ -12,6 +12,8 @@
 
 > **Naming.** The product is **Loom OS**. The installable package is **`loom-os`** (`pip install loom-os`); the CLI command is **`loom`**. The repository directory and design/plan docs are named **`agentic-os`**. They all refer to the same project.
 
+**Resources:** [Documentation](docs-site/index.md) · [Discussions](https://github.com/mohamedhusseinios/Loom-OS/discussions) · [Contributing](CONTRIBUTING.md)
+
 ---
 
 ## Quick Start
