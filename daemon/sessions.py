@@ -62,6 +62,8 @@ class SessionManager:
         if session is None:
             logger.warning("end_session called for unknown id: %s", session_id)
             return
+        if not session.active:
+            return  # already closed — don't re-bridge
         session.active = False
 
         # Bridge notable context items to the inbox as findings
@@ -96,7 +98,14 @@ class SessionManager:
     async def _bridge_to_inbox(self, session: Session) -> None:
         """Persist important learnings from a session to the permanent inbox."""
         inbox = self.base_dir / "inbox" / session.project
-        inbox.mkdir(parents=True, exist_ok=True)
+        try:
+            inbox.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "Session %s: failed to create inbox directory: %s",
+                session.id, exc,
+            )
+            return
 
         # Write context items worth persisting (excluding ephemeral refs)
         persisted = 0
@@ -106,8 +115,9 @@ class SessionManager:
                 continue
             finding_id = str(uuid.uuid4())[:8]
             finding_path = inbox / f"finding-{finding_id}.md"
-            finding_path.write_text(
-                f"""---
+            try:
+                finding_path.write_text(
+                    f"""---
 agent: {session.agent_id}
 project: {session.project}
 session: {session.id}
@@ -117,8 +127,13 @@ key: {key}
 ---
 {value}
 """
-            )
-            persisted += 1
+                )
+                persisted += 1
+            except OSError as exc:
+                logger.warning(
+                    "Session %s: failed to bridge context item %r: %s",
+                    session.id, key, exc,
+                )
 
         if persisted:
             logger.info(
