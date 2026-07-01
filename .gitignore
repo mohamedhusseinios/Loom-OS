@@ -9,3 +9,4 @@ graphify-out/
 dist/
 *.egg-info/
 .superpowers/
+site/

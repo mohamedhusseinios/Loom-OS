@@ -1,0 +1,10 @@
+{
+  "system": "loom-os",
+  "repo_sha": "da535c2",
+  "build_time_s": 1.15,
+  "nodes": 2469,
+  "edges": 3671,
+  "communities": 168,
+  "avg_query_latency_ms": 5489.3,
+  "queries_run": 4
+}

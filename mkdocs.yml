@@ -1,0 +1,23 @@
+site_name: Loom OS
+site_description: Unified agent memory fabric for multi-agent coding
+docs_dir: docs-site
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - Filesystem protocol: concepts/filesystem-protocol.md
+      - Knowledge graph: concepts/knowledge-graph.md
+  - Guides:
+      - Connect Claude Code: guides/connect-claude-code.md
+      - Custom extractor plugin: guides/custom-extractor-plugin.md
+      - Hybrid search: guides/hybrid-search.md
+  - Reference:
+      - CLI: reference/cli.md
+      - API: reference/api.md

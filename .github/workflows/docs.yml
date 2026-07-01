@@ -1,0 +1,32 @@
+name: docs
+on:
+  pull_request:
+    paths: ['docs-site/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+  push:
+    branches: [main]
+    paths: ['docs-site/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r docs-site/requirements.txt
+      - run: mkdocs build --strict
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r docs-site/requirements.txt
+      - run: mkdocs gh-deploy --force

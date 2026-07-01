@@ -6,53 +6,49 @@ Usage:
 import json
 from pathlib import Path
 
+_HEADER = """# Loom OS Benchmarks
 
-def generate_report(metrics: dict, output_path: str = "benchmarks/report.md") -> str:
-    """Generate a markdown report from benchmark metrics."""
-    md = f"""# Loom OS Benchmark Report
+> Reproducible head-to-head measurements. Every number below was measured on the
+> same task and repo commit. Cells marked **not measured** were not run — Loom does
+> not publish estimated competitor numbers. See `benchmarks/README.md` to reproduce.
+
+## Why Loom is structurally fast
+
+- Single-process daemon — no Docker, no Neo4j, no network round-trips.
+- `graph.json` mtime cache — zero repeated JSON parsing.
+- NumPy cosine similarity — O(n), no index overhead below ~10K docs.
 
 ## Results
-
-| Metric | Value |
-|--------|-------|
-| Build time | {metrics['build_time_s']}s |
-| Nodes | {metrics['nodes']:,} |
-| Edges | {metrics['edges']:,} |
-| Communities | {metrics['communities']:,} |
-| Avg query latency | {metrics['avg_query_latency_ms']}ms |
-| Queries run | {metrics['queries_run']} |
-
-## Architecture
-
-- **Single-process daemon** (no Docker/Neo4j)
-- **SQLite** for persistence
-- **NumPy** for vector similarity
-- **sentence-transformers** all-MiniLM-L6-v2 for embeddings
-- **graph.json mtime cache** — zero repeated JSON parsing
-
-## Why It's Fast
-
-1. No network round-trips — everything is local
-2. mtime-based graph cache avoids re-parsing graph.json
-3. NumPy cosine similarity is O(n) with no index overhead for <10K docs
-4. Single-process means no IPC, no serialization, no Docker layer
-
-## Comparison
-
-| Feature | Loom OS | Cognee | Graphiti |
-|---------|---------|--------|----------|
-| Infrastructure | `pip install` | Docker + Neo4j | Docker + Neo4j |
-| Setup time | ~30s | ~10min | ~10min |
-| Query latency | {metrics['avg_query_latency_ms']}ms | ~200-500ms* | ~200-500ms* |
-
-*Competitor numbers are estimates; run equivalent tasks for precise comparison.
 """
+
+
+def _cell(sys_metrics, key, suffix=""):
+    if sys_metrics.get("not_measured"):
+        return "not measured"
+    val = sys_metrics.get(key)
+    return f"{val:,}{suffix}" if isinstance(val, int) else f"{val}{suffix}"
+
+
+def generate_report(systems: list[dict], output_path: str = "BENCHMARKS.md") -> str:
+    """Render an honest comparison table from measured metrics only."""
+    rows = ["| System | Repo @ | Build time | Nodes | Edges | Avg query latency |",
+            "|--------|--------|-----------|-------|-------|-------------------|"]
+    for s in systems:
+        sha = s.get("repo_sha", "—") if not s.get("not_measured") else "—"
+        rows.append(
+            f"| {s['system']} | {sha} | {_cell(s, 'build_time_s', 's')} | "
+            f"{_cell(s, 'nodes')} | {_cell(s, 'edges')} | "
+            f"{_cell(s, 'avg_query_latency_ms', 'ms')} |"
+        )
+    md = _HEADER + "\n" + "\n".join(rows) + "\n"
     Path(output_path).write_text(md)
     return md
 
 
 if __name__ == "__main__":
     import sys
-    metrics = json.loads(Path(sys.argv[1]).read_text())
-    report = generate_report(metrics)
+    data = json.loads(Path(sys.argv[1]).read_text())
+    # Handle both single dict (legacy) and list of dicts (new)
+    systems = data if isinstance(data, list) else [data]
+    report = generate_report(systems)
     print(report)

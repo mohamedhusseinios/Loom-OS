@@ -86,7 +86,13 @@ async def test_hybrid_query_returns_dual_relevance(tmp_path, monkeypatch):
     # Deterministic embedding: vector = [len(text)] so 'AuthService' seeds first.
     async def fake_embed(self, text):
         return [float(len(text)), 1.0]
+
+    async def fake_embed_batch(self, texts):
+        return [[float(len(t)), 1.0] for t in texts]
     monkeypatch.setattr("daemon.embeddings.EmbeddingGenerator.embed", fake_embed, raising=False)
+    monkeypatch.setattr(
+        "daemon.embeddings.EmbeddingGenerator.embed_batch", fake_embed_batch, raising=False
+    )
 
     engine = GraphEngine()
     rows = await engine.hybrid_query(str(tmp_path), "proj-1", "AuthService", depth=1)
@@ -97,6 +103,39 @@ async def test_hybrid_query_returns_dual_relevance(tmp_path, monkeypatch):
     bcrypt = next(r for r in rows if r["id"] == "BcryptHasher")
     assert bcrypt["structural_distance"] == 1
     assert "semantic_score" in bcrypt
+
+
+def test_hybrid_query_batches_node_embeddings(monkeypatch, tmp_path):
+    """hybrid_query must embed all node ids in ONE batch call, not per-node.
+
+    Regression test for the O(nodes x queries) perf bug: the old code called
+    ``await gen.embed(str(nid))`` for every node on every query (seed loop and
+    again during BFS scoring), with no cache. ``embed_batch`` already exists
+    and does one forward pass — this asserts it's actually used.
+    """
+    import json, asyncio
+    from daemon.graph_engine import GraphEngine
+    gdir = tmp_path / "graphify-out"; gdir.mkdir(parents=True)
+    (gdir / "graph.json").write_text(json.dumps({
+        "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+        "links": [{"source": "a", "target": "b"}],
+    }))
+    calls = {"embed": 0, "embed_batch": 0, "batch_sizes": []}
+    class FakeGen:
+        def __init__(self, *a, **k): pass
+        async def embed(self, text):
+            calls["embed"] += 1
+            return [float(len(str(text))), 1.0, 0.0]
+        async def embed_batch(self, texts):
+            calls["embed_batch"] += 1
+            calls["batch_sizes"].append(len(texts))
+            return [[float(len(str(t))), 1.0, 0.0] for t in texts]
+    monkeypatch.setattr("daemon.graph_engine.EmbeddingGenerator", FakeGen)
+    res = asyncio.run(GraphEngine().hybrid_query(str(tmp_path), "proj", "q"))
+    assert calls["embed_batch"] == 1        # all node ids embedded in one batch
+    assert calls["batch_sizes"] == [3]      # exactly the 3 nodes
+    assert calls["embed"] <= 1              # question only; no per-node embed loop
+    assert isinstance(res, list)
 
 
 def test_graph_json_cache_invalidates_on_mtime_change(tmp_path):
