@@ -105,11 +105,11 @@ class PatternRepository:
         pattern.agents.add(agent_id)
         pattern.last_seen = datetime.now(timezone.utc).isoformat()
 
-        # Recompute confidence
-        pattern.confidence = self._compute_confidence(pattern)
-
-        # Recompute status
-        pattern.status = self._compute_status(pattern)
+        # A manually deprecated pattern stays deprecated — re-observation must
+        # not silently promote it back into the active lifecycle.
+        if pattern.status != PatternStatus.DEPRECATED:
+            pattern.confidence = self._compute_confidence(pattern)
+            pattern.status = self._compute_status(pattern)
 
         return pattern
 
