@@ -119,3 +119,26 @@ async def test_cross_project_patterns(repo):
     cross = await repo.cross_project_patterns()
     assert len(cross) == 1
     assert cross[0].pattern_text == "x"
+
+
+@pytest.mark.asyncio
+async def test_observing_a_deprecated_pattern_does_not_resurrect_it():
+    """Re-observing a deprecated pattern must keep it deprecated."""
+    repo = PatternRepository()
+    p = await repo.observe("use dependency injection", "p1", "a1")
+    await repo.deprecate(p.id, reason="superseded")
+    # same normalised text, observed again → must STAY deprecated
+    again = await repo.observe("Use dependency injection.", "p2", "a2")
+    assert again.id == p.id
+    assert again.status == PatternStatus.DEPRECATED
+
+
+@pytest.mark.asyncio
+async def test_cross_project_dedup_counts_one_pattern_two_projects():
+    """Cross-project dedup via normalisation counts distinct projects correctly."""
+    repo = PatternRepository()
+    await repo.observe("retry with backoff", "p1", "a1")
+    await repo.observe("  Retry   with backoff  ", "p2", "a2")  # same after normalise
+    cross = await repo.cross_project_patterns()
+    assert len(cross) == 1
+    assert cross[0].projects == {"p1", "p2"}

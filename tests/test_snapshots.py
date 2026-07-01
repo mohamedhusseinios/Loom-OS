@@ -64,3 +64,26 @@ async def test_replay_respects_limit(mgr):
 
     history = await mgr.replay(project="proj", agent_id="a1", limit=5)
     assert len(history) == 5
+
+
+@pytest.mark.asyncio
+async def test_capture_clamps_max_and_keeps_newest():
+    """max_snapshots=0 clamps to >=1; max_snapshots=2 keeps only newest 2."""
+    # Test clamp: max_snapshots=0 should clamp to 1
+    mgr = SnapshotManager(max_snapshots=0)
+    s = await mgr.capture("p", "a1", step=1)
+    assert [x.id for x in await mgr.replay("p", "a1")] == [s.id]
+
+    # Test eviction: max_snapshots=2 keeps only newest 2 (oldest evicted)
+    mgr2 = SnapshotManager(max_snapshots=2)
+    for i in range(3):
+        await mgr2.capture("p", "a1", step=i)
+    steps = [x.step for x in await mgr2.replay("p", "a1")]
+    assert steps == [1, 2]  # oldest (step 0) evicted, newest kept
+
+
+@pytest.mark.asyncio
+async def test_replay_empty_returns_empty_list():
+    """Replay on unknown project/agent returns empty list."""
+    mgr = SnapshotManager()
+    assert await mgr.replay("nope", "nobody") == []

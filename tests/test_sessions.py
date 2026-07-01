@@ -79,3 +79,33 @@ async def test_list_active_sessions_filters_by_project(manager):
     active_a = await manager.list_active_sessions(project="proj-a")
     assert len(active_a) == 1
     assert active_a[0].project == "proj-a"
+
+
+@pytest.mark.asyncio
+async def test_end_session_survives_write_failure(tmp_path, monkeypatch):
+    """A mailbox write failure must NOT crash session close."""
+    mgr = SessionManager(base_dir=str(tmp_path))
+    s = await mgr.start_session("a1", "p")
+    await mgr.add_context(s.id, "learning", "auth uses bcrypt")
+
+    from pathlib import Path
+    def boom(self, *a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(Path, "write_text", boom)
+    # A mailbox write failure must NOT crash session close.
+    await mgr.end_session(s.id)
+    assert (await mgr.get_session(s.id)).active is False
+
+
+@pytest.mark.asyncio
+async def test_end_session_is_idempotent(tmp_path):
+    """Calling end_session twice must not re-bridge findings."""
+    mgr = SessionManager(base_dir=str(tmp_path))
+    s = await mgr.start_session("a1", "p")
+    await mgr.add_context(s.id, "k", "v")
+    await mgr.end_session(s.id)
+    inbox = tmp_path / "inbox" / "p"
+    after_first = sorted(inbox.glob("finding-*.md"))
+    await mgr.end_session(s.id)               # second close must not re-bridge
+    after_second = sorted(inbox.glob("finding-*.md"))
+    assert after_first == after_second and len(after_first) == 1

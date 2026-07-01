@@ -86,3 +86,29 @@ async def test_timeline_returns_chronological(tracker):
     assert len(timeline) == 2
     assert timeline[0].id == f1.id  # first created
     assert timeline[1].id == f2.id
+
+
+@pytest.mark.asyncio
+async def test_facts_at_boundaries_are_inclusive():
+    """Characterization: facts_at includes both valid_from and valid_to boundaries (inclusive)."""
+    t = TemporalTracker()
+    f = await t.record("auth uses bcrypt", "p", "a1", valid_from="2026-01-01T00:00:00")
+    # exactly valid_from → included (inclusive start)
+    assert f.id in {x.id for x in await t.facts_at("p", "2026-01-01T00:00:00")}
+    # before valid_from → excluded
+    assert f.id not in {x.id for x in await t.facts_at("p", "2025-12-31T23:59:59")}
+    # open-ended (valid_to=None) → active at any later time
+    assert f.id in {x.id for x in await t.facts_at("p", "2030-01-01T00:00:00")}
+
+
+@pytest.mark.asyncio
+async def test_facts_at_excludes_after_expiry_but_includes_expiry_instant():
+    """Characterization: facts_at includes the expiry instant (valid_to boundary is inclusive)."""
+    t = TemporalTracker()
+    f = await t.record("x", "p", "a1", valid_from="2026-01-01T00:00:00")
+    await t.expire(f.id, reason="changed")   # sets valid_to = now (future vs valid_from)
+    vt = (await t.get_fact(f.id)).valid_to
+    # at exactly valid_to → still included (inclusive end)
+    assert f.id in {x.id for x in await t.facts_at("p", vt)}
+    # strictly after valid_to → excluded
+    assert f.id not in {x.id for x in await t.facts_at("p", "2099-01-01T00:00:00")}

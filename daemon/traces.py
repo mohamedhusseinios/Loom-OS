@@ -81,7 +81,7 @@ class TraceCapture:
     """
 
     def __init__(self, max_spans: int = _DEFAULT_MAX_SPANS):
-        self._max_spans = max_spans
+        self._max_spans = max(1, max_spans)
         self._spans: list[TraceSpan] = []
         self._by_id: dict[str, TraceSpan] = {}
 
@@ -123,6 +123,8 @@ class TraceCapture:
         if span is None:
             logger.debug("finish_span: unknown span id %s", span_id)
             return
+        if span.end_time is not None:
+            return  # already finished — idempotent no-op
         span.end_time = time.monotonic()
         span.latency_ms = (span.end_time - span.start_time) * 1000
         if output_data is not None:
