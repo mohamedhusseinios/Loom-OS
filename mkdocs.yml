@@ -1,0 +1,12 @@
+site_name: Loom OS
+site_description: Unified agent memory fabric for multi-agent coding
+docs_dir: docs-site
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Home: index.md
