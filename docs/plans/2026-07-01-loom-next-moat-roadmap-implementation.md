@@ -5,6 +5,28 @@
 > **Predecessor:** [docs/plans/2026-06-29-post-parity-roadmap-implementation.md](2026-06-29-post-parity-roadmap-implementation.md) shipped all 9 gap-closure features. Its Phase 3 note said "re-run the competitor analysis before proceeding" — that re-analysis produced *this* plan.
 > **Detail policy:** **Phase 1 (P0) is fully task-by-task / test-first** because it is the next work to execute. **Phases 2–4 are architecture-level outlines** — expand each feature into its own detailed plan under `docs/plans/` when that phase begins.
 
+---
+
+## ⚠️ Status — updated 2026-07-02
+
+This roadmap has advanced **two phases** past its original authoring. The sections below the goal are preserved as the original spec, annotated inline with what actually happened. Legend: ✅ shipped · ❌ dropped · ⏳ next · ◻️ outlined (not started).
+
+| Phase | Feature | Status | Landed / note |
+|-------|---------|--------|---------------|
+| 1 | #1 Publish reproducible benchmarks | ✅ shipped | **PR #9** (`3d3a449`) — plus an incidental `hybrid_query` batch/cache perf fix (20.8s → 5.5s/query) that publishing the benchmark exposed |
+| 1 | #2 Documentation site + community | ✅ shipped | **PR #9** (`3d3a449`) — MkDocs Material site + CI/Pages deploy + `CONTRIBUTING.md` + GitHub Discussions |
+| 2 | #3 Incremental graph persistence | ❌ **dropped** | A spike falsified the premise: `graphify update` has no scoped/per-file mode (it re-extracts the whole project every run, and crashes if handed a single file), and a full re-extract is already fast (~2s / 134 files). The only real fix lives upstream in graphify, not the daemon. See memory `graphify-no-incremental-update`. |
+| 2 | #4 Mature the five first-gen modules | ✅ shipped | **PR #10** (`7f28495`) — all five modules hardened in one pass (+ a real `patterns` deprecate-resurrection bug fix). Detailed sub-plan: [2026-07-01-phase2-module-hardening-implementation.md](2026-07-01-phase2-module-hardening-implementation.md) |
+| 2 | #5 Cross-project graph federation | ⏳ **next** | Its gating decision (Open Question #4, federation index scope) is **resolved: organization-wide / shared**. Still needs its own detailed sub-plan before build. |
+| 3 | #6 Cloud / hosted offering decision | ◻️ outlined | strategic gate — not started |
+| 3 | #7 MCP ecosystem positioning | ◻️ outlined | not started |
+| 4 | #8 LlamaIndex + CrewAI integrations | ◻️ outlined | not started |
+| 4 | #9 Expanded plugin examples | ◻️ outlined | not started |
+
+**Where the roadmap now stands:** Phase 1 complete; Phase 2 two-thirds resolved (#4 shipped, #3 dropped); **Feature #5 (federation) is the next substantive build** — its privacy/scope blocker is now cleared (org-wide). Phases 3–4 remain outlined.
+
+---
+
 **Goal:** Convert Loom's feature lead (30/31 dimensions vs the next competitor's 9) into a durable, defensible moat by shipping distribution assets (published benchmarks, docs, community), hardening first-generation modules, and adding category-defining capabilities (cross-project federation) — without breaking Loom's local-first, single-process, filesystem-protocol moat.
 
 **Architecture:** Extend the existing Python FastAPI daemon (`daemon/`) and Next.js dashboard (`dashboard/`). Distribution work (benchmarks, docs) ships as repo artifacts and a separate static docs site — **zero daemon changes**. Maturity + federation work adds new modules and defensive guards inside the single daemon process. Framework integrations ship as **separate optional packages** under `integrations/` that delegate to `loom-client`. Graphify stays the AST source of truth; nothing here dilutes that.
@@ -34,12 +56,14 @@ The daemon serves **in-memory code**. After editing any `daemon/*.py`, **restart
 
 ---
 
-# PHASE 1 — P0: Distribution & Community — DETAILED
+# PHASE 1 — P0: Distribution & Community — ✅ SHIPPED (PR #9)
 
 > **Framing:** The product is feature-complete; **discoverability is the binding constraint.** These two features are primarily execution + light hardening, not new subsystems.
 > **Recommended order (from plan-inputs Open Question #2):** benchmarks first (≈2h, higher leverage, harness exists), then docs (≈2 days).
 
-## Feature #1 — Publish Reproducible Benchmarks (Suggestion 1)
+## Feature #1 — Publish Reproducible Benchmarks (Suggestion 1) — ✅ SHIPPED
+
+> ✅ **Shipped in PR #9.** The task checklist below is retained as the original spec. `shape_metrics`/`generate_report` landed as written; running the benchmark also surfaced and fixed a `hybrid_query` perf bug (batch/cache embeddings, 20.8s → 5.5s/query).
 
 **Why:** The eval harness (`daemon/evals.py`) and benchmark runner (`benchmarks/`) exist but have **never run head-to-head** against Cognee/Graphiti. No competitor has published comparison data — being first is a marketing moat. Loom's single-process/SQLite/NumPy architecture *should* win on setup time, latency, and resource use.
 
@@ -300,7 +324,9 @@ git commit -m "docs: publish reproducible head-to-head benchmarks"
 
 ---
 
-## Feature #2 — Documentation Site + Community Channel (Suggestion 2)
+## Feature #2 — Documentation Site + Community Channel (Suggestion 2) — ✅ SHIPPED
+
+> ✅ **Shipped in PR #9.** MkDocs Material site (quickstart / concepts / guides / reference), CI build + GitHub Pages deploy, `CONTRIBUTING.md`, and GitHub Discussions all landed. Checklist retained as the original spec.
 
 **Why:** 31 feature dimensions, 24 daemon modules, a dashboard, two SDKs, an MCP server, and a LangChain integration — with **no docs site and no community channel.** A developer landing on the repo sees 24 Python modules and bounces. Discoverability is now the bottleneck.
 
@@ -413,12 +439,14 @@ git commit -m "docs: add CONTRIBUTING + community links (Discussions)"
 
 ---
 
-# PHASE 2 — P1: Maturity Hardening — OUTLINE
+# PHASE 2 — P1: Maturity Hardening — ⏳ IN PROGRESS (#4 shipped · #3 dropped · #5 next)
 
 > **Expand each feature below into its own detailed `docs/plans/<date>-<name>.md` (test-first) when this phase begins.** The `plan-inputs.md` "Architecture Implications" section already contains per-file, per-method specifics — use it as the spec for each expansion.
-> **Recommended order (plan-inputs):** #3 (highest technical leverage — prevents a scaling wall) → #4 (start with `temporal.py`) → #5 (category-defining).
+> **Original recommended order (plan-inputs):** #3 → #4 → #5. **What actually happened:** #4 shipped first (all five modules together, PR #10); **#3 was dropped** after a spike (see the status table above); **#5 is the only remaining Phase-2 build.**
 
-## Feature #3 — Incremental Graph Persistence
+## Feature #3 — Incremental Graph Persistence — ❌ DROPPED
+
+> ❌ **Dropped 2026-07-02 after a spike against the real `graphify` CLI.** The premise below — that Graphify could be handed a changed-files set and merge incrementally — was false: `graphify update` takes only a project *directory*, re-extracts the whole project every run, and **crashes if handed a single file**. A full re-extract is already fast (~2s / 134 files), and the read-side `graph.json` mtime cache + the router's 1-update/30s rate-limit already absorb the cost for realistic repos. Any real fix would live **upstream in graphify** (incremental extraction), not in the daemon. See memory `graphify-no-incremental-update`. The outline below is retained for the historical record.
 
 - **Goal:** Replace full-source Graphify rebuilds with change-scoped merges so large monorepos / many projects don't hit the `MIN_UPDATE_INTERVAL` (1 update / 30s / project) wall in `router.py`.
 - **Files:** Modify `daemon/graph_engine.py` (~100–150 LOC: add `async incremental_update(self, project_path: str, changed_files: set[str]) -> None` beside `_run_graphify_build`, reusing the read path for cached graph state), `daemon/watcher.py` (~20 LOC: pass the changed-files set instead of the bare project path), `daemon/router.py` (~10 LOC: thread the changed-files set through the graph-update scheduler). Test: `tests/test_graph_engine.py` (~80 LOC).
@@ -426,7 +454,10 @@ git commit -m "docs: add CONTRIBUTING + community links (Discussions)"
 - **Hard constraint:** an incremental merge must produce results **equivalent to a full rebuild** for the changed subset — Graphify's `graph.json` contract must never be corrupted.
 - **Effort:** ~1 week. **Expand into:** `docs/plans/<date>-incremental-graph-persistence-implementation.md`.
 
-## Feature #4 — Mature the Five First-Generation Modules
+## Feature #4 — Mature the Five First-Generation Modules — ✅ SHIPPED (PR #10)
+
+> ✅ **Shipped in PR #10** via the detailed sub-plan [2026-07-01-phase2-module-hardening-implementation.md](2026-07-01-phase2-module-hardening-implementation.md). All five modules were hardened in one pass, plus a real bug fix (re-observing a *deprecated* pattern no longer resurrects it).
+> **Deviation from the outline below — do not re-introduce:** the sub-plan deliberately did **not** add the prescribed `asyncio.Lock`s. The mutating methods (`record`/`expire`/`start_span`/`capture`/`observe`) have no `await` in their critical sections, so under single-threaded asyncio they already run atomically — a lock is a no-op with real overhead. Only `sessions.end_session` (which mutates, then `await`s `_bridge_to_inbox`) needed a guard. Read the per-module table below as original intent, not as-built.
 
 - **Goal:** Move `temporal / traces / sessions / snapshots / patterns` from "present" to "battle-tested" before any public claim about temporal tracking or tracing. Each is <210 LOC today.
 - **Pattern per module:** targeted edge-case tests + `asyncio.Lock` around state mutations + defensive error handling. Extend the **existing** `tests/test_<module>.py` (no new test files). ~250 LOC code + ~210 LOC tests total.
@@ -442,13 +473,15 @@ git commit -m "docs: add CONTRIBUTING + community links (Discussions)"
 - **Order decision (plan-inputs Open Question #3):** start with `temporal.py` for the strongest "we match Graphiti" claim, **or** `patterns.py` for the strongest unique-value (cross-project) claim. **Pick one before starting.**
 - **Effort:** ~1–2 weeks. **Expand into:** `docs/plans/<date>-module-maturity-hardening-implementation.md`.
 
-## Feature #5 — Cross-Project Graph Federation
+## Feature #5 — Cross-Project Graph Federation — ⏳ NEXT
+
+> ⏳ **Next substantive build.** The gating decision below is resolved (org-wide). No implementation exists yet (`daemon/federation.py` not created) — expand this outline into its own detailed sub-plan before building.
 
 - **Goal:** A read-only index across all `~/.loom/inbox/*/graphify-out/graph.json` so users can ask "which projects use pattern/symbol X?" — a capability **no competitor is positioned to deliver** (they use flat namespaces).
 - **Files:** Create `daemon/federation.py` (~120 LOC: `FederatedIndex` with `build_index()`, `query(question, depth=2)`, `cross_project_references(symbol)`), Modify `daemon/api.py` (+~30 LOC: `GET /api/federated-query?q=&depth=`, `GET /api/federated/references?symbol=`), Create `dashboard/components/federation-explorer.tsx` (~150 LOC), Test `tests/test_federation.py` (~60 LOC).
 - **Test focus:** two projects sharing a node both appear in a federated query; `cross_project_references` finds a symbol across repos.
 - **Hard constraint:** **read-only** across projects — preserves per-project isolation; no cross-writes.
-- **Open question (plan-inputs #4):** for team mode, is federation **per-user** or **organization-wide**? This decides the index scope — resolve before building.
+- **Open question (plan-inputs #4) — ✅ RESOLVED 2026-07-02:** federation index scope is **organization-wide / shared** — one shared cross-project index visible to all users/agents (maximizes shared knowledge and discoverability over strict per-user isolation). This coexists with team mode's per-user *inbox* isolation; only the federated *query index* is shared org-wide, and the read-only constraint still holds.
 - **Effort:** ~1–1.5 weeks. **Expand into:** `docs/plans/<date>-cross-project-federation-implementation.md`.
 
 ---
@@ -495,10 +528,10 @@ git commit -m "docs: add CONTRIBUTING + community links (Discussions)"
 
 Copied from `plan-inputs.md` — these gate their features:
 
-1. **Cloud offering — Option A (ship managed) or Option B (self-hosted positioning)?** Strategic/business call. Gates Feature #6 (and all cloud work).
-2. **P0 order — benchmarks or docs first?** Recommendation: **benchmarks first** (≈2h, harness exists, higher leverage), then docs (≈2 days). Already baked into Phase 1 ordering.
-3. **Which P1 module to harden first?** `temporal.py` (strongest "matches Graphiti" claim) vs `patterns.py` (strongest unique-value claim). Gates Feature #4 ordering.
-4. **Federation privacy model — per-user or organization-wide?** Affects the Feature #5 index scope under team mode.
+1. **Cloud offering — Option A (ship managed) or Option B (self-hosted positioning)?** ⏳ **Still open** — strategic/business call; gates Feature #6 (Phase 3) and all cloud work.
+2. **P0 order — benchmarks or docs first?** ✅ **Resolved** — benchmarks first, then docs; both shipped in PR #9.
+3. **Which P1 module to harden first?** ✅ **Resolved** — moot: the Feature #4 sub-plan hardened all five modules in one pass (PR #10) rather than picking one.
+4. **Federation privacy model — per-user or organization-wide?** ✅ **Resolved 2026-07-02 — organization-wide / shared.** Sets the Feature #5 index scope; team-mode inbox isolation stays per-user.
 
 ---
 
@@ -519,6 +552,8 @@ From the analysis's "Competitive Moat Checklist" + Differentiation Strategy. Any
 ---
 
 # Recommended Sequencing
+
+> **Note (2026-07-02):** the original day/week timeline below is historical — Phases 1–2 have already executed (and not in this exact order). See the **Status** table at the top for what actually shipped. The remaining ready item is **Feature #5 (federation, org-wide)**.
 
 ```
 Days 1–3     Phase 1 · Feature #1 (benchmarks) → publish BENCHMARKS.md          [P0]
@@ -545,11 +580,12 @@ Re-analyze   Re-run competitor analysis before Phase 4 ships — category moves 
 
 # Execution Handoff
 
-Plan complete and saved to `docs/plans/2026-07-01-loom-next-moat-roadmap-implementation.md`. Because the chosen shape is **one roadmap (Phase 1 detailed, Phases 2–4 outlined)**, execution proceeds phase-by-phase; expand each Phase-2+ feature into its own detailed plan when you reach it.
+**Status 2026-07-02:** Phase 1 shipped (PR #9, subagent-driven), Feature #4 shipped (PR #10), Feature #3 dropped. Execution proceeds phase-by-phase; expand each remaining Phase-2+ feature into its own detailed plan when you reach it.
 
-Two execution options for **Phase 1** (the ready-to-build part):
+**Next up — Feature #5 (cross-project federation), Phase 2** — now unblocked:
 
-1. **Subagent-Driven (recommended)** — dispatch a fresh subagent per task (1.1 → 2.4), review between tasks, fast iteration. REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`.
-2. **Inline Execution** — execute Phase 1 tasks in this session with checkpoints. REQUIRED SUB-SKILL: `superpowers:executing-plans`.
+1. Its gating decision is resolved (**index scope = organization-wide / shared**).
+2. Expand the Feature #5 outline above into a detailed, test-first sub-plan at `docs/plans/<date>-cross-project-federation-implementation.md` (mirror the shape of the Feature #4 sub-plan).
+3. Execute it subagent-driven (`superpowers:subagent-driven-development`) on a fresh branch off `main`.
 
-Which approach?
+After Feature #5, the roadmap moves to Phase 3 (Feature #6 cloud decision — still open — then #7 MCP tools) and Phase 4 (#8, #9). Re-run the competitor analysis before Phase 4 ships.
