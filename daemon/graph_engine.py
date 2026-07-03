@@ -8,6 +8,7 @@ import asyncio
 import json
 import math
 import subprocess
+import time
 from collections import deque
 from pathlib import Path
 from daemon.models import BuildResult, GraphStats, QueryResult
@@ -58,33 +59,9 @@ class GraphEngine:
     # Build / update
     # ----------------------------------------------------------------
 
-    async def build_project(self, project_path: str) -> BuildResult:
-        """Run a code-only graph build (AST extraction, no LLM)."""
-        project_name = Path(project_path).name
-        if not self.available:
-            return BuildResult(
-                project=project_name,
-                status="failed",
-                error="Graphify not installed",
-            )
-        try:
-            await asyncio.to_thread(self._run_graphify_build, project_path)
-            stats = await self.get_stats(project_path)
-            return BuildResult(
-                project=project_name,
-                status="completed",
-                nodes=stats.nodes,
-                edges=stats.edges,
-            )
-        except Exception as e:
-            return BuildResult(
-                project=project_name,
-                status="failed",
-                error=str(e),
-            )
-
-    def _run_graphify_build(self, project_path: str):
-        """Run ``graphify update`` (code-only, no LLM).
+    def _run_graphify_build(self, project_path: str, cluster: bool = True):
+        """Run ``graphify update`` (code-only, no LLM). ``cluster=False`` appends
+        ``--no-cluster`` to skip the expensive global clustering pass.
 
         If no ``graph.json`` exists yet, create a minimal stub first —
         ``graphify update`` needs an existing graph to update.
@@ -94,14 +71,19 @@ class GraphEngine:
             graph_path.parent.mkdir(parents=True, exist_ok=True)
             graph_path.write_text('{"nodes":[],"links":[]}')
 
+        cmd = ["graphify", "update", project_path]
+        if not cluster:
+            cmd.append("--no-cluster")
         try:
-            # NB: the subcommand comes first — ``graphify update <path>``.
-            # The transposed form ``graphify <path> --update`` makes graphify
-            # run its default full extraction (docs/papers/images), which needs
-            # an LLM API key, exits non-zero, and leaves graph.json as the empty
-            # stub — so the dashboard reports "build complete" over an empty graph.
+            subprocess.run(cmd, capture_output=True, timeout=300, check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(_decode_subprocess_error(e)) from e
+
+    def _run_graphify_cluster(self, project_path: str):
+        """Re-run global clustering on the existing graph.json (no re-extraction)."""
+        try:
             subprocess.run(
-                ["graphify", "update", project_path],
+                ["graphify", "cluster-only", project_path, "--no-viz"],
                 capture_output=True,
                 timeout=300,
                 check=True,
@@ -109,8 +91,49 @@ class GraphEngine:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(_decode_subprocess_error(e)) from e
 
+    async def _run_and_measure(self, project_path: str, runner) -> BuildResult:
+        """Run a graphify step in a thread, measure wall-time, shape a BuildResult."""
+        project_name = Path(project_path).name
+        if not self.available:
+            return BuildResult(
+                project=project_name, status="failed", error="Graphify not installed"
+            )
+        t0 = time.monotonic()
+        try:
+            await asyncio.to_thread(runner, project_path)
+        except Exception as e:
+            return BuildResult(
+                project=project_name, status="failed", error=str(e),
+                duration_s=time.monotonic() - t0,
+            )
+        duration = time.monotonic() - t0
+        stats = await self.get_stats(project_path)
+        return BuildResult(
+            project=project_name, status="completed",
+            nodes=stats.nodes, edges=stats.edges, duration_s=duration,
+        )
+
+    async def build_project(self, project_path: str) -> BuildResult:
+        """Full code-only graph build (AST extraction + global clustering)."""
+        return await self._run_and_measure(project_path, self._run_graphify_build)
+
+    async def extract_only(self, project_path: str) -> BuildResult:
+        """Fast update: AST extraction with clustering skipped (--no-cluster)."""
+        return await self._run_and_measure(
+            project_path, lambda p: self._run_graphify_build(p, cluster=False)
+        )
+
+    async def cluster_only(self, project_path: str) -> BuildResult:
+        """Re-run global clustering on the existing graph (graphify cluster-only)."""
+        return await self._run_and_measure(project_path, self._run_graphify_cluster)
+
     async def update_project(self, project_path: str, files: list[str]) -> BuildResult:
-        """Incremental update (code-only) — same as build but preserves existing graph."""
+        """Deprecated alias kept for compatibility — a full build.
+
+        The daemon now routes finding-driven updates through
+        ``GraphUpdateCoordinator`` (see ``daemon/router.py``); this is retained
+        only so external callers/tests referencing it keep working.
+        """
         return await self.build_project(project_path)
 
     # ----------------------------------------------------------------

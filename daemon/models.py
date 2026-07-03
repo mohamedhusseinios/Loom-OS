@@ -117,6 +117,7 @@ class BuildResult(BaseModel):
     nodes: int = 0
     edges: int = 0
     error: Optional[str] = None
+    duration_s: float = 0.0
 
 # --- Project CRUD Schemas ---
 
