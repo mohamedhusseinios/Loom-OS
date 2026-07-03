@@ -84,6 +84,13 @@ class GraphUpdateCoordinator:
         self._start_run(project, project_path, st, now)
 
     def _start_run(self, project: str, project_path: str, st: _ProjectState, now: float) -> None:
+        if st.in_progress:
+            # Defensive: callers already check `not in_progress`, so this is
+            # unreachable today. Guard anyway so a future refactor that adds an
+            # await before a `_start_run` call can never launch a 2nd concurrent
+            # graphify subprocess — it coalesces into the running run instead.
+            st.dirty = True
+            return
         st.in_progress = True
         st.dirty = False
         st.last_run_ts = now
@@ -123,6 +130,10 @@ class GraphUpdateCoordinator:
         st.followup_pending = False
         if st.dirty and not st.in_progress:
             self._start_run(project, project_path, st, time.monotonic())
+        # If dirty but a run/cluster is in_progress, we deliberately do NOT
+        # re-arm here (that would busy-loop with delay=0). The in-flight op's
+        # own tail (`if st.dirty: _arm_followup`) re-arms once it completes;
+        # test_no_second_subprocess_while_cluster_runs asserts that recovery.
 
     def _arm_cluster(self, project: str, project_path: str) -> None:
         st = self._state[project]
