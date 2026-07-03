@@ -1,14 +1,13 @@
 # Context
 
 ## Current Task
-Shipped "merge target branch selection" — the task drawer's Merge button now lets the user pick which branch (local or remote) a finished task merges into. Delivered as PR #8 on `feat/merge-target-branch-selection`.
+Loom "next-moat" roadmap, executed subagent-driven. PRs #9/#10/#11 **merged to main**. This session built **Feature #3 (pragmatic)** — cost-gated cluster-deferral for the daemon graph-update path → **PR #12** (open: https://github.com/mohamedhusseinios/Loom-OS/pull/12). Work was on worktree branch `loom/graph-cluster-deferral` off `main`; the main-repo checkout is still the merged/dead `loom/phase2-module-hardening` — do future work off `main`.
 
 ## Key Decisions
-- Off-target merges run in a throwaway git worktree so the user's working checkout is never switched; merging into `origin/X` creates a local `X` and does NOT push.
-- Merge endpoint takes an optional `{target, remote}` body and stays backward compatible (no body → current branch); response gained a `target` field.
-- Dropdown default = the repo's current branch.
+- **Feature #3:** the original "incremental persistence" stays ❌ DROPPED; a merge-based revival was spiked and proven non-viable on graphify 0.8.47 (extraction-root-relative IDs break `merge-graphs`). Instead shipped the pragmatic goal — **defer the expensive global clustering off the finding hot-path** for large repos (cost gate + `GraphUpdateCoordinator`) + fix the overlap bug. Memories: `loom-feature3-incremental-spike`, `graphify-no-incremental-update`.
+- **Feature #5 federation index scope = ORG-WIDE / shared** (resolved 2026-07-02). Memory: `loom-federation-org-wide-scope`.
 
 ## Next Steps
-- Review/merge PR #8 (https://github.com/mohamedhusseinios/Loom-OS/pull/8).
-- Optional follow-ups (in PR/ledger): unit test for `remote` defaulting to False; visually distinguish remote options in the `<select>`.
-- Real end-to-end UI smoke (click Merge on a done task with a live daemon + dashboard) — not yet exercised.
+- Review/merge **PR #12** (cluster-deferral). Opus whole-branch review verdict: READY TO MERGE, no must-fix.
+- **NEW-1 follow-up** (task chip spawned): register-time initial build bypasses the coordinator's overlap guard — route it through the coordinator. Plus a deferred Minor bundle (see PR body).
+- **Feature #5 (cross-project federation)** remains the next substantive roadmap build (org-wide; needs a detailed sub-plan). Phase-1 line: numpy base dep, benchmarks packaging.

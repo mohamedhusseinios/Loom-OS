@@ -1,110 +1,212 @@
 # Architecture/Design Plan Inputs: Loom OS
 
+> Generated 2026-07-01 | Post-parity analysis — all 9 roadmap features shipped. This file prepares the inputs for the `writing-plans` skill to generate full implementation plans.
+
 ## Project Context
 
-- **Name:** Loom OS
-- **Category:** AI agent memory fabric / knowledge graph platform / multi-agent coordination tool
-- **Platform:** macOS/Linux daemon (Python/FastAPI) + web dashboard (Next.js 16)
-- **Target market:** Engineering teams using multiple AI coding agents (Claude Code, Codex, Hermes, Gemini CLI, Copilot CLI, Aider)
-- **One-line description:** Unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project. Agents talk through the filesystem; a Next.js dashboard is the control plane.
-- **Package:** `loom-os` on PyPI, CLI command `loom`, repo directory `agentic-os`
+- **Name:** Loom OS (package: `loom-os`, CLI: `loom`, repo: `agentic-os`)
+- **Category:** AI agent memory fabric — knowledge graph platform for multi-agent coding
+- **Platform:** Python daemon (FastAPI + SQLite + Graphify) + Next.js dashboard
+- **Target market:** Developers and teams using multiple AI coding agents (Claude Code, Codex, Cursor, Hermes)
+- **One-liner:** Unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project.
+- **Current state:** v0.2.0 on PyPI. 30 of 31 feature dimensions present. All 9 post-parity roadmap features shipped. 11 additional modules beyond the roadmap. Feature-complete for local-first single-agent and small-team use.
+
+## Post-Parity Status
+
+All 9 post-parity roadmap features (LLM extraction, hybrid search, PyPI ship, team mode, client SDK, agent discovery, benchmarks, plugins, LangChain integration) shipped as of commit `3b63a51`. The competitive question has shifted from "close the gap" (gap-closure is done — Loom leads 30:9 on the feature matrix) to "what's the next moat?".
+
+**Module inventory (24 daemon modules, confirmed by introspection):**
+
+| Module | LOC | Key Classes/Functions |
+|--------|-----|----------------------|
+| `api.py` | ~900+ | FastAPI app, lifespan, REST routes, WebSocket fan-out |
+| `graph_engine.py` | ~400+ | `GraphEngine.build()`, `.hybrid_query()`, `._read_graph_json()` |
+| `registry.py` | ~500+ | `AgentRegistry` (aiosqlite): agents, projects, tasks, capabilities |
+| `router.py` | ~300+ | `Router.handle_file()`, `_handle_finding()`, `_handle_task()` |
+| `watcher.py` | ~150+ | Watchdog observer → asyncio loop marshaling |
+| `extractors.py` | ~250+ | `Extractor` ABC, `RegexExtractor`, `LLMExtractor`, `ExtractorPipeline` |
+| `extracted_store.py` | ~50 | `ExtractedEdgeStore` sidecar JSON store |
+| `embeddings.py` | 135 | `EmbeddingGenerator.embed()`, `.embed_batch()`, `EmbeddingStore` |
+| `mcp_server.py` | 292 | `list_projects()`, `search_knowledge_graph()`, `query_graph()`, `add_to_memory()` |
+| `worker.py` | 301 | `Worker` class, `run_claude()`, `run_agent()`, `_post_progress()` |
+| `worktree.py` | 132 | `create_worktree()`, `commit_all()`, `branch_diff()`, `merge_branch()` |
+| `temporal.py` | 152 | `TemporalFact`, `TemporalTracker.record()`, `.active_facts()`, `.timeline()` |
+| `traces.py` | 159 | `TraceSpan`, `TraceCapture.start_span()`, `.finish_span()`, `.get_spans()` |
+| `sessions.py` | 128 | `Session`, `SessionManager.start_session()`, `.add_context()` |
+| `snapshots.py` | 126 | `StateSnapshot`, `SnapshotManager.capture()`, `.replay()` |
+| `patterns.py` | 209 | `PatternRepository.observe()`, `.cross_project_patterns()`, `.top_patterns()` |
+| `recall.py` | 163 | `RecallEngine.recall()`, `.retain()` |
+| `ingest.py` | 176 | `DocumentIngestor.ingest_file()`, `.ingest_directory()` |
+| `audit.py` | 155 | `AuditTrail.record()`, `.query()`, `.summary()` |
+| `project_knowledge.py` | 265 | `discover_knowledge_sources()`, `ingest_all_sources()` |
+| `known_agents.py` | 125 | `detect_installed()`, `get_known_agents()` |
+| `shared_context.py` | 233 | `generate_shared_context()`, graph/findings/agent sections |
+| `evals.py` | 195 | `EvalEngine.evaluate()`, `.get_pass_rate()`, `EvalCase` |
+| `plugins.py` | ~100+ | Plugin discovery, `Extractor` contract |
 
 ## Competitive Constraints
 
-### Must-have features (from P0 suggestions)
-- **Production vector backend** — embeddings must persist across daemon restarts and scale beyond ~10K documents. Cognee sets this bar with PGVector/Qdrant.
-- **Temporal fact persistence** — temporal queries must survive restarts. Graphiti sets this bar with Neo4j.
-- **Session checkpoint persistence** — session context must survive crashes/restarts. Letta sets this bar with tiered memory persistence.
+Must-have features every competitor has — table stakes:
+- **Hosted cloud option** (Cognee, Graphiti, Mem0, Letta, LangMem all have it; Loom does not) → see Suggestion 6 (Open Question)
+- **Large community presence** (>20K stars for Cognee/Graphiti/Mem0; Loom is unmeasured publicly) → Suggestion 2 addresses this
 
-### Quality bars to meet or exceed
-- **Vector search latency:** Cognee achieves <100ms on 10K+ docs via PGVector indexing. Loom's in-memory scan is O(n) — fine for <1K but degrades.
-- **Temporal query accuracy:** Graphiti's bi-temporal model supports point-in-time and range queries. Loom's `facts_at(time)` is in-memory only.
-- **SDK resilience:** Mem0's SDKs handle network failures with retry + backoff. Loom's SDKs are basic HTTP wrapping.
-
-### Pricing/deployment expectations
-- All major competitors (Cognee, Mem0, Letta) offer managed cloud. Loom is local-only.
-- Self-hosted Docker is table stakes for team usage.
+Quality bars to meet or exceed:
+- **Benchmark credibility** — no competitor has published comparison data; the opportunity is to be first
+- **Module maturity** — Graphiti's temporal model has years of refinement; Loom's `temporal.py` is 152 lines. The bar is "battle-tested, not just present"
 
 ## Differentiation Strategy
 
-### Primary differentiator
-**Filesystem inbox protocol + three-layer span.** No competitor offers both zero-SDK integration (drop files, no API key) AND the full memory→orchestration→dashboard stack in a single process.
+**Primary differentiators (preserve and extend):**
+1. **Filesystem inbox protocol** — zero-SDK, zero-auth agent onboarding. No competitor has this. It is Loom's deepest moat.
+2. **Single-process daemon** — `pip install loom-os && loom start`. No Docker, no Neo4j, no Postgres. Architecturally alien to every competitor.
+3. **Code-specific AST knowledge graph** — Graphify extracts real code structure. Competitors build graphs from unstructured text extraction.
+4. **Dashboard + WebSocket push** — visual control plane with real-time updates. No memory competitor has a UI.
 
-### Secondary differentiators
-1. **Code-specific knowledge graph** — Graphify extracts AST-level structure. No general memory tool understands code.
-2. **Multi-agent worker execution** — Loom runs 6 different agent CLIs in isolated git worktrees. No memory competitor does this.
-3. **Eval harness + pattern repository** — unique in this category. No competitor has either.
-4. **MCP server** — Loom speaks the MCP protocol natively, competing with MCP Memory Server on its own turf while offering strictly more.
-5. **Plugin system** — community extractors via `~/.loom/plugins/extractors/`. Cognee has a partial pipeline extension mechanism.
+**Next-moat candidates (from suggestions):**
+5. **Cross-project graph federation** (Suggestion 5) — category-defining capability no competitor is positioned to deliver
+6. **Published benchmarks** (Suggestion 1) — marketing moat backed by the existing eval harness
 
 ## Architecture Implications
 
-### P0: Production Vector Backend
-- **Feature:** Persistent vector storage replacing in-memory NumPy
-- **Component:** New `daemon/vec_store.py` module (~120 LOC)
-- **Modify:** `EmbeddingStore` class in `daemon/embeddings.py` (~30 LOC changed — swap `_docs` list for sqlite-vec table)
-- **Migration:** On first startup after upgrade, re-embed from existing findings (or accept a cold start — embeddings are derived data)
-- **Dependency:** `sqlite-vec` Python package (pure C extension, no server) or `lancedb` (columnar ANN)
-- **API impact:** None — `EmbeddingStore.insert()` and `.search()` signatures unchanged
-- **LOC estimate:** ~150 LOC total
+Each suggestion mapped to specific existing modules and methods. LOC estimates are approximate.
 
-### P0: Temporal Fact Persistence
-- **Feature:** SQLite-backed temporal fact storage
-- **Component:** Modify `daemon/temporal.py` (~80 LOC added)
-- **Change:** `TemporalTracker.__init__` accepts `db_path` parameter (default: `~/.loom/temporal.db`). Add `CREATE TABLE temporal_facts` schema. `record()` and `expire()` write to SQLite. `active_facts()`, `list_facts()`, `timeline()`, `facts_at()` query from SQLite.
-- **Migration:** None needed — empty table on first run. Facts accumulate going forward.
-- **API impact:** None — all temporal API endpoints continue to work (they call TemporalTracker methods)
-- **LOC estimate:** ~80 LOC
+### Suggestion 1: Publish Benchmarks
+- **Files:** Zero changes. Run existing `daemon/evals.py` (`EvalEngine.evaluate()`, `EvalCase`) and `benchmarks/` harness.
+- **Output:** `BENCHMARKS.md` with reproducible results vs Cognee/Graphiti.
+- **No daemon code changes needed.**
 
-### P0: Session Checkpoint Persistence
-- **Feature:** SQLite-backed session storage with checkpoint/restore
-- **Component:** Modify `daemon/sessions.py` (~60 LOC added)
-- **Change:** Add `sessions` table. `SessionManager` stores sessions in SQLite. Add `checkpoint(session_id)` and `restore(session_id)` methods. `start_session()` checks for existing checkpoint.
-- **Migration:** None — empty table on first run.
-- **API impact:** New `POST /api/sessions/{id}/checkpoint` and `POST /api/sessions/{id}/restore` endpoints (~20 LOC in api.py)
-- **LOC estimate:** ~80 LOC
+### Suggestion 2: Documentation Site + Community Channel
+- **Files:** New `docs-site/` directory (static site). No daemon changes.
+- **Community:** GitHub Discussions or Discord server — zero infrastructure.
+- **No daemon code changes needed.**
 
-### P1: Managed Cloud / Dockerization
-- **Feature:** Docker deployment + HTTP-to-inbox gateway
-- **Component:** New `Dockerfile` + `docker-compose.yml` (~50 LOC)
-- **Component:** New HTTP-to-inbox middleware in `daemon/api.py` (~100 LOC) — translate `POST /api/inbox/{project}/finding` to writing a `finding-*.md` file
-- **Dependency:** None new for Docker. Multi-tenant requires schema changes in `registry.py` (~50 LOC — add `tenant_id` column)
-- **LOC estimate:** ~200 LOC
+### Suggestion 3: Incremental Graph Persistence
+- **Modify:** `daemon/graph_engine.py` (~100–150 LOC)
+  - Add `async incremental_update(self, project_path: str, changed_files: set[str]) -> None` alongside existing `_build()`
+  - Diff changed files against cached parse results; merge new/modified nodes/edges into existing `graph.json`
+  - Reuse `_read_graph_json()` for the existing graph state
+- **Modify:** `daemon/watcher.py` (~20 LOC)
+  - Pass changed-files set to the graph engine instead of triggering a full rebuild
+  - The watcher already tracks which files changed via watchdog events — extend the event payload
+- **Modify:** `daemon/router.py` (~10 LOC)
+  - `Router._schedule_graph_update()` passes the changed-files set through to `graph_engine`
+- **Test:** `tests/test_graph_engine.py` (~80 LOC)
+  - Test: incremental update adds new nodes without removing existing ones
+  - Test: modified file replaces its node's edges without affecting siblings
+  - Test: deleted file removes its nodes from the graph
+- **Constraint:** Graphify's own `graph.json` output must never be broken — incremental merges must produce equivalent results to full rebuilds for the changed subset.
 
-### P1: Multi-Modal Query Planner
-- **Feature:** Replace BFS heuristic with scored query planner
-- **Component:** Refactor `hybrid_query()` in `daemon/graph_engine.py` (~100 LOC changed)
-- **Change:** (1) Pre-compute node embeddings at graph build time and cache. (2) Use ANN search for seed selection instead of brute-force cosine. (3) Replace BFS with scored ranking combining semantic similarity + structural distance + relational edge weight.
-- **Dependency:** Depends on P0 vector backend for embedding persistence (otherwise re-computing embeddings per query defeats the purpose)
-- **LOC estimate:** ~100 LOC
+### Suggestion 4: Mature First-Generation Modules
+For each of the 5 modules, the pattern is: targeted edge-case tests + concurrency guards + defensive error handling.
 
-### P2: Framework Adapters (AutoGen, CrewAI)
-- **Feature:** `loom-autogen` and `loom-crewai` packages
-- **Component:** New `integrations/loom-autogen/` (~100 LOC) and `integrations/loom-crewai/` (~100 LOC)
-- **Pattern:** Same as existing `langchain-loom` — subclass framework's memory base class, delegate to Loom REST API
-- **LOC estimate:** ~200 LOC total
+- **`daemon/temporal.py` (152 → ~220 LOC):**
+  - Add `asyncio.Lock` around `TemporalTracker.record()` and `.expire()` (concurrent fact recording)
+  - Add `facts_at()` edge-case tests for boundary timestamps (exactly `valid_from`, exactly `valid_to`)
+  - Add test: expired fact with no `valid_to` returns correctly
+  - **Test:** `tests/test_temporal.py` (+~50 LOC)
 
-### P2: Production Auth (OAuth2 + RBAC)
-- **Feature:** OAuth2 password flow + role-based access control
-- **Component:** Modify `daemon/auth.py` (~150 LOC added)
-- **Change:** Add OAuth2 backend (passlib + python-jose). Add `roles` and `user_roles` tables to registry. Add role checks on mutating API routes.
-- **LOC estimate:** ~200 LOC
+- **`daemon/traces.py` (159 → ~210 LOC):**
+  - Add guard in `TraceCapture.finish_span()` for span already finished (idempotent)
+  - Add `_evict_oldest()` test for boundary: max_spans = 0, max_spans = 1
+  - Add concurrency test: 100 simultaneous `start_span` calls don't exceed max_spans
+  - **Test:** `tests/test_traces.py` (+~40 LOC)
 
-### P2: Mature SDKs
-- **Feature:** Retry, batching, streaming for Python + npm SDKs
-- **Component:** Modify `loom-client/` (~80 LOC) and `loom-client-ts/` (~80 LOC)
-- **Change:** Add tenacity-based retry. Add batch methods. Add SSE consumer for task progress.
-- **LOC estimate:** ~160 LOC
+- **`daemon/sessions.py` (128 → ~180 LOC):**
+  - Add try/except in `SessionManager._bridge_to_inbox()` for mailbox write failures
+  - Add test: session context survives daemon restart (persistence check)
+  - Add test: `end_session()` cleans up subgraph correctly
+  - **Test:** `tests/test_sessions.py` (+~40 LOC)
+
+- **`daemon/snapshots.py` (126 → ~180 LOC):**
+  - Add guard in `SnapshotManager.replay()` for partial/corrupt snapshots
+  - Add test: `capture()` + `replay()` roundtrip preserves all state fields
+  - Add test: eviction policy keeps most-recent N snapshots
+  - **Test:** `tests/test_snapshots.py` (+~40 LOC)
+
+- **`daemon/patterns.py` (209 → ~270 LOC):**
+  - Expand `_normalise()` with more linguistic coverage (stemming, common abbreviations)
+  - Add test: `cross_project_patterns()` correctly deduplicates across projects
+  - Add test: `deprecate()` transitions status correctly
+  - **Test:** `tests/test_patterns.py` (+~40 LOC)
+
+- **Total:** ~250 LOC new code + ~210 LOC new tests across 5 modules
+
+### Suggestion 5: Cross-Project Graph Federation
+- **Create:** `daemon/federation.py` (~120 LOC)
+  ```python
+  class FederatedIndex:
+      def __init__(self, loom_dir: str = "~/.loom"): ...
+      async def build_index(self) -> dict: ...  # scan all graphify-out/graph.json
+      async def query(self, question: str, depth: int = 2) -> list[dict]: ...  # returns {node, project, distance}
+      async def cross_project_references(self, symbol: str) -> list[dict]: ...  # which projects use this?
+  ```
+- **Modify:** `daemon/api.py` (+~30 LOC)
+  - `GET /api/federated-query?q=...&depth=2` → federated search results
+  - `GET /api/federated/references?symbol=...` → cross-project symbol lookup
+- **Create:** `dashboard/components/federation-explorer.tsx` (~150 LOC)
+  - Search component showing results tagged by project origin
+  - Click-through to the specific project's graph view
+- **Test:** `tests/test_federation.py` (~60 LOC)
+  - Test: two projects with shared nodes appear in federated query
+  - Test: cross_project_references finds a symbol in multiple repos
+- **Constraint:** Must not break per-project isolation — federation is read-only across projects. No project can write to another's graph.
+
+### Suggestion 7: MCP Ecosystem Positioning
+- **Modify:** `daemon/mcp_server.py` (+~60 LOC)
+  - Add `discover_agents(project: str)` tool — wraps `registry.list_agents_by_project()`
+  - Add `query_temporal_facts(project: str, timestamp: str = None)` tool — wraps `TemporalTracker.active_facts()` / `.facts_at()`
+  - Add `search_patterns(project: str, query: str)` tool — wraps `PatternRepository.list_patterns()`
+  - All read-only; no new infrastructure needed
+- **Test:** `tests/test_mcp.py` (+~30 LOC)
+
+### Suggestion 8: Framework Integrations
+- **Create:** `integrations/llamaindex-loom/` (~200 LOC + `pyproject.toml` + tests + README)
+  - Implements LlamaIndex storage backend interface
+  - Delegates to `loom-client` for all I/O
+  - Pattern proven with `langchain-loom` (commit d13667c)
+- **Create:** `integrations/crewai-loom/` (~200 LOC + same package structure)
+  - Implements CrewAI shared memory interface
+  - Delegates to `loom-client`
+- **No daemon changes.** Both packages use `loom-client` as their transport.
+
+### Suggestion 9: Expanded Plugin Examples
+- **Create:** `examples/plugins/git_history.py` (~50 LOC) — extracts entities from git log
+- **Create:** `examples/plugins/todo_scanner.py` (~40 LOC) — scans for TODO/FIXME/HACK comments
+- **Create:** `examples/plugins/test_coverage.py` (~50 LOC) — maps test files to source files
+- **Create:** `examples/plugins/dependency_mapper.py` (~50 LOC) — extracts import dependency edges
+- **No daemon changes.** Plugins follow the existing `Extractor` ABC and `plugins.discover()` mechanism.
 
 ## Open Questions
 
-1. **Vector backend choice:** sqlite-vec (minimal, pure extension) vs LanceDB (columnar ANN, more features but heavier dependency)? The plugin system already exists — could the vector backend be pluggable?
-2. **Temporal persistence scope:** Sidecar SQLite file (`~/.loom/temporal.db`) vs extending `state.db` in registry.py? Sidecar keeps temporal logic isolated; state.db consolidation simplifies backups.
-3. **Multi-tenant isolation model:** Separate databases per tenant vs `tenant_id` column on every table? Column approach is simpler but requires audit discipline; database-per-tenant is safer but operationally heavier.
-4. **Query planner vs incremental improvement:** Replace `hybrid_query` entirely or incrementally improve the existing BFS? Incremental is lower risk; full replacement is cleaner.
-5. **Auth scope:** Is OAuth2 sufficient, or do enterprise deployments need OIDC/SAML? Depends on target customer (SMB vs enterprise).
-6. **Should the eval harness be a standalone tool?** Deepening it might warrant extracting to a separate `loom-eval` package rather than growing `daemon/evals.py`.
+These require a user decision before planning can proceed:
+
+1. **Cloud offering: Option A (ship managed) or Option B (self-hosted positioning)?**
+   - Option A: Dockerize + optional Postgres backend (~150 LOC). Captures enterprise buyers who ask "is there a cloud version?"
+   - Option B: Lean into local-first philosophy. Write a position paper. Zero code changes.
+   - **This is a strategic/business decision, not a technical one. The user should decide.**
+
+2. **Priority ordering: benchmarks first or docs first?**
+   - Both are P0. Benchmarks take ~2 hours to run + write up (harness exists). Docs site takes ~2 days to deploy + write content.
+   - Recommendation: benchmarks first (higher leverage, less effort), then docs.
+
+3. **Which P1 module to harden first?**
+   - `temporal.py` is the most competitive (Graphiti is the benchmark). Starting here gives the strongest "we match Graphiti" claim.
+   - `patterns.py` is the most differentiating (no competitor has cross-project patterns). Starting here strengthens the unique-value claim.
+
+4. **Federation privacy model:**
+   - Cross-project federation surfaces symbols across all projects in `~/.loom/`. For team mode, should federation be per-user only, or organization-wide? This affects the federation index scoping.
 
 ## Recommended Next Step
 
-Load the `writing-plans` or `plan` skill with this file as context to generate the full implementation plan. The P0 items (vector backend, temporal persistence, session persistence) are the highest-value changes — they convert three V1 in-memory implementations to production-grade and close the depth gap with Cognee and Graphiti. They're also independent of each other and can be implemented in parallel.
+Load the `writing-plans` skill with this file as context. The recommended implementation order is:
+
+1. **Immediate P0 (days):** Run benchmarks (Suggestion 1) + deploy docs site (Suggestion 2). Both are primarily execution work, not new code.
+2. **Next P1 (weeks):** Incremental graph persistence (Suggestion 3) — highest technical leverage, prevents scaling problems. Then module maturity hardening (Suggestion 4) starting with `temporal.py`.
+3. **Then P1 differentiator:** Cross-project federation (Suggestion 5) — category-defining capability.
+4. **Strategic gate:** Cloud offering decision (Suggestion 6) must be resolved before any cloud-related work.
+5. **Background P2-P3:** MCP expansion (Suggestion 7), framework integrations (Suggestion 8), plugin examples (Suggestion 9).
+
+**Design context to read:**
+- `docs/plans/2026-06-29-post-parity-roadmap-implementation.md` — the roadmap that shipped all 9 features. Its Phase 3 section called for re-running this analysis before proceeding. That's what we just did.
+- `docs/ARCHITECTURE.md` — current module map and data flow.
+- `CLAUDE.md` — project conventions, daemon patterns, and gotchas.
