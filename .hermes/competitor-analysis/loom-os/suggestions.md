@@ -1,110 +1,182 @@
 # Competitor Analysis Suggestions: Loom OS
 
-## Suggestion: Production Vector Backend
+> Generated 2026-07-01 | Post-parity analysis — all 9 roadmap features shipped. These suggestions are forward-looking, not gap-closure.
 
-**Priority:** P0 (must-have)
-**Evidence:** Cognee ships PGVector + Qdrant as production vector backends. Loom's `EmbeddingStore` (`daemon/embeddings.py`, 135 lines) uses in-memory NumPy arrays with zero-vector graceful degradation. Embeddings are lost on daemon restart. The code comments: "For <10K documents this is fast and requires zero infrastructure. A future V2 can swap to an on-disk sqlite-vec backend without changing the public API."
-**Rationale:** Semantic search across findings, entities, and graph nodes is a core feature. Without persistence, every daemon restart requires re-embedding the entire corpus. For teams with >10K findings/documents, the in-memory store won't scale.
-**Action:** Replace `EmbeddingStore._docs` (in-memory list) with a sqlite-vec table in `~/.loom/embeddings.db`. The existing `EmbeddingStore` API (`insert`, `search`) stays identical — only the storage backend changes. Consider LanceDB as an alternative if ANN index performance matters.
-**Architecture impact:** New `daemon/vec_store.py` module (~120 LOC) + modify `EmbeddingStore` class in `embeddings.py` (~30 LOC changed) + migration path for any existing in-memory embeddings.
+## Context
 
----
+All 9 post-parity roadmap features (LLM extraction, relational queries, PyPI ship, team mode, client SDK, agent discovery, benchmarks, plugins, LangChain integration) shipped as of commit `3b63a51` (2026-06-29). Additionally, 11 modules beyond the roadmap shipped (temporal, traces, sessions, snapshots, patterns, recall, ingest, audit, project_knowledge, known_agents, shared_context). Loom now has 30 of 31 feature dimensions — the next-closest competitor has 9.
 
-## Suggestion: Temporal Fact Persistence
-
-**Priority:** P0 (must-have)
-**Evidence:** Graphiti / Zep persists temporal facts to Neo4j — bi-temporal queries survive restarts. Loom's `TemporalTracker` (`daemon/temporal.py`, 152 lines) stores facts in `self._facts: dict[str, TemporalFact]` — an in-memory dict. The docstring explicitly says "All state is in-memory (V1). SQLite persistence can be added later."
-**Rationale:** Temporal queries ("what was true at time T?") are useless if facts disappear on restart. This is a core differentiator vs Graphiti and it's currently non-functional across sessions.
-**Action:** Modify `TemporalTracker.__init__` to accept a `db_path` parameter and add SQLite schema (`temporal_facts` table with columns matching `TemporalFact` dataclass). Persist `record()` and `expire()` calls to SQLite. Load facts on startup.
-**Architecture impact:** Modify `daemon/temporal.py` (~80 LOC added) + add temporal table to `registry.py` initialization or use a sidecar SQLite file. ~210 lines total after change.
+**The competitive frame has shifted from "close the gap" to "build the next moat."** These suggestions reflect that.
 
 ---
 
-## Suggestion: Session Checkpoint Persistence
+## Completed Suggestions (from 2026-06-26 analysis)
 
-**Priority:** P0 (must-have)
-**Evidence:** Letta persists agent state (working memory + archival storage) across restarts. Loom's `SessionManager` (`daemon/sessions.py`, 128 lines) stores sessions in `self._sessions: dict[str, Session]` — in-memory only. The docstring says: "Sessions are in-memory (V1). A future V2 can persist session checkpoints to disk for crash recovery."
-**Rationale:** Long-running agent sessions that span daemon restarts (e.g., after a crash or update) lose all accumulated context. For multi-agent workflows where session continuity matters, this is a reliability gap.
-**Action:** Add SQLite-backed session storage. Serialize `Session.context` dict as JSON. Add `checkpoint()` and `restore()` methods.
-**Architecture impact:** Modify `daemon/sessions.py` (~60 LOC added). Add `sessions` table to registry or sidecar DB.
-
----
-
-## Suggestion: Managed Cloud Deployment
-
-**Priority:** P1 (high)
-**Evidence:** Cognee, Mem0, and Letta all offer managed cloud options. Loom OS is local-only (`pip install loom-os`).
-**Rationale:** Teams that don't want to manage a local daemon need a hosted option. The filesystem inbox protocol is inherently local — a cloud version would need an API gateway that translates HTTP → inbox files internally.
-**Action:** (1) Dockerize the daemon + dashboard as a single container for self-hosted teams. (2) Design an HTTP-to-inbox gateway for managed cloud (agents POST findings → gateway writes to inbox → daemon processes as normal). (3) Add SSO/OAuth for multi-tenant cloud.
-**Architecture impact:** New `Dockerfile` + `docker-compose.yml` (~50 LOC). HTTP-to-inbox gateway as a new FastAPI middleware (~100 LOC). Multi-tenant schema changes to `registry.py` (~50 LOC).
+| # | Original Suggestion | Status | Shipped Commit |
+|---|-------------------|--------|----------------|
+| ✅1 | LLM extraction pipeline (Ollama/OpenAI/Claude) | **Shipped** | 5671410, f66c7df |
+| ✅2 | Relational/hybrid query support | **Shipped** | 4ed7743, 781cf12 |
+| ✅3 | Ship to PyPI + `loom init` CLI | **Shipped** | 7c07c64, 5e14b3c, 2c8ba3f |
+| ✅4 | Team mode (optional auth, per-user inbox) | **Shipped** | ea595cc, 30b237f |
+| ✅5 | Client SDK (Python + npm TypeScript) | **Shipped** | 884d7ca |
+| ✅6 | Agent discovery / capability directory | **Shipped** | 6c1311b |
+| ✅7 | Performance benchmarks & eval harness | **Shipped** | 4d5fba3 |
+| ✅8 | Plugin system for extractors | **Shipped** | 64eeea8 |
+| ✅9 | Framework integrations (LangChain BaseMemory) | **Shipped** | d13667c |
 
 ---
 
-## Suggestion: Multi-Modal Query Planner (Upgrade from BFS Heuristic)
+## New Suggestions
 
-**Priority:** P1 (high)
-**Evidence:** Cognee has a proper multi-modal query planner across graph + vector + relational stores. Loom's `hybrid_query` (`daemon/graph_engine.py:275-329`) is a vector-seeded BFS over AST + extracted edges — a heuristic join, not a true query planner.
-**Rationale:** The BFS approximation degrades on large graphs (every BFS step recomputes embeddings for the current node). A scored query planner that pre-computes embeddings and uses ANN search would be both faster and more accurate.
-**Action:** (1) Pre-compute and cache embeddings for all node IDs (avoid recomputing per BFS step). (2) Replace BFS traversal with a scored ranking that combines semantic similarity + structural distance + relational edge weight. (3) Add query plan explainability (show which sources contributed to each result).
-**Architecture impact:** Refactor `hybrid_query` in `graph_engine.py` (~100 LOC changed). Depends on P0 vector backend for embedding persistence.
+### Suggestion Priority Legend
 
----
-
-## Suggestion: Expand Framework Adapter Ecosystem
-
-**Priority:** P2 (medium)
-**Evidence:** Mem0 has mature adapters for LangChain, AutoGen, and CrewAI. Loom has a LangChain `BaseMemory` adapter only (`langchain-loom` integration, commit d13667c).
-**Rationale:** Framework adapters are the primary integration path for teams already using agent frameworks. Each adapter expands Loom's addressable market.
-**Action:** Add `loom-autogen` adapter (AutoGen conversable agent memory). Add `loom-crewai` adapter (CrewAI crew memory). Both follow the same pattern as the LangChain adapter — subclass the framework's memory base class and delegate to Loom's API.
-**Architecture impact:** New packages (~100 LOC each). No daemon changes needed — the REST API already supports all required operations.
+| Priority | What it means for Loom *now* |
+|----------|------------------------------|
+| **P0** | Distribution & community — the binding constraint. The product is feature-complete; discoverability is the bottleneck. |
+| **P1** | Maturity hardening — make first-generation modules battle-tested enough to compete with specialists. |
+| **P2** | Go-to-market positioning — cloud offering decision, MCP ecosystem play. |
+| **P3** | Ecosystem expansion — more integrations, more content, polish. |
 
 ---
 
-## Suggestion: Production Authentication (OAuth2 + RBAC)
+## P0: Distribution & Community Growth
 
-**Priority:** P2 (medium)
-**Evidence:** Loom's auth is optional token middleware (`daemon/auth.py`, commit ea595cc: "no-op when unconfigured"). Mem0 and Letta have production auth with managed cloud.
-**Rationale:** For team usage and any future cloud deployment, token middleware isn't sufficient. OAuth2 enables SSO, and RBAC enables per-role permissions (admin, developer, viewer).
-**Action:** (1) Add OAuth2 password flow (or OIDC for enterprise SSO). (2) Add role-based access control on API routes (admin can delete projects, developer can dispatch tasks, viewer is read-only). (3) Add per-user project isolation (partially implemented via the `user` column in the agents table).
-**Architecture impact:** Modify `daemon/auth.py` (~150 LOC added). Add `roles` and `permissions` tables to `registry.py`. Add auth middleware to all mutating API routes.
+### Suggestion 1: Publish Reproducible Benchmarks
 
----
-
-## Suggestion: Mature Client SDKs (Retry, Batching, Streaming)
-
-**Priority:** P2 (medium)
-**Evidence:** Mem0's SDKs include retry logic, request batching, and streaming responses. Loom's Python SDK (`loom-client`) and npm twin are basic HTTP wrapping.
-**Rationale:** Production usage requires resilience patterns — transient failures, bulk operations, and progress streaming for long-running tasks.
-**Action:** (1) Add exponential backoff retry to all SDK methods. (2) Add batch methods (`add_findings_batch`, `search_batch`). (3) Add SSE/streaming for task progress (the daemon already has `POST /tasks/{id}/progress` — expose it as a stream).
-**Architecture impact:** Modify `loom-client/` Python package (~80 LOC). Modify npm twin `loom-client-ts/` (~80 LOC). No daemon changes.
+**Priority:** P0
+**Evidence:** The eval harness (`daemon/evals.py` — 195 lines with `EvalEngine`, `EvalCase`, LLM-as-judge scoring) and benchmark runner (commit 4d5fba3 with `benchmarks/` harness) exist but have never been run head-to-head against Cognee or Graphiti. No competitor has published comparison data.
+**Rationale:** Loom's single-process/SQLite/NumPy architecture is a radical bet against the Docker+Neo4j orthodoxy. Proving it wins on latency, setup time, and resource consumption — with reproducible numbers — is the single highest-leverage marketing asset available. Cognee (26K stars) and Graphiti (28K stars) can't counter with their own numbers because their infrastructure overhead is structurally higher.
+**Action:** Run the existing benchmark harness against Loom + Cognee + Graphiti on identical tasks (graph build time, query latency, recall precision on a standard repo). Publish results as `BENCHMARKS.md` with reproducible setup instructions. Zero new code needed — the harness exists.
+**Architecture impact:** None — run existing `benchmarks/` harness. Output is a markdown report.
 
 ---
 
-## Suggestion: Cross-Project Pattern Mining (Deepen Existing Feature)
+### Suggestion 2: Documentation Site + Community Channel
 
-**Priority:** P3 (nice-to-have)
-**Evidence:** Loom's `daemon/patterns.py` (209 lines) already has a `cross_project` search endpoint (`GET /api/patterns/cross-project`). No competitor has any pattern repository at all.
-**Rationale:** This is a unique differentiator that's underexploited. Cross-project pattern mining ("this team solved auth this way in project A, and that way in project B") is the killer feature for multi-project engineering orgs.
-**Action:** (1) Add pattern clustering (group similar patterns across projects). (2) Add pattern recommendation ("you're about to build auth — here are 3 patterns from your other projects"). (3) Add pattern deprecation tracking (mark patterns as superseded).
-**Architecture impact:** Extend `daemon/patterns.py` (~100 LOC). New API endpoints. Dashboard component for pattern browser.
-
----
-
-## Suggestion: Eval Harness Expansion (Deepen Existing Feature)
-
-**Priority:** P3 (nice-to-have)
-**Evidence:** Loom's `daemon/evals.py` (195 lines) is unique in this category — no competitor has an eval harness. Current implementation has basic pass/fail and pass-rate endpoints.
-**Rationale:** As the only tool with built-in evaluation, deepening this feature compounds the moat. Eval results become a data flywheel — better evals → better agent recommendations → more agent usage → more data → better evals.
-**Action:** (1) Add recall precision@k metrics. (2) Add agent-specific eval suites (different benchmarks for claude-code vs codex). (3) Add temporal eval (does recall accuracy degrade over time as the graph grows?).
-**Architecture impact:** Extend `daemon/evals.py` (~80 LOC). New API endpoints for metric queries.
+**Priority:** P0
+**Evidence:** Loom has 31 feature dimensions, 24 daemon modules, a Next.js dashboard, Python + npm SDKs, MCP server, and LangChain integration — but no documentation site and no community channel (Discord/GitHub Discussions). Cognee and Mem0 both have active Discord servers that drive community growth.
+**Rationale:** The product is deep — graph-based memory, autonomous worker execution, temporal tracking, pattern detection. Discoverability is now the binding constraint, not features. A developer landing on the GitHub repo sees 24 Python modules and a dashboard — that's intimidating without guided documentation.
+**Action:** (1) Deploy a docs site (MkDocs or Fumadocs — the dashboard already uses Next.js, so Fumadocs is natural). (2) Open a GitHub Discussions tab or Discord server. (3) Write 3-5 tutorial walkthroughs: "connect Claude Code to Loom", "add a custom extractor plugin", "use hybrid search for architecture Q&A". (4) Create 1-2 demo projects showing the full inbox → graph → dashboard flow.
+**Architecture impact:** None for the daemon. Docs site is a separate static deployment. Discord/GitHub Discussions is zero infrastructure.
 
 ---
 
-## Priority Summary
+## P1: Maturity Hardening
 
-| Priority | Count | Items |
-|----------|-------|-------|
-| P0 | 3 | Vector backend persistence, temporal persistence, session persistence |
-| P1 | 2 | Managed cloud, multi-modal query planner upgrade |
-| P2 | 3 | Framework adapters (AutoGen, CrewAI), production auth, mature SDKs |
-| P3 | 2 | Cross-project pattern mining, eval harness expansion |
+### Suggestion 3: Incremental Graph Persistence
+
+**Priority:** P1
+**Evidence:** `daemon/graph_engine.py` invokes `graphify` as a subprocess that rebuilds `graph.json` from the project's full AST on each update. The mtime cache (commit 4d5fba3) skips unnecessary rebuilds, but when a rebuild does happen, it's full-source. Cognee and Graphiti use Neo4j which handles incremental updates natively — changed nodes merge without full rebuild.
+**Rationale:** Loom currently rate-limits graph updates to 1 per 30 seconds per project (`MIN_UPDATE_INTERVAL` in router.py). This works for small projects but becomes a scaling bottleneck on large monorepos or many concurrent projects. Incremental updates — diff changed files against the last parse and merge only new/modified nodes/edges into `graph.json` — would eliminate this bottleneck before it becomes a complaint.
+**Action:** Modify `graph_engine.py`'s build method to accept a set of changed file paths (from the watcher) and pass only those to Graphify's incremental mode (if available), or diff the new `graph.json` against the cached one and merge new/modified nodes. Add corresponding tests in `tests/test_graph_engine.py`.
+**Architecture impact:**
+- `daemon/graph_engine.py` (~100–150 LOC change: add `incremental_update()` method alongside `_build`)
+- `daemon/watcher.py` (~20 LOC: pass changed-files set instead of full project path)
+- `tests/test_graph_engine.py` (~80 LOC: new test for incremental merge correctness)
+
+---
+
+### Suggestion 4: Mature First-Generation Modules
+
+**Priority:** P1
+**Evidence:** Several modules are first-generation implementations under 210 lines that are present in the feature matrix but not yet production-hardened:
+
+| Module | LOC | Maturity Concern |
+|--------|-----|------------------|
+| `temporal.py` | 152 | Validity-range fact tracking — Graphiti has years of refinement in temporal graphs |
+| `traces.py` | 159 | Span capture with eviction — needs concurrency safety under load |
+| `sessions.py` | 128 | Session subgraphs — `_bridge_to_inbox` needs error handling for mailbox failures |
+| `snapshots.py` | 126 | State snapshots — `replay()` needs guard against partial snapshots |
+| `patterns.py` | 209 | Cross-project patterns — `_normalise()` needs more linguistic coverage |
+
+**Rationale:** The feature matrix shows ✅ for these modules, and they are functionally present. But "present" and "battle-tested" are different claims. Before any public claim about temporal tracking or execution tracing, these modules need edge-case tests, concurrency guards, and eviction policies validated under load. The risk: if a user tries `temporal.facts_at(timestamp)` and gets a wrong answer because of an edge case, it undermines the credibility of the entire platform.
+**Action:** For each module: (1) write targeted edge-case tests in the existing `tests/test_*.py` files; (2) add concurrency guards (`asyncio.Lock` where state mutations happen); (3) add eviction policy tests under load; (4) expand the module by 50–100 LOC of defensive guards.
+**Architecture impact:** Expand each of the 5 modules by ~50–100 LOC. Extend existing test files (no new test files needed). Total: ~250–500 LOC across daemon + ~300–500 LOC across tests.
+
+---
+
+### Suggestion 5: Cross-Project Graph Federation
+
+**Priority:** P1
+**Evidence:** Projects are fully isolated — each has its own `~/.loom/inbox/<project>/graphify-out/graph.json`. There is no way to query "which projects use pattern X?" or "find this module across all repos." `patterns.py:cross_project_patterns()` works on pattern observations (textual), not on graph federation. No competitor has cross-project graph queries either — they all use flat namespaces.
+**Rationale:** This is a category-defining capability no competitor is positioned to deliver. A `federation.py` module that indexes across all `graphify-out/` directories would unlock "find pattern X across the org's repos" — something that currently requires running separate searches per project. For teams with multiple microservices, this is the difference between "memory per project" and "organizational knowledge graph."
+**Action:** Create `daemon/federation.py` that builds a combined index of nodes/edges across all project graphs. Add `GET /api/federated-query?q=...` endpoint. Add a dashboard component for federated search results.
+**Architecture impact:**
+- New `daemon/federation.py` (~120 LOC: scan all `~/.loom/inbox/*/graphify-out/graph.json`, build merged adjacency)
+- `daemon/api.py` (+~30 LOC: `GET /api/federated-query` endpoint)
+- `dashboard/components/federation-explorer.tsx` (~150 LOC: new search component)
+- `tests/test_federation.py` (~60 LOC: test merged index correctness)
+
+---
+
+## P2: Go-To-Market Positioning
+
+### Suggestion 6: Cloud/Hosted Offering Decision
+
+**Priority:** P2
+**Evidence:** Every competitor with >20K stars has a hosted option (Cognee Cloud, Zep Cloud, Mem0 Cloud, Letta Cloud, LangGraph Cloud). Loom is the only major competitor without one. At the same time, Loom's single-process architecture makes containerization *easier* than competitors — it's one `docker run` vs Cognee's docker-compose with Neo4j + PGVector.
+**Rationale:** This is a go-to-market decision, not an architecture one. Enterprise buyers ask "is there a cloud version?" before evaluating features. The answer doesn't have to be "yes" — but it has to be a deliberate choice, not silence. Either:
+- **Option A:** Ship a managed offering. Dockerize the daemon (trivial for single-process), offer multi-tenant isolation via the existing team-mode per-user inbox scoping, optionally swap SQLite for Postgres for multi-tenant durability.
+- **Option B:** Lean into "self-hosted by design" positioning. Make the case that single-process local-first is a feature, not a limitation — "your agent memory never leaves your machine."
+**Action:** Make an explicit decision and document it. If Option A: write `Dockerfile` + `docker-compose.yml` (~50 LOC total for single-process), add optional Postgres connection string support to `registry.py`. If Option B: write a position paper explaining the local-first philosophy.
+**Architecture impact:**
+- Option A: `Dockerfile` (~20 LOC) + `docker-compose.yml` (~30 LOC) + optional `daemon/registry.py` Postgres backend (~100 LOC behind a connection-string check)
+- Option B: documentation only
+
+---
+
+### Suggestion 7: MCP Ecosystem Positioning
+
+**Priority:** P2
+**Evidence:** Loom has `mcp_server.py` (292 lines) exposing 4 tools (`list_projects`, `get_project_graph`, `search_knowledge_graph`, `add_to_memory`). The MCP ecosystem is the fastest-growing agent protocol (87K-star umbrella repo). The official MCP Memory Server is entity-relation only — no code awareness, no graph search, no dashboard.
+**Rationale:** Positioning Loom as "the richest MCP-compatible memory backend" opens a distribution channel through the MCP ecosystem. Any agent that speaks MCP can use Loom as its memory layer — Claude Code, Cursor, Windsurf, and any future MCP-compatible tool. This is the cheapest distribution play available: a few more MCP tools cost ~60 LOC but expose Loom to the entire MCP-compatible agent ecosystem.
+**Action:** Add 2-3 more MCP tools to `mcp_server.py`: agent discovery, temporal fact queries, pattern search. Update the MCP server documentation to position Loom as a drop-in upgrade from the basic MCP Memory Server.
+**Architecture impact:** `daemon/mcp_server.py` (+~60 LOC: 2-3 new tool functions). No daemon changes needed — the tools query existing modules.
+
+---
+
+## P3: Ecosystem Expansion
+
+### Suggestion 8: Additional Framework Integrations (LlamaIndex, CrewAI)
+
+**Priority:** P3
+**Evidence:** Loom has `langchain-loom` (LangChain `BaseMemory` integration). The roadmap (Feature #10) also called for LlamaIndex and CrewAI integrations. LlamaIndex has a storage backend interface; CrewAI has shared crew memory needs. Both are thin wrappers over `loom-client`.
+**Rationale:** Each integration opens a community's discoverability channel. LangChain's ecosystem is the largest; LlamaIndex's is second for RAG use cases; CrewAI is growing in multi-agent orchestration. The pattern is proven with `langchain-loom` — replicate it.
+**Action:** Create `integrations/llamaindex-loom/` (implements LlamaIndex storage backend) and `integrations/crewai-loom/` (implements CrewAI shared memory). Each is a separate package (~200 LOC) delegating to `loom-client`.
+**Architecture impact:** 2 new packages under `integrations/`, each ~200 LOC + tests + README. No daemon changes.
+
+---
+
+### Suggestion 9: Expanded Plugin Examples & Plugin Marketplace
+
+**Priority:** P3
+**Evidence:** The plugin system shipped with 3 example plugins (commit 64eeea8) and a `/api/plugins` endpoint. The plugin discovery mechanism (`daemon/plugins.py`) works but has a small example set.
+**Rationale:** The plugin system is the community contribution surface. More high-quality example plugins (Git history extractor, TODO/FIXME scanner, test coverage analyzer, dependency graph mapper) demonstrate the platform's extensibility and seed the ecosystem. A community-contributed plugin registry would be a moat — competitors don't have one.
+**Action:** Write 3-5 additional example plugins. Document the `Extractor` contract thoroughly. Consider a `loom plugins install <url>` command for remote plugin installation (trust boundary: local filesystem only, documented).
+**Architecture impact:** Example plugins are new files under `examples/plugins/` (~50 LOC each). Optional `daemon/plugins.py` enhancement for remote install (~40 LOC).
+
+---
+
+## Summary Matrix
+
+| # | Suggestion | Priority | Evidence Strength | Architecture Impact |
+|---|-----------|----------|-------------------|---------------------|
+| 1 | Publish reproducible benchmarks | P0 | Strong (harness exists, no competitor has published) | Zero — run existing code |
+| 2 | Documentation site + community channel | P0 | Strong (31 features, zero discoverability surface) | None (separate deployment) |
+| 3 | Incremental graph persistence | P1 | Strong (Graphify full-rebuild is a known scaling bottleneck) | ~250 LOC in graph_engine + watcher + tests |
+| 4 | Mature first-generation modules | P1 | Strong (5 modules under 210 LOC, untested at scale) | ~500 LOC across 5 modules + tests |
+| 5 | Cross-project graph federation | P1 | Strong (category-defining — no competitor has it) | ~360 LOC new federation module + endpoint + dashboard |
+| 6 | Cloud/hosted offering decision | P2 | Strong (every competitor has one; deliberate choice needed) | ~50 LOC (Dockerfile) or zero (positioning only) |
+| 7 | MCP ecosystem positioning | P2 | Moderate (MCP server exists, needs more tools + messaging) | ~60 LOC in mcp_server.py |
+| 8 | LlamaIndex + CrewAI integrations | P3 | Moderate (proven pattern with langchain-loom) | 2 packages × ~200 LOC each |
+| 9 | Expanded plugin examples | P3 | Moderate (plugin system exists, needs more seeds) | ~250 LOC examples + optional CLI enhancement |
+
+---
+
+## Next Steps
+
+1. **Immediate (P0):** Run the benchmark harness against Cognee/Graphiti and publish results. Deploy a docs site. Open a community channel.
+2. **Next quarter (P1):** Incremental graph persistence, module maturity hardening, cross-project federation.
+3. **Strategic decision needed:** Cloud offering — make an explicit choice and document it.
+4. **Ongoing (P2-P3):** MCP ecosystem expansion, framework integrations, plugin ecosystem growth.
+5. Use `plan-inputs.md` as input to the `writing-plans` skill for full implementation planning.
