@@ -167,3 +167,81 @@ def test_graph_json_cache_handles_missing_file(tmp_path):
     clear_graph_cache()
     with pytest.raises(FileNotFoundError):
         GraphEngine._read_graph_json(tmp_path / "nonexistent.json")
+
+
+@pytest.mark.asyncio
+async def test_extract_only_passes_no_cluster(tmp_path, monkeypatch):
+    """extract_only runs ``graphify update <path> --no-cluster`` (clustering skipped)."""
+    engine = GraphEngine()
+    if not engine.available:
+        pytest.skip("graphify not installed")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+
+        class _Result:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr("daemon.graph_engine.subprocess.run", fake_run)
+    result = await engine.extract_only(str(tmp_path))
+
+    assert captured["cmd"][:2] == ["graphify", "update"], captured["cmd"]
+    assert captured["cmd"][2] == str(tmp_path)
+    assert "--no-cluster" in captured["cmd"], captured["cmd"]
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_cluster_only_runs_cluster_subcommand(tmp_path, monkeypatch):
+    """cluster_only runs ``graphify cluster-only <path> --no-viz``."""
+    engine = GraphEngine()
+    if not engine.available:
+        pytest.skip("graphify not installed")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+
+        class _Result:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr("daemon.graph_engine.subprocess.run", fake_run)
+    result = await engine.cluster_only(str(tmp_path))
+
+    assert captured["cmd"][:2] == ["graphify", "cluster-only"], captured["cmd"]
+    assert captured["cmd"][2] == str(tmp_path)
+    assert "--no-viz" in captured["cmd"], captured["cmd"]
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_build_reports_duration(tmp_path, monkeypatch):
+    """build_project populates BuildResult.duration_s with measured wall-time."""
+    engine = GraphEngine()
+    if not engine.available:
+        pytest.skip("graphify not installed")
+
+    def fake_run(cmd, *args, **kwargs):
+        time.sleep(0.02)
+
+        class _Result:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr("daemon.graph_engine.subprocess.run", fake_run)
+    result = await engine.build_project(str(tmp_path))
+
+    assert isinstance(result.duration_s, float)
+    assert result.duration_s >= 0.02
