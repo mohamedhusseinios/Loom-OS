@@ -188,3 +188,53 @@ async def test_finding_runs_extractor_pipeline_and_persists(tmp_path):
 
     rows = await store.load("proj-1")
     assert any(r["name"] == "AuthService" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_finding_delegates_to_coordinator(router_with_registry, monkeypatch):
+    """A finding that references code files calls coordinator.request_update."""
+    router, reg, engine, tmp_path = router_with_registry
+    await reg.upsert_project("test-proj", str(tmp_path / "repo"))
+
+    calls = []
+
+    async def fake_request_update(project, project_path):
+        calls.append((project, project_path))
+
+    monkeypatch.setattr(router.coordinator, "request_update", fake_request_update)
+
+    inbox = tmp_path / "inbox" / "test-proj"
+    inbox.mkdir(parents=True)
+    finding = inbox / "finding-x.md"
+    finding.write_text(
+        "---\nagent: a\nproject: test-proj\ntype: bug-report\nfiles: [daemon/x.py]\n---\nbody"
+    )
+
+    await router.handle_file("test-proj", str(finding))
+
+    assert calls == [("test-proj", str(tmp_path / "repo"))]
+
+
+@pytest.mark.asyncio
+async def test_register_seeds_the_cost_gate(router_with_registry, monkeypatch):
+    """The initial register-time build seeds the coordinator's cost gate."""
+    router, reg, engine, tmp_path = router_with_registry
+    from daemon.models import BuildResult
+
+    async def fake_build(path):
+        return BuildResult(project="p", status="completed", nodes=1, edges=1, duration_s=7.5)
+
+    async def noop(*a, **k):
+        return None
+
+    seeded = []
+    monkeypatch.setattr(engine, "build_project", fake_build)
+    monkeypatch.setattr(router, "_scan_and_share", noop)
+    monkeypatch.setattr(
+        router.coordinator, "record_full_build",
+        lambda project, dur: seeded.append((project, dur)),
+    )
+
+    await router._build_project("test-proj", str(tmp_path / "repo"))
+
+    assert seeded == [("test-proj", 7.5)]

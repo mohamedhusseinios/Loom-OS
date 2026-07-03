@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING
 
 from daemon.registry import AgentRegistry
 from daemon.graph_engine import GraphEngine
+from daemon.graph_update_coordinator import GraphUpdateCoordinator
 from daemon.models import (
     RegisterPayload, HeartbeatPayload, FindingFrontmatter,
     AgentInfo, AgentStatus, FindingType, WsEvent, TaskPayload,
-    AgentTaskCreatePayload, AgentTaskStatus,
+    AgentTaskCreatePayload, AgentTaskStatus, BuildResult,
 )
 
 if TYPE_CHECKING:
@@ -42,8 +43,8 @@ class Router:
         self.recall = recall
         self.extractor_pipeline = extractor_pipeline
         self.extracted_store = extracted_store
-        self._last_update: dict[str, float] = {}  # project -> timestamp
         self._event_queue: asyncio.Queue[WsEvent] = asyncio.Queue()
+        self.coordinator = GraphUpdateCoordinator(graph_engine, self._on_graph_updated)
 
     async def handle_file(self, project: str, filepath: str, user: str | None = None):
         """Route an inbox file to the correct handler."""
@@ -137,13 +138,12 @@ class Router:
         content = path.read_text()
         frontmatter = self._parse_frontmatter(content)
 
-        # If finding references code files, queue incremental update
-        if frontmatter.files and self._can_update(project):
+        # If the finding references code files, hand the update to the
+        # coordinator (cost-gated cluster deferral + overlap guard + throttle).
+        if frontmatter.files:
             project_info = await self.registry.get_project(project)
             if project_info:
-                asyncio.create_task(
-                    self._update_project(project, project_info.project_path, frontmatter)
-                )
+                await self.coordinator.request_update(project, project_info.project_path)
 
         await self._emit_event("finding:ingested", project, {
             "file": path.name,
@@ -221,14 +221,6 @@ class Router:
                 return FindingFrontmatter(**data)
         return FindingFrontmatter(agent="unknown", project="unknown")
 
-    def _can_update(self, project: str) -> bool:
-        now = datetime.now(timezone.utc).timestamp()
-        last = self._last_update.get(project, 0)
-        if now - last >= MIN_UPDATE_INTERVAL:
-            self._last_update[project] = now
-            return True
-        return False
-
     async def _build_project(self, project: str, project_path: str):
         result = await self.graph.build_project(project_path)
         # Persist stats so the dashboard's project list reflects the build.
@@ -240,6 +232,7 @@ class Router:
             await self.registry.update_graph_stats(
                 project, result.nodes, result.edges, communities
             )
+            self.coordinator.record_full_build(project, result.duration_s)
         await self._emit_event("graph:updated", project, {
             "nodes_added": result.nodes,
             "edges_added": result.edges,
@@ -275,8 +268,8 @@ class Router:
         # Regenerate the shared agent context so all agents see the latest.
         await self._regenerate_shared_context(project, project_path)
 
-    async def _update_project(self, project: str, project_path: str, finding: FindingFrontmatter):
-        result = await self.graph.update_project(project_path, finding.files)
+    async def _on_graph_updated(self, project: str, project_path: str, result: "BuildResult"):
+        """Callback for the coordinator: persist stats, emit event, refresh context."""
         communities = 0
         if result.status == "completed":
             stats = await self.graph.get_stats(project_path)
@@ -290,10 +283,7 @@ class Router:
             "communities": communities,
             "status": result.status,
             "error": result.error,
-            "agent": finding.agent,
         })
-
-        # Regenerate shared context so agents see the updated graph + findings.
         await self._regenerate_shared_context(project, project_path)
 
     async def _regenerate_shared_context(self, project: str, project_path: str):
