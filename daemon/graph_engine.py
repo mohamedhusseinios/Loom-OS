@@ -10,6 +10,7 @@ import math
 import subprocess
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from daemon.models import BuildResult, GraphStats, QueryResult
 from daemon.embeddings import EmbeddingGenerator
@@ -74,6 +75,11 @@ class GraphEngine:
         cmd = ["graphify", "update", project_path]
         if not cluster:
             cmd.append("--no-cluster")
+        # NB: the subcommand comes first — ``graphify update <path>``. The
+        # transposed form ``graphify <path> --update`` makes graphify run its
+        # default full extraction (docs/papers/images), which needs an LLM API
+        # key, exits non-zero, and leaves graph.json as the empty stub — so the
+        # dashboard reports "build complete" over an empty graph.
         try:
             subprocess.run(cmd, capture_output=True, timeout=300, check=True)
         except subprocess.CalledProcessError as e:
@@ -91,7 +97,7 @@ class GraphEngine:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(_decode_subprocess_error(e)) from e
 
-    async def _run_and_measure(self, project_path: str, runner) -> BuildResult:
+    async def _run_and_measure(self, project_path: str, runner: Callable[[str], None]) -> BuildResult:
         """Run a graphify step in a thread, measure wall-time, shape a BuildResult."""
         project_name = Path(project_path).name
         if not self.available:

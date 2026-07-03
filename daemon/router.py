@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Rate limiting: min seconds between graph updates per project
-MIN_UPDATE_INTERVAL = 30
-
 
 class Router:
     """Processes inbox events and dispatches to registry + graph engine."""

@@ -112,3 +112,7 @@ Two `graph:updated` emits per burst for deferred repos: the dashboard shows fres
 - Spike results: merge-based incremental is non-viable → memory `loom-feature3-incremental-spike`; earlier drop → `graphify-no-incremental-update`.
 - Roadmap: `docs/plans/2026-07-01-loom-next-moat-roadmap-implementation.md` (Feature #3, ❌ dropped — this is the pragmatic reinterpretation of its goal).
 - Touch points: `daemon/graph_engine.py` (`update_project`, `_run_graphify_build`, `build_project`), `daemon/router.py` (`_handle_finding`, `_can_update`, `_update_project`, `_build_project`), `daemon/models.py` (`BuildResult`).
+
+## Known limitation (follow-up)
+
+The "never two concurrent graphify subprocesses per project" invariant holds for **coordinator-mediated (finding-driven)** updates. The register-time initial full build (`_handle_register` → `_build_project`) runs **outside** the coordinator (pre-existing behavior), so a finding arriving during a large repo's initial build can still start a concurrent `graphify` build. Routing the register build through the coordinator — or setting an in-progress marker before launching it so an early finding coalesces — is a tracked follow-up, not addressed in this change.
