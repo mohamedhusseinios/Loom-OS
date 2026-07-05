@@ -35,17 +35,17 @@ Add two entries to `KNOWN_AGENTS` in `daemon/known_agents.py`:
 
 ### 2. Frontend: avatar and quick-pick polish
 
-`AgentCard` currently builds initials from `agent_name` (e.g. "Claude Code" → "CC"). To make Kimi Code and ZCode recognizable at a glance, add a small `AGENT_AVATAR` map keyed by canonical agent name:
+`AgentCard` currently builds initials from `agent_name` (e.g. "Claude Code" → "CC"). To make Kimi Code and ZCode recognizable at a glance, add a small `AGENT_INITIALS` map keyed by canonical agent name:
 
-| agent | initials | default avatar background |
-|---|---|---|
-| `claude-code` | CC | emerald |
-| `codex` | CX | blue |
-| `kimi-code` | KM | indigo |
-| `zcode` | ZC | violet |
-| fallback | first two letters | zinc |
+| agent | initials |
+|---|---|
+| `claude-code` | CC |
+| `codex` | CX |
+| `kimi-code` | KM |
+| `zcode` | ZC |
+| fallback | first two letters |
 
-`AgentCard` uses the map when the registered `agent_name` matches a known canonical name; otherwise it keeps the existing fallback.
+`AgentCard` uses the map for initials when the registered `agent_name` matches a known canonical name; otherwise it keeps the existing fallback. The avatar background/text colors remain driven by `agent.status` (online/working/offline) so status scanning is unchanged.
 
 `RegisterAgentModal` already renders quick-pick chips from `/api/agents/known`. Each chip is updated to show the agent `description` as a native `title` tooltip on hover, so users know what Kimi Code and ZCode are before selecting them.
 

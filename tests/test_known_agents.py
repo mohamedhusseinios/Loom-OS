@@ -61,6 +61,15 @@ def test_zcode_detected_in_user_applications_folder(monkeypatch):
     assert installed.get("zcode") == f"{home}/Applications/ZCode.app"
 
 
+def test_cursor_detected_via_app_bundle(monkeypatch):
+    monkeypatch.setattr(
+        "daemon.known_agents.Path",
+        _make_fake_path("/Applications/Cursor.app"),
+    )
+    installed = detect_installed()
+    assert installed.get("cursor") == "/Applications/Cursor.app"
+
+
 def test_kimi_code_not_detected_without_binary(monkeypatch):
     monkeypatch.setattr("daemon.known_agents.shutil.which", lambda _name: None)
     installed = detect_installed()

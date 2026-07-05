@@ -100,7 +100,7 @@ def _find_binary(name: str) -> str | None:
 
 
 def _detect_app_bundle(name: str) -> str | None:
-    """Detect an macOS .app bundle by name in /Applications or ~/Applications."""
+    """Detect a macOS .app bundle by name in /Applications or ~/Applications."""
     app_path = Path(f"/Applications/{name}.app")
     if app_path.exists():
         return str(app_path)

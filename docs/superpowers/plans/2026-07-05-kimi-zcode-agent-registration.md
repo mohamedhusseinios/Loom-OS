@@ -183,49 +183,44 @@ git commit -m "feat: add Kimi Code and ZCode to built-in agent catalog"
 **Files:**
 - Modify: `dashboard/components/agent-card.tsx`
 
-### Step 1: Add the avatar map
+### Step 1: Add the avatar initials map
 
 Inside `dashboard/components/agent-card.tsx`, after the imports and before the `AgentCard` component, add:
 
 ```typescript
-const AGENT_AVATAR: Record<
-  string,
-  { initials: string; bg: string; text: string }
-> = {
-  "claude-code": { initials: "CC", bg: "bg-emerald-900", text: "text-emerald-300" },
-  codex: { initials: "CX", bg: "bg-blue-900", text: "text-blue-300" },
-  "kimi-code": { initials: "KM", bg: "bg-indigo-900", text: "text-indigo-300" },
-  zcode: { initials: "ZC", bg: "bg-violet-900", text: "text-violet-300" },
+const AGENT_INITIALS: Record<string, string> = {
+  "claude-code": "CC",
+  codex: "CX",
+  "kimi-code": "KM",
+  zcode: "ZC",
 };
 ```
 
-### Step 2: Use the avatar map
+### Step 2: Use the initials map while keeping status colors
 
-Replace the existing `initials` and `avatarBg[agent.status]` logic in the component with:
+Replace the existing `initials` constant with a lookup that falls back to generated initials for unknown agents:
 
 ```typescript
-const avatar = AGENT_AVATAR[agent.agent_name] ?? {
-  initials: agent.agent_name
+const initials =
+  AGENT_INITIALS[agent.agent_name] ??
+  agent.agent_name
     .split("-")
     .map((w) => w[0]?.toUpperCase())
     .join("")
-    .slice(0, 2),
-  bg: avatarBg[agent.status].split(" ")[0], // keep the background half
-  text: avatarBg[agent.status].split(" ")[1], // keep the text half
-};
+    .slice(0, 2);
 ```
 
-Then update the avatar `div` className to:
+Keep the avatar `<div>` using the existing status-based classes:
 
 ```tsx
 <div
-  className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatar.bg} ${avatar.text}`}
+  className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatarBg[agent.status]}`}
 >
-  {avatar.initials}
+  {initials}
 </div>
 ```
 
-**Before/after context:** The old className used `${avatarBg[agent.status]}` and the old initials came from the local `initials` constant. Remove the now-unused `initials` constant.
+This preserves the existing online/working/offline color semantics while giving known agents consistent, recognizable initials.
 
 ### Step 3: Verify the dashboard builds
 
