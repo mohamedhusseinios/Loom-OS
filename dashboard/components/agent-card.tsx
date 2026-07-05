@@ -6,6 +6,16 @@ import { ChevronDown, ChevronUp, Trash2, Loader2 } from "lucide-react";
 import { timeAgo } from "@/lib/time-ago";
 import { unregisterAgent } from "@/lib/api";
 
+const AGENT_AVATAR: Record<
+  string,
+  { initials: string; bg: string; text: string }
+> = {
+  "claude-code": { initials: "CC", bg: "bg-emerald-900", text: "text-emerald-300" },
+  codex: { initials: "CX", bg: "bg-blue-900", text: "text-blue-300" },
+  "kimi-code": { initials: "KM", bg: "bg-indigo-900", text: "text-indigo-300" },
+  zcode: { initials: "ZC", bg: "bg-violet-900", text: "text-violet-300" },
+};
+
 interface AgentCardProps {
   agent: {
     agent_id: string;
@@ -30,12 +40,6 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
   const [deleting, setDeleting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const initials = agent.agent_name
-    .split("-")
-    .map((w) => w[0]?.toUpperCase())
-    .join("")
-    .slice(0, 2);
-
   const statusBorder = {
     online: "border-emerald-700 bg-emerald-900/20",
     working: "border-amber-700 bg-amber-900/20",
@@ -52,6 +56,16 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
     online: "bg-emerald-900 text-emerald-300",
     working: "bg-amber-900 text-amber-300",
     offline: "bg-zinc-800 text-zinc-500",
+  };
+
+  const avatar = AGENT_AVATAR[agent.agent_name] ?? {
+    initials: agent.agent_name
+      .split("-")
+      .map((w) => w[0]?.toUpperCase())
+      .join("")
+      .slice(0, 2),
+    bg: avatarBg[agent.status].split(" ")[0],
+    text: avatarBg[agent.status].split(" ")[1],
   };
 
   const registered = timeAgo(agent.last_heartbeat, tTime);
@@ -78,9 +92,9 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
         onClick={() => setExpanded(!expanded)}
       >
         <div
-          className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatarBg[agent.status]}`}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatar.bg} ${avatar.text}`}
         >
-          {initials}
+          {avatar.initials}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
