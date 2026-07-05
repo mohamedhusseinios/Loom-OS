@@ -6,14 +6,11 @@ import { ChevronDown, ChevronUp, Trash2, Loader2 } from "lucide-react";
 import { timeAgo } from "@/lib/time-ago";
 import { unregisterAgent } from "@/lib/api";
 
-const AGENT_AVATAR: Record<
-  string,
-  { initials: string; bg: string; text: string }
-> = {
-  "claude-code": { initials: "CC", bg: "bg-emerald-900", text: "text-emerald-300" },
-  codex: { initials: "CX", bg: "bg-blue-900", text: "text-blue-300" },
-  "kimi-code": { initials: "KM", bg: "bg-indigo-900", text: "text-indigo-300" },
-  zcode: { initials: "ZC", bg: "bg-violet-900", text: "text-violet-300" },
+const AGENT_INITIALS: Record<string, string> = {
+  "claude-code": "CC",
+  codex: "CX",
+  "kimi-code": "KM",
+  zcode: "ZC",
 };
 
 interface AgentCardProps {
@@ -58,15 +55,13 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
     offline: "bg-zinc-800 text-zinc-500",
   };
 
-  const avatar = AGENT_AVATAR[agent.agent_name] ?? {
-    initials: agent.agent_name
+  const initials =
+    AGENT_INITIALS[agent.agent_name] ??
+    agent.agent_name
       .split("-")
       .map((w) => w[0]?.toUpperCase())
       .join("")
-      .slice(0, 2),
-    bg: avatarBg[agent.status].split(" ")[0],
-    text: avatarBg[agent.status].split(" ")[1],
-  };
+      .slice(0, 2);
 
   const registered = timeAgo(agent.last_heartbeat, tTime);
 
@@ -92,9 +87,9 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
         onClick={() => setExpanded(!expanded)}
       >
         <div
-          className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatar.bg} ${avatar.text}`}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm ${avatarBg[agent.status]}`}
         >
-          {avatar.initials}
+          {initials}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
