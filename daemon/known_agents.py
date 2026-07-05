@@ -74,6 +74,22 @@ KNOWN_AGENTS = [
         "default_version": "1.0",
         "default_capabilities": ["code-analysis", "editing"],
     },
+    {
+        "name": "kimi-code",
+        "display": "Kimi Code",
+        "detect_cmd": "kimi",
+        "description": "Moonshot AI's Kimi Code CLI agent",
+        "default_version": "1.0",
+        "default_capabilities": ["code-analysis", "generation", "refactoring"],
+    },
+    {
+        "name": "zcode",
+        "display": "ZCode",
+        "detect_cmd": None,
+        "description": "Zhipu AI's ZCode agentic development environment",
+        "default_version": "1.0",
+        "default_capabilities": ["code-analysis", "generation", "long-context", "review"],
+    },
 ]
 
 
@@ -95,6 +111,17 @@ def _detect_cursor() -> str | None:
     return None
 
 
+def _detect_zcode() -> str | None:
+    """Detect ZCode via its macOS app bundle."""
+    zcode_app = Path("/Applications/ZCode.app")
+    if zcode_app.exists():
+        return str(zcode_app)
+    user_zcode = Path.home() / "Applications" / "ZCode.app"
+    if user_zcode.exists():
+        return str(user_zcode)
+    return None
+
+
 def detect_installed() -> dict[str, str]:
     """Return a dict of {canonical_name: detected_path} for installed agents.
 
@@ -111,6 +138,10 @@ def detect_installed() -> dict[str, str]:
             # Special-case detection handlers
             if agent["name"] == "cursor":
                 path = _detect_cursor()
+                if path:
+                    installed[agent["name"]] = path
+            elif agent["name"] == "zcode":
+                path = _detect_zcode()
                 if path:
                     installed[agent["name"]] = path
     return installed
