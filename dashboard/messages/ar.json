@@ -194,7 +194,7 @@
   "RegisterAgentModal": {
     "heading": "تسجيل وكيل",
     "agentName": "اسم الوكيل",
-    "agentNamePlaceholder": "مثال: claude-code, codex",
+    "agentNamePlaceholder": "مثال: claude-code, codex, kimi-code, zcode",
     "projectPath": "مسار المشروع",
     "pathPlaceholder": "/المسار/المطلق/للمشروع",
     "version": "الإصدار",

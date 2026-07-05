@@ -194,7 +194,7 @@
   "RegisterAgentModal": {
     "heading": "Register Agent",
     "agentName": "Agent Name",
-    "agentNamePlaceholder": "e.g. claude-code, codex",
+    "agentNamePlaceholder": "e.g. claude-code, codex, kimi-code, zcode",
     "projectPath": "Project Path",
     "pathPlaceholder": "/absolute/path/to/project",
     "version": "Version",
