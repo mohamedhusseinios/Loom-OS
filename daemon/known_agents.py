@@ -74,6 +74,22 @@ KNOWN_AGENTS = [
         "default_version": "1.0",
         "default_capabilities": ["code-analysis", "editing"],
     },
+    {
+        "name": "kimi-code",
+        "display": "Kimi Code",
+        "detect_cmd": "kimi",
+        "description": "Moonshot AI's Kimi Code CLI agent",
+        "default_version": "1.0",
+        "default_capabilities": ["code-analysis", "generation", "refactoring"],
+    },
+    {
+        "name": "zcode",
+        "display": "ZCode",
+        "detect_cmd": None,
+        "description": "Zhipu AI's ZCode agentic development environment",
+        "default_version": "1.0",
+        "default_capabilities": ["code-analysis", "generation", "long-context", "review"],
+    },
 ]
 
 
@@ -83,16 +99,25 @@ def _find_binary(name: str) -> str | None:
     return found
 
 
+def _detect_app_bundle(name: str) -> str | None:
+    """Detect a macOS .app bundle by name in /Applications or ~/Applications."""
+    app_path = Path(f"/Applications/{name}.app")
+    if app_path.exists():
+        return str(app_path)
+    user_app = Path.home() / "Applications" / f"{name}.app"
+    if user_app.exists():
+        return str(user_app)
+    return None
+
+
 def _detect_cursor() -> str | None:
     """Detect Cursor editor via its macOS app bundle."""
-    cursor_app = Path("/Applications/Cursor.app")
-    if cursor_app.exists():
-        return str(cursor_app)
-    # Also check user Applications
-    user_cursor = Path.home() / "Applications" / "Cursor.app"
-    if user_cursor.exists():
-        return str(user_cursor)
-    return None
+    return _detect_app_bundle("Cursor")
+
+
+def _detect_zcode() -> str | None:
+    """Detect ZCode via its macOS app bundle."""
+    return _detect_app_bundle("ZCode")
 
 
 def detect_installed() -> dict[str, str]:
@@ -111,6 +136,10 @@ def detect_installed() -> dict[str, str]:
             # Special-case detection handlers
             if agent["name"] == "cursor":
                 path = _detect_cursor()
+                if path:
+                    installed[agent["name"]] = path
+            elif agent["name"] == "zcode":
+                path = _detect_zcode()
                 if path:
                     installed[agent["name"]] = path
     return installed

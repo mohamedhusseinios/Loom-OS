@@ -6,6 +6,13 @@ import { ChevronDown, ChevronUp, Trash2, Loader2 } from "lucide-react";
 import { timeAgo } from "@/lib/time-ago";
 import { unregisterAgent } from "@/lib/api";
 
+const AGENT_INITIALS: Record<string, string> = {
+  "claude-code": "CC",
+  codex: "CX",
+  "kimi-code": "KM",
+  zcode: "ZC",
+};
+
 interface AgentCardProps {
   agent: {
     agent_id: string;
@@ -30,12 +37,6 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
   const [deleting, setDeleting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const initials = agent.agent_name
-    .split("-")
-    .map((w) => w[0]?.toUpperCase())
-    .join("")
-    .slice(0, 2);
-
   const statusBorder = {
     online: "border-emerald-700 bg-emerald-900/20",
     working: "border-amber-700 bg-amber-900/20",
@@ -53,6 +54,14 @@ export function AgentCard({ agent, projectId, onRemoved }: AgentCardProps) {
     working: "bg-amber-900 text-amber-300",
     offline: "bg-zinc-800 text-zinc-500",
   };
+
+  const initials =
+    AGENT_INITIALS[agent.agent_name] ??
+    agent.agent_name
+      .split("-")
+      .map((w) => w[0]?.toUpperCase())
+      .join("")
+      .slice(0, 2);
 
   const registered = timeAgo(agent.last_heartbeat, tTime);
 

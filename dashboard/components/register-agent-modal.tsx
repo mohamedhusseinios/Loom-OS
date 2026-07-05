@@ -118,6 +118,7 @@ export function RegisterAgentModal({
                 <button
                   key={ka.name}
                   type="button"
+                  title={ka.description}
                   onClick={() => selectKnownAgent(ka)}
                   className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
                     agent === ka.name
@@ -142,6 +143,7 @@ export function RegisterAgentModal({
                 <button
                   key={ka.name}
                   type="button"
+                  title={ka.description}
                   onClick={() => selectKnownAgent(ka)}
                   className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors opacity-60 hover:opacity-100 ${
                     agent === ka.name

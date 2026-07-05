@@ -9,4 +9,5 @@ graphify-out/
 dist/
 *.egg-info/
 .superpowers/
+.worktrees/
 site/
