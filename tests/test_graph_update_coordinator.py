@@ -199,3 +199,36 @@ async def test_deferred_interval_accounting_after_cluster():
     assert engine.calls == ["extract", "cluster"]
     assert coord._state["p"].last_extract_s == 2.0
     assert coord._state["p"].last_full_build_s == 5.0  # 2.0 extract + 3.0 cluster
+
+
+@pytest.mark.asyncio
+async def test_initial_build_blocks_concurrent_finding_update():
+    """While request_initial_build is in flight, a finding request_update coalesces into dirty."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    class SlowGraph:
+        available = True
+        async def build_project(self, path):
+            calls.append(("build", path))
+            started.set()
+            await release.wait()
+            return BuildResult(project="p", status="completed", nodes=10, edges=20, duration_s=1.0)
+
+    updated = []
+    async def on_updated(proj, path, res):
+        updated.append((proj, res.nodes))
+
+    coord = GraphUpdateCoordinator(SlowGraph(), on_updated, min_interval_s=0.01)
+    coord.request_initial_build("p", "/repo")
+    await started.wait()
+
+    # Finding arrives while initial build is running -> must NOT launch 2nd build right now
+    await coord.request_update("p", "/repo")
+    assert len(calls) == 1
+
+    release.set()
+    await asyncio.sleep(0.05)
+    assert len(calls) == 2  # trailing rebuild ran after initial build completed
+

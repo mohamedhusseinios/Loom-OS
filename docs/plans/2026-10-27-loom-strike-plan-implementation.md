@@ -218,7 +218,7 @@ Flagged in `CONTEXT.md` (`NEW-1 follow-up`): `Router._handle_register` spawns `a
 - Modify: `daemon/router.py`
 - Test: `tests/test_graph_update_coordinator.py`, `tests/test_router.py`
 
-- [ ] **Step 1: Write failing test for register + immediate finding overlap**
+- [x] **Step 1: Write failing test for register + immediate finding overlap**
 
 Add to `tests/test_graph_update_coordinator.py`:
 ```python
@@ -254,24 +254,24 @@ async def test_initial_build_blocks_concurrent_finding_update():
     assert len(calls) == 2  # trailing rebuild ran after initial build completed
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_graph_update_coordinator.py -k "initial_build_blocks" -v`
 Expected: FAIL (`AttributeError: 'GraphUpdateCoordinator' object has no attribute 'request_initial_build'`)
 
-- [ ] **Step 3: Add `request_initial_build` to `GraphUpdateCoordinator` and wire `Router._handle_register`**
+- [x] **Step 3: Add `request_initial_build` to `GraphUpdateCoordinator` and wire `Router._handle_register`**
 
 In `daemon/graph_update_coordinator.py`:
 - Add `request_initial_build(self, project: str, project_path: str) -> None` (or `async def`) that marks `st.in_progress = True`, runs `self.graph.build_project(project_path)`, records `st.last_full_build_s`, invokes `self.on_updated`, and if `st.dirty` was set during the initial build, arms the follow-up.
 - In `daemon/router.py`:
   - Update `_handle_register` and `_build_project` so initial builds go through `self.coordinator` (and still run `self._scan_and_share(project, payload.project_path)` upon completion).
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 Run: `.venv/bin/python -m pytest tests/test_graph_update_coordinator.py tests/test_router.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add daemon/graph_update_coordinator.py daemon/router.py tests/test_graph_update_coordinator.py tests/test_router.py

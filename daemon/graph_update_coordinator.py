@@ -67,6 +67,31 @@ class GraphUpdateCoordinator:
         """Seed the cost gate from an out-of-band full build (e.g. register)."""
         self._state.setdefault(project, _ProjectState()).last_full_build_s = duration_s
 
+    def request_initial_build(self, project: str, project_path: str) -> asyncio.Task:
+        """Entry point for initial project registration build."""
+        st = self._state.setdefault(project, _ProjectState())
+        if st.in_progress:
+            st.dirty = True
+            return asyncio.create_task(asyncio.sleep(0))
+        st.in_progress = True
+        st.dirty = False
+        st.last_run_ts = time.monotonic()
+        return asyncio.create_task(self._run_initial(project, project_path))
+
+    async def _run_initial(self, project: str, project_path: str) -> None:
+        st = self._state[project]
+        try:
+            result = await self.graph.build_project(project_path)
+            if result.status == "completed":
+                self.record_full_build(project, result.duration_s)
+            await self.on_updated(project, project_path, result)
+        except Exception as exc:
+            logger.warning("initial graph build failed for %s: %s", project, exc)
+        finally:
+            st.in_progress = False
+        if st.dirty:
+            self._start_run(project, project_path, st, time.monotonic())
+
     def _interval(self, st: _ProjectState) -> float:
         return min(self.max_interval_s, max(self.min_interval_s, st.last_full_build_s))
 
