@@ -992,3 +992,15 @@ def test_token_auth_middleware_blocks_writes_when_token_configured(client, tmp_p
         configure_auth_token(None)
 
 
+def test_cors_allows_localhost_and_127_0_0_1(client):
+    """CORS middleware must allow both localhost:3000 and 127.0.0.1:3000."""
+    headers_lh = {"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"}
+    resp_lh = client.options("/api/projects", headers=headers_lh)
+    assert resp_lh.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+    headers_ip = {"Origin": "http://127.0.0.1:3000", "Access-Control-Request-Method": "GET"}
+    resp_ip = client.options("/api/projects", headers=headers_ip)
+    assert resp_ip.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+
+
+
