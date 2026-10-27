@@ -28,11 +28,20 @@ interface WebSocketContextValue {
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
-// Pinned to 127.0.0.1 (not "localhost") on purpose: the daemon binds IPv4 only
-// (`--host 127.0.0.1`). On dual-stack machines "localhost" can resolve to ::1
-// first, and some browsers don't fall back to IPv4 for a WebSocket the way they
-// do for fetch() — so the socket would silently fail while REST still worked.
-const WS_URL = "ws://127.0.0.1:8472/ws";
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  if (typeof window !== "undefined") {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host =
+      window.location.hostname === "localhost"
+        ? "127.0.0.1"
+        : window.location.hostname;
+    return `${proto}//${host}:8472/ws`;
+  }
+  return "ws://127.0.0.1:8472/ws";
+}
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [lastEvent, setLastEvent] = useState<WsEvent | null>(null);
@@ -53,7 +62,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     let unmounted = false;
 
     const connect = () => {
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(getWsUrl());
 
       ws.onopen = () => {
         attempts = 0;

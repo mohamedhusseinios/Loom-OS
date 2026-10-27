@@ -1,4 +1,8 @@
-const BASE_URL = "http://localhost:8472";
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:8472`
+    : "http://localhost:8472");
 
 export interface ProjectSummary {
   project: {
