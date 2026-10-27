@@ -24,6 +24,7 @@ from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
     AgentTaskStatus, TaskProgressPayload,
 )
+from daemon.auth import TokenAuthMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Loom", version="0.1.0", lifespan=lifespan)
 
+app.add_middleware(TokenAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],

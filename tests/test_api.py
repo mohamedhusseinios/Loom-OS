@@ -964,3 +964,31 @@ def test_federated_references_success(client):
     assert body["symbol"] == "login"
     assert isinstance(body["references"], list)
 
+
+def test_token_auth_middleware_blocks_writes_when_token_configured(client, tmp_path):
+    """TokenAuthMiddleware must reject write methods with 401 when auth is configured."""
+    from daemon.auth import configure_auth_token
+    proj_dir = tmp_path / "valid_proj"
+    proj_dir.mkdir()
+    configure_auth_token("secret-token")
+    try:
+        # GET is allowed without auth
+        get_resp = client.get("/api/projects")
+        assert get_resp.status_code == 200
+
+        # POST without token is rejected with 401
+        post_resp = client.post("/api/projects", json={"name": "newproj", "path": str(proj_dir)})
+        assert post_resp.status_code == 401
+        assert post_resp.json()["detail"] == "Invalid or missing auth token"
+
+        # POST with correct token passes auth middleware
+        authed_resp = client.post(
+            "/api/projects",
+            json={"name": "newproj", "path": str(proj_dir)},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert authed_resp.status_code in (200, 201)
+    finally:
+        configure_auth_token(None)
+
+
