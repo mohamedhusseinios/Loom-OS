@@ -31,6 +31,7 @@ class AgentRegistry:
         os.makedirs(os.path.dirname(expanded), exist_ok=True)
         self.db = await aiosqlite.connect(expanded)
         self.db.row_factory = aiosqlite.Row
+        await self.db.execute("PRAGMA journal_mode=WAL")
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 agent_id TEXT PRIMARY KEY,

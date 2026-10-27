@@ -14,6 +14,14 @@ async def registry(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_registry_enables_wal_mode(registry):
+    cursor = await registry.db.execute("PRAGMA journal_mode")
+    row = await cursor.fetchone()
+    assert row[0].lower() == "wal"
+
+
+
+@pytest.mark.asyncio
 async def test_register_agent(registry):
     agent = AgentInfo(
         agent_id="claude-code-noor",
