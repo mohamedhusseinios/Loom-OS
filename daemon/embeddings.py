@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 # all-MiniLM-L6-v2 output dimension
 _DEFAULT_DIM = 384
 
+_MODEL_CACHE: dict[str, object] = {}
+
+
+def clear_model_cache():
+    """Clear the process-wide model cache. For testing."""
+    _MODEL_CACHE.clear()
+
+
+def _instantiate_sentence_transformer(model_name: str):
+    """Instantiate a SentenceTransformer model, trying local files first."""
+    from sentence_transformers import SentenceTransformer
+
+    try:
+        return SentenceTransformer(model_name, local_files_only=True)
+    except Exception:
+        return SentenceTransformer(model_name)
+
 
 class EmbeddingGenerator:
     """Generate text embedding vectors.
@@ -54,6 +71,8 @@ class EmbeddingGenerator:
         More efficient than calling embed() N times — the model encodes
         all texts in a single forward pass.
         """
+        if not texts:
+            return []
         if self._model is None:
             self._model = self._load_model()
         if self._model is None:
@@ -63,15 +82,19 @@ class EmbeddingGenerator:
 
     def _load_model(self):
         """Try to load the sentence-transformer model; return None on failure."""
-        try:
-            from sentence_transformers import SentenceTransformer
+        if self.model_name in _MODEL_CACHE:
+            return _MODEL_CACHE[self.model_name]
 
-            model = SentenceTransformer(self.model_name)
+        try:
+            model = _instantiate_sentence_transformer(self.model_name)
+            dim_fn = getattr(model, 'get_sentence_embedding_dimension', None)
+            dim = dim_fn() if dim_fn else getattr(model, 'get_embedding_dimension', lambda: _DEFAULT_DIM)()
             logger.info(
                 "EmbeddingGenerator: loaded model %s (dim=%d)",
                 self.model_name,
-                getattr(model, 'get_sentence_embedding_dimension', lambda: model.get_embedding_dimension())(),
+                dim,
             )
+            _MODEL_CACHE[self.model_name] = model
             return model
         except Exception as exc:
             logger.warning(

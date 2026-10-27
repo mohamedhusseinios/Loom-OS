@@ -89,3 +89,33 @@ async def test_embed_batch_empty_list():
     gen = EmbeddingGenerator()
     results = await gen.embed_batch([])
     assert results == []
+
+
+def test_embedding_generator_reuses_cached_model_across_instances(monkeypatch):
+    """Two EmbeddingGenerator instances with the same model_name share the loaded model."""
+    from daemon import embeddings as emb_mod
+    emb_mod.clear_model_cache()
+    calls = []
+
+    class FakeModel:
+        def get_sentence_embedding_dimension(self):
+            return 384
+        def encode(self, x):
+            import numpy as np
+            if isinstance(x, list):
+                return np.ones((len(x), 384), dtype=np.float32)
+            return np.ones(384, dtype=np.float32)
+
+    def fake_loader(model_name):
+        calls.append(model_name)
+        return FakeModel()
+
+    monkeypatch.setattr(emb_mod, "_instantiate_sentence_transformer", fake_loader)
+    g1 = EmbeddingGenerator("all-MiniLM-L6-v2")
+    g2 = EmbeddingGenerator("all-MiniLM-L6-v2")
+    import asyncio
+    asyncio.run(g1.embed("one"))
+    asyncio.run(g2.embed("two"))
+    assert calls == ["all-MiniLM-L6-v2"]  # loaded once, reused by g2
+    emb_mod.clear_model_cache()
+

@@ -245,3 +245,34 @@ async def test_build_reports_duration(tmp_path, monkeypatch):
 
     assert isinstance(result.duration_s, float)
     assert result.duration_s >= 0.02
+
+
+@pytest.mark.asyncio
+async def test_hybrid_query_caches_node_embeddings_by_mtime(tmp_path, monkeypatch):
+    """Second hybrid_query on an unchanged graph.json does not call embed_batch again."""
+    from daemon.graph_engine import GraphEngine, clear_graph_cache
+    from daemon.embeddings import EmbeddingGenerator
+
+    clear_graph_cache()
+    gdir = tmp_path / "graphify-out"
+    gdir.mkdir()
+    (gdir / "graph.json").write_text(json.dumps({
+        "nodes": [{"id": "auth.login", "kind": "function"}, {"id": "db.connect", "kind": "function"}],
+        "links": [{"source": "auth.login", "target": "db.connect", "relation": "calls"}],
+    }))
+
+    batch_calls = []
+    async def fake_embed(self, text):
+        return [1.0] * 384
+    async def fake_embed_batch(self, texts):
+        batch_calls.append(list(texts))
+        return [[1.0] * 384 for _ in texts]
+
+    monkeypatch.setattr(EmbeddingGenerator, "embed", fake_embed)
+    monkeypatch.setattr(EmbeddingGenerator, "embed_batch", fake_embed_batch)
+
+    engine = GraphEngine()
+    await engine.hybrid_query(str(tmp_path), "proj", "authentication")
+    await engine.hybrid_query(str(tmp_path), "proj", "database")
+    assert len(batch_calls) == 1  # cached on second query!
+

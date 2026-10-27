@@ -17,11 +17,13 @@ from daemon.embeddings import EmbeddingGenerator
 from daemon.extracted_store import ExtractedEdgeStore
 
 _graph_cache: dict[str, tuple[float, dict]] = {}  # path -> (mtime, data)
+_node_vec_cache: dict[str, tuple[float, dict[str, list[float]]]] = {}  # path -> (mtime, vec_by_id)
 
 
 def clear_graph_cache():
     """Clear the graph.json cache. For testing."""
     _graph_cache.clear()
+    _node_vec_cache.clear()
 
 
 def _decode_subprocess_error(e: subprocess.CalledProcessError) -> str:
@@ -325,9 +327,15 @@ class GraphEngine:
         q_vec = await gen.embed(question)
         # Batch-embed all node ids ONCE and cache — avoids the O(nodes) per-query
         # embed() calls that made hybrid_query O(nodes x queries) unbatched.
-        node_keys = list(nodes)                       # preserve current iteration order
-        node_vecs = await gen.embed_batch([str(k) for k in node_keys])
-        vec_by_id = {k: v for k, v in zip(node_keys, node_vecs)}
+        mtime = graph_path.stat().st_mtime
+        cached_vecs = _node_vec_cache.get(str(graph_path))
+        if cached_vecs and cached_vecs[0] == mtime:
+            vec_by_id = cached_vecs[1]
+        else:
+            node_keys = list(nodes)
+            node_vecs = await gen.embed_batch([str(k) for k in node_keys])
+            vec_by_id = {k: v for k, v in zip(node_keys, node_vecs)}
+            _node_vec_cache[str(graph_path)] = (mtime, vec_by_id)
 
         # Seed: cosine similarity of question vs each node id/label.
         seeds: list[tuple[str, float]] = []

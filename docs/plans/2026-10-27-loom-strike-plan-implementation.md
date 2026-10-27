@@ -92,7 +92,7 @@ git commit -m "fix(packaging): declare numpy in base dependencies"
 - Test: `tests/test_embeddings.py`, `tests/test_graph_engine.py`
 - Regenerate: `benchmarks/loom.json`, `BENCHMARKS.md`
 
-- [ ] **Step 1: Write failing tests for model singleton, offline fallback, and node-vector caching**
+- [x] **Step 1: Write failing tests for model singleton, offline fallback, and node-vector caching**
 
 Add to `tests/test_embeddings.py`:
 ```python
@@ -157,12 +157,12 @@ async def test_hybrid_query_caches_node_embeddings_by_mtime(tmp_path, monkeypatc
     assert len(batch_calls) == 1  # cached on second query!
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_embeddings.py tests/test_graph_engine.py -k "reuses_cached_model or caches_node_embeddings" -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement process-wide model cache + local-first load in `daemon/embeddings.py`**
+- [x] **Step 3: Implement process-wide model cache + local-first load in `daemon/embeddings.py`**
 
 In `daemon/embeddings.py`:
 1. Add a module-level `_MODEL_CACHE: dict[str, object] = {}` (caching only successfully loaded models, or caching by `model_name`, with `clear_model_cache()` helper).
@@ -172,7 +172,7 @@ In `daemon/embeddings.py`:
 3. In `_load_model(self)`, check `_MODEL_CACHE.get(self.model_name)` before calling `_instantiate_sentence_transformer(self.model_name)`.
 4. Handle empty list in `embed_batch([])` early (`if not texts: return []`) before loading the model.
 
-- [ ] **Step 4: Implement mtime-keyed node-vector cache in `daemon/graph_engine.py`**
+- [x] **Step 4: Implement mtime-keyed node-vector cache in `daemon/graph_engine.py`**
 
 In `daemon/graph_engine.py`:
 1. Add `_node_vec_cache: dict[str, tuple[float, dict[str, list[float]]]] = {}` alongside `_graph_cache`, and clear both in `clear_graph_cache()`.
@@ -189,7 +189,7 @@ In `daemon/graph_engine.py`:
        _node_vec_cache[str(graph_path)] = (mtime, vec_by_id)
    ```
 
-- [ ] **Step 5: Run full test suite & regenerate benchmarks**
+- [x] **Step 5: Run full test suite & regenerate benchmarks**
 
 Run:
 ```bash
@@ -199,7 +199,7 @@ Run:
 ```
 Expected: All 282+ tests PASS (even offline); `BENCHMARKS.md` `Avg query latency` drops from `5489.3ms` to dramatically lower latency.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add daemon/embeddings.py daemon/graph_engine.py tests/test_embeddings.py tests/test_graph_engine.py benchmarks/loom.json BENCHMARKS.md

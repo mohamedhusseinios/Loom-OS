@@ -14,6 +14,6 @@
 
 | System | Repo @ | Build time | Nodes | Edges | Avg query latency |
 |--------|--------|-----------|-------|-------|-------------------|
-| loom-os | da535c2 | 1.15s | 2,469 | 3,671 | 5489.3ms |
+| loom-os | adea317 | 0.0s | 3,382 | 4,680 | 2179.0ms |
 | cognee | — | not measured | not measured | not measured | not measured |
 | graphiti | — | not measured | not measured | not measured | not measured |
