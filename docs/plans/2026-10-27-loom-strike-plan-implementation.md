@@ -376,7 +376,7 @@ Next substantive roadmap milestone (`docs/plans/2026-07-01-loom-next-moat-roadma
 - Modify: `daemon/mcp_server.py`
 - Test: `tests/test_federation.py` (create), `tests/test_api.py` (extend)
 
-- [ ] **Step 1: Write failing tests in `tests/test_federation.py`**
+- [x] **Step 1: Write failing tests in `tests/test_federation.py`**
 
 Create `tests/test_federation.py`:
 ```python
@@ -421,12 +421,12 @@ async def test_federated_index_queries_across_multiple_projects(tmp_path):
     assert {r["project"] for r in q_res} == {"auth-service", "billing-service"}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_federation.py -v`
 Expected: FAIL (`ModuleNotFoundError: No module named 'daemon.federation'`)
 
-- [ ] **Step 3: Implement `daemon/federation.py`**
+- [x] **Step 3: Implement `daemon/federation.py`**
 
 Create `daemon/federation.py` (~130 LOC):
 - `FederatedIndex`:
@@ -436,7 +436,7 @@ Create `daemon/federation.py` (~130 LOC):
   - `async def shared_symbols(self, min_projects: int = 2, limit: int = 50) -> list[dict]`: returns symbols (`label` / function / class names) that appear across `>= min_projects` repositories, sorted by project count and total degree.
   - `async def query(self, question: str, depth: int = 2, top_k: int = 10) -> list[dict]`: combines keyword/symbol score + `GraphEngine.hybrid_query` across indexed projects and tags each result with `"project": project_id`.
 
-- [ ] **Step 4: Wire FastAPI endpoints in `daemon/api.py` and MCP tool in `daemon/mcp_server.py`**
+- [x] **Step 4: Wire FastAPI endpoints in `daemon/api.py` and MCP tool in `daemon/mcp_server.py`**
 
 In `daemon/api.py`:
 - Add module global `federation_index: Optional[FederatedIndex] = None`.
@@ -447,12 +447,12 @@ In `daemon/api.py`:
 - Add API tests in `tests/test_api.py` verifying 400 on missing `q`/`symbol` and 200 with multi-project results.
 - Add `@mcp.tool(name="federated_search")` in `daemon/mcp_server.py`.
 
-- [ ] **Step 5: Run tests to verify pass**
+- [x] **Step 5: Run tests to verify pass**
 
 Run: `.venv/bin/python -m pytest tests/test_federation.py tests/test_api.py tests/test_mcp.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add daemon/federation.py daemon/api.py daemon/mcp_server.py tests/test_federation.py tests/test_api.py

@@ -39,6 +39,7 @@ audit_trail: Optional = None     # AuditTrail (lazy)
 temporal_tracker: Optional = None  # TemporalTracker
 doc_ingestor: Optional = None      # DocumentIngestor
 eval_engine: Optional = None  # EvalEngine (lazy import)
+federation_index: Optional = None  # FederatedIndex (lazy import)
 connected_clients: list[WebSocket] = []
 
 WORKER_MAX_BUDGET_USD = 5.0
@@ -1133,6 +1134,52 @@ async def ingest_directory(project_id: str, payload: dict):
         agent_id=payload.get("agent_id", "ingestor"),
     )
     return {"results": results}
+
+
+# --- Cross-Project Federation (Feature #5) ---
+
+async def _get_federated_index():
+    global federation_index
+    if federation_index is None:
+        from daemon.federation import FederatedIndex
+        federation_index = FederatedIndex()
+    if registry is not None:
+        projs = await registry.list_projects()
+        await federation_index.build_index(projs)
+    return federation_index
+
+
+@app.get("/api/federated/stats")
+async def get_federated_stats():
+    """Return org-wide federated index statistics and top shared symbols."""
+    idx = await _get_federated_index()
+    summary = dict(idx._stats)
+    shared = await idx.shared_symbols(min_projects=2, limit=25)
+    return {
+        **summary,
+        "stats": summary,
+        "shared_symbols": shared,
+    }
+
+
+@app.get("/api/federated/query")
+async def query_federated(q: str = "", depth: int = 2, top_k: int = 10):
+    """Query across all indexed projects."""
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    idx = await _get_federated_index()
+    results = await idx.query(q.strip(), depth=depth, top_k=top_k)
+    return {"query": q, "results": results}
+
+
+@app.get("/api/federated/references")
+async def get_federated_references(symbol: str = ""):
+    """Find occurrences of a symbol across all indexed projects."""
+    if not symbol or not symbol.strip():
+        raise HTTPException(status_code=400, detail="Parameter 'symbol' is required")
+    idx = await _get_federated_index()
+    refs = await idx.cross_project_references(symbol.strip())
+    return {"symbol": symbol, "references": refs}
 
 
 @app.websocket("/ws")

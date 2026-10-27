@@ -922,3 +922,45 @@ def test_agents_list_includes_structured_capabilities(client):
     agents = resp.json()["agents"]
     assert len(agents) > 0
     assert "structured_capabilities" in agents[0]
+
+
+def test_federated_stats_endpoint(client):
+    """GET /api/federated/stats returns index statistics and shared symbols."""
+    resp = client.get("/api/federated/stats")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "projects_indexed" in body
+    assert "shared_symbols" in body
+
+
+def test_federated_query_missing_q_raises_400(client):
+    """GET /api/federated/query without q raises 400."""
+    resp = client.get("/api/federated/query")
+    assert resp.status_code == 400
+    assert "required" in resp.json()["detail"].lower()
+
+
+def test_federated_query_success(client):
+    """GET /api/federated/query?q=auth returns 200 with result list."""
+    resp = client.get("/api/federated/query?q=auth")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["query"] == "auth"
+    assert isinstance(body["results"], list)
+
+
+def test_federated_references_missing_symbol_raises_400(client):
+    """GET /api/federated/references without symbol raises 400."""
+    resp = client.get("/api/federated/references")
+    assert resp.status_code == 400
+    assert "required" in resp.json()["detail"].lower()
+
+
+def test_federated_references_success(client):
+    """GET /api/federated/references?symbol=login returns 200."""
+    resp = client.get("/api/federated/references?symbol=login")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["symbol"] == "login"
+    assert isinstance(body["references"], list)
+

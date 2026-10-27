@@ -191,3 +191,11 @@ def test_mcp_hybrid_search_tool(tmp_path):
     assert res == []
 
 
+def test_mcp_federated_search_tool(tmp_path):
+    from daemon.mcp_server import federated_search
+    # Without state db returns empty list
+    res = federated_search(query="anything", loom_dir=str(tmp_path))
+    assert res == []
+
+
+

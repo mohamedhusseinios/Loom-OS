@@ -328,6 +328,50 @@ def hybrid_search(
     return asyncio.run(engine.hybrid_query(project_path, project, query, depth=depth, top_k=top_k))
 
 
+@mcp.tool(
+    name="federated_search",
+    annotations={"title": "Cross-Project Federated Search", "readOnlyHint": True},
+)
+def federated_search(
+    query: str,
+    depth: int = 2,
+    top_k: int = 10,
+    loom_dir: str | None = None,
+) -> list[dict]:
+    """Search code and symbols across all projects registered with Loom OS.
+
+    Args:
+        query: Natural language query or symbol name
+        depth: BFS exploration depth from seeds (default: 2)
+        top_k: Maximum number of results to return (default: 10)
+        loom_dir: Optional custom loom directory
+    """
+    import asyncio
+    import sqlite3
+    from daemon.federation import FederatedIndex
+
+    db = _state_db_path(loom_dir)
+    if not db.exists():
+        return []
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("SELECT project_id, project_path FROM projects").fetchall()
+        projects = [{"project_id": r["project_id"], "project_path": r["project_path"]} for r in rows]
+    finally:
+        conn.close()
+
+    idx = FederatedIndex()
+
+    async def _run():
+        await idx.build_index(projects)
+        return await idx.query(query, depth=depth, top_k=top_k)
+
+    return asyncio.run(_run())
+
+
+
 
 # ---------------------------------------------------------------------------
 # Entrypoint
