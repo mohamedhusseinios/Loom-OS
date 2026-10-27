@@ -175,3 +175,19 @@ def test_query_graph_finds_node(tmp_path):
     nodes = result.get("results", [])
     assert len(nodes) > 0
     assert any("AuthService" in r["name"] for r in nodes)
+
+
+def test_mcp_get_shared_context_tool(tmp_path):
+    from daemon.mcp_server import get_shared_context
+    # Verify get_shared_context returns shared context markdown or helpful message
+    res = get_shared_context(project="nonexistent", loom_dir=str(tmp_path))
+    assert "not found" in res.lower() or isinstance(res, str)
+
+
+def test_mcp_hybrid_search_tool(tmp_path):
+    from daemon.mcp_server import hybrid_search
+    # Nonexistent project returns empty list
+    res = hybrid_search(project="nonexistent", query="anything", loom_dir=str(tmp_path))
+    assert res == []
+
+

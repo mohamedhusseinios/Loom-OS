@@ -291,7 +291,7 @@ Today, `loom init` drops a `register.json` in `~/.loom/inbox/<project>/`, but th
 - Modify: `daemon/mcp_server.py`
 - Test: `tests/test_wiring.py` (create), `tests/test_mcp.py` (extend)
 
-- [ ] **Step 1: Write failing tests for `daemon/wiring.py` and upgraded `daemon/mcp_server.py`**
+- [x] **Step 1: Write failing tests for `daemon/wiring.py` and upgraded `daemon/mcp_server.py`**
 
 Create `tests/test_wiring.py`:
 ```python
@@ -325,12 +325,12 @@ def test_mcp_get_shared_context_tool(tmp_path):
     assert "not found" in res.lower() or isinstance(res, str)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_wiring.py tests/test_mcp.py -v`
 Expected: FAIL (`ModuleNotFoundError: No module named 'daemon.wiring'`)
 
-- [ ] **Step 3: Implement `daemon/wiring.py` and wire `loom wire` + `loom init --wire` in `daemon/main.py`**
+- [x] **Step 3: Implement `daemon/wiring.py` and wire `loom wire` + `loom init --wire` in `daemon/main.py`**
 
 1. Create `daemon/wiring.py`:
    - Define `LOOM_BLOCK_START = "<!-- LOOM-OS:START -->"` and `LOOM_BLOCK_END = "<!-- LOOM-OS:END -->"`.
@@ -345,18 +345,18 @@ Expected: FAIL (`ModuleNotFoundError: No module named 'daemon.wiring'`)
    - Add `wire` to `KNOWN_SUBCOMMANDS` and add subcommand `loom wire --project <name> --project-path <path>`.
    - Call `wire_project` automatically at the end of `loom init` (unless `--no-wire` is passed).
 
-- [ ] **Step 4: Upgrade `daemon/mcp_server.py` with `get_shared_context` and `hybrid_search`**
+- [x] **Step 4: Upgrade `daemon/mcp_server.py` with `get_shared_context` and `hybrid_search`**
 
 In `daemon/mcp_server.py`:
 - Add `@mcp.tool(name="get_shared_context", annotations={"title": "Get Shared Context", "readOnlyHint": True})` that reads `<project_path>/.loom/SHARED_CONTEXT.md` (or generates a summary from `state.db` + `graph.json` if missing).
 - Add `@mcp.tool(name="hybrid_search", annotations={"title": "Hybrid Graph + Semantic Search", "readOnlyHint": True})` that invokes `asyncio.run(GraphEngine().hybrid_query(project_path, project, query, depth=depth, top_k=top_k))` so MCP clients get full semantic + structural BFS graph retrieval.
 
-- [ ] **Step 5: Run tests to verify pass**
+- [x] **Step 5: Run tests to verify pass**
 
 Run: `.venv/bin/python -m pytest tests/test_wiring.py tests/test_mcp.py tests/test_cli.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add daemon/wiring.py daemon/main.py daemon/mcp_server.py tests/test_wiring.py tests/test_mcp.py

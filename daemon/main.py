@@ -132,14 +132,28 @@ def cmd_init(args):
     """Bootstrap a project: create the inbox and a starter register.json."""
     inbox = os.path.expanduser(f"~/.loom/inbox/{args.project}")
     os.makedirs(inbox, exist_ok=True)
+    proj_path = os.path.expanduser(args.project_path)
     payload = {
         "agent": args.agent, "version": "1.0", "project": args.project,
-        "project_path": os.path.expanduser(args.project_path), "capabilities": [],
+        "project_path": proj_path, "capabilities": [],
     }
     with open(os.path.join(inbox, "register.json"), "w") as f:
         json.dump(payload, f, indent=2)
     print(f"✓ Initialized Loom project '{args.project}'")
+    if not getattr(args, "no_wire", False):
+        from daemon.wiring import wire_project
+        wire_project(project=args.project, project_path=proj_path)
     print("  Next: run `loom start`, then open http://localhost:3000")
+
+
+def cmd_wire(args):
+    """Wire agent instructions and MCP config into a project directory."""
+    from daemon.wiring import wire_project
+    res = wire_project(project=args.project, project_path=os.path.expanduser(args.project_path))
+    status = "updated" if res["updated"] else "already configured"
+    print(f"✓ Wired Loom OS into '{args.project}' ({status})")
+    for f in res["files"]:
+        print(f"  • {f}")
 
 
 def main():
@@ -147,7 +161,7 @@ def main():
     # but with start flags), silently insert "start" so they don't get the
     # confusing "invalid choice: '127.0.0.1'" error.
     # Don't intercept --help / -h — let the main parser show all subcommands.
-    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents", "worker", "init"}
+    KNOWN_SUBCOMMANDS = {"start", "register", "unregister", "detect-agents", "worker", "init", "wire"}
     if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
         pass
     elif len(sys.argv) > 1 and sys.argv[1] not in KNOWN_SUBCOMMANDS and not sys.argv[1].startswith("-"):
@@ -211,7 +225,14 @@ def main():
     init_p.add_argument("--project", required=True, help="Project identifier")
     init_p.add_argument("--project-path", default=".", help="Path to the project (default: cwd)")
     init_p.add_argument("--agent", default="claude-code", help="Initial agent name")
+    init_p.add_argument("--no-wire", action="store_true", help="Skip agent instructions and MCP config wiring")
     init_p.set_defaults(func=cmd_init)
+
+    # ---- loom wire ----
+    wire_p = sub.add_parser("wire", help="Configure zero-config agent wiring (CLAUDE.md, AGENTS.md, .mcp.json)")
+    wire_p.add_argument("--project", required=True, help="Project identifier")
+    wire_p.add_argument("--project-path", default=".", help="Path to the project (default: cwd)")
+    wire_p.set_defaults(func=cmd_wire)
 
     args = parser.parse_args()
 

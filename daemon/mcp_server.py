@@ -279,6 +279,56 @@ def query_graph(question: str, project: str, loom_dir: str | None = None) -> dic
     return {"results": results[:20], "total": len(results)}
 
 
+@mcp.tool(
+    name="get_shared_context",
+    annotations={"title": "Get Shared Context", "readOnlyHint": True},
+)
+def get_shared_context(project: str, loom_dir: str | None = None) -> str:
+    """Return the shared agent context markdown for a project.
+
+    Args:
+        project: Project ID
+        loom_dir: Optional custom loom directory
+    """
+    project_path = _find_project_path(project, loom_dir)
+    if project_path:
+        ctx_file = Path(project_path) / ".loom" / "SHARED_CONTEXT.md"
+        if ctx_file.exists():
+            return ctx_file.read_text()
+    return f"Shared context not found for project '{project}'."
+
+
+@mcp.tool(
+    name="hybrid_search",
+    annotations={"title": "Hybrid Graph + Semantic Search", "readOnlyHint": True},
+)
+def hybrid_search(
+    project: str,
+    query: str,
+    depth: int = 2,
+    top_k: int = 10,
+    loom_dir: str | None = None,
+) -> list[dict]:
+    """Search the project knowledge graph using hybrid vector similarity + AST BFS traversal.
+
+    Args:
+        project: Project ID
+        query: Natural language query or symbol
+        depth: BFS exploration depth from top semantic seeds (default: 2)
+        top_k: Maximum number of ranked results to return (default: 10)
+        loom_dir: Optional custom loom directory
+    """
+    import asyncio
+    from daemon.graph_engine import GraphEngine
+
+    project_path = _find_project_path(project, loom_dir)
+    if not project_path:
+        return []
+    engine = GraphEngine()
+    return asyncio.run(engine.hybrid_query(project_path, project, query, depth=depth, top_k=top_k))
+
+
+
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
