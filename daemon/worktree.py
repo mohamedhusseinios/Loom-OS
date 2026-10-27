@@ -22,9 +22,28 @@ def _run(cwd: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def create_worktree(repo_path: str, workspace_path: str, branch: str, base_ref: str = "HEAD") -> None:
-    """Create a new worktree at ``workspace_path`` on a fresh ``branch``."""
+    """Create a new worktree at ``workspace_path`` on a fresh or existing ``branch``."""
     Path(workspace_path).parent.mkdir(parents=True, exist_ok=True)
-    proc = _run(repo_path, "worktree", "add", "-b", branch, workspace_path, base_ref)
+    _run(repo_path, "worktree", "prune")
+
+    if os.path.exists(workspace_path):
+        # If it's already a valid worktree for the requested branch, reuse it
+        branch_check = _run(workspace_path, "rev-parse", "--abbrev-ref", "HEAD")
+        if branch_check.returncode == 0 and branch_check.stdout.strip() == branch:
+            return
+        # Stale or unexpected directory: clean it up
+        remove_worktree(repo_path, workspace_path)
+        if os.path.exists(workspace_path):
+            shutil.rmtree(workspace_path, ignore_errors=True)
+        _run(repo_path, "worktree", "prune")
+
+    # If branch already exists, attach worktree without -b
+    branch_exists = _run(repo_path, "rev-parse", "--verify", f"refs/heads/{branch}").returncode == 0
+    if branch_exists:
+        proc = _run(repo_path, "worktree", "add", workspace_path, branch)
+    else:
+        proc = _run(repo_path, "worktree", "add", "-b", branch, workspace_path, base_ref)
+
     if proc.returncode != 0:
         raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
 
@@ -130,3 +149,6 @@ def merge_branch_into(repo_path: str, source_branch: str, target: str,
 
 def remove_worktree(repo_path: str, workspace_path: str) -> None:
     _run(repo_path, "worktree", "remove", "--force", workspace_path)
+    if os.path.exists(workspace_path):
+        shutil.rmtree(workspace_path, ignore_errors=True)
+    _run(repo_path, "worktree", "prune")

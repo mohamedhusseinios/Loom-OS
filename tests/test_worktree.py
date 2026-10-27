@@ -56,6 +56,26 @@ def test_commit_all_returns_false_when_no_changes(repo, tmp_path):
     assert worktree.commit_all(str(ws), "noop") is False
 
 
+def test_create_worktree_handles_existing_worktree_and_branch(repo, tmp_path):
+    """Retrying a task should not crash if the worktree or branch already exists."""
+    import shutil
+    ws = tmp_path / "ws" / "task-retry"
+    # First creation:
+    worktree.create_worktree(str(repo), str(ws), "loom/task-retry", base_ref="main")
+    assert ws.exists()
+
+    # Second creation with worktree still on disk (clean reuse):
+    worktree.create_worktree(str(repo), str(ws), "loom/task-retry", base_ref="main")
+    assert ws.exists()
+
+    # Third creation with worktree removed from disk, but branch still exists in repo:
+    worktree.remove_worktree(str(repo), str(ws))
+    assert not ws.exists()
+    worktree.create_worktree(str(repo), str(ws), "loom/task-retry", base_ref="main")
+    assert ws.exists()
+
+
+
 def test_list_branches_shape_and_exclusions(repo):
     _git(repo, "branch", "develop")
     _git(repo, "branch", "loom/task-zzz")
