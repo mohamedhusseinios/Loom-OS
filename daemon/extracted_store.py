@@ -7,8 +7,10 @@ zero-infra philosophy.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from collections import defaultdict
 from pathlib import Path
 
 from daemon.extractors import ExtractedEntity
@@ -17,24 +19,29 @@ from daemon.extractors import ExtractedEntity
 class ExtractedEdgeStore:
     def __init__(self, loom_dir: str | None = None):
         self.base = Path(loom_dir or os.path.expanduser("~/.loom")) / "extracted"
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    def _get_lock(self, project: str) -> asyncio.Lock:
+        return self._locks[project]
 
     def _path(self, project: str) -> Path:
         return self.base / f"{project}.json"
 
     async def add(self, project: str, source_file: str, entities: list[ExtractedEntity]) -> None:
-        self.base.mkdir(parents=True, exist_ok=True)
-        rows = await self.load(project)
-        for e in entities:
-            rows.append({
-                "name": e.name,
-                "kind": e.kind,
-                "confidence": e.confidence,
-                "context": e.context,
-                "relationships": [list(r) for r in e.relationships],
-                "source_file": source_file,
-                "source": "llm",
-            })
-        self._path(project).write_text(json.dumps(rows, indent=2))
+        async with self._get_lock(project):
+            self.base.mkdir(parents=True, exist_ok=True)
+            rows = await self.load(project)
+            for e in entities:
+                rows.append({
+                    "name": e.name,
+                    "kind": e.kind,
+                    "confidence": e.confidence,
+                    "context": e.context,
+                    "relationships": [list(r) for r in e.relationships],
+                    "source_file": source_file,
+                    "source": "llm",
+                })
+            self._path(project).write_text(json.dumps(rows, indent=2))
 
     async def load(self, project: str) -> list[dict]:
         p = self._path(project)
