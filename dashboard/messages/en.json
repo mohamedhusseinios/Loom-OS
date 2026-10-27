@@ -261,5 +261,21 @@
     "noWorkerBody": "This task is in Running, but no worker is attached. Click Run to start one.",
     "externalAgentTitle": "External agent — can't run from here",
     "externalAgentBody": "{agent} runs in its own process and can't be started from the dashboard. Assign a runnable agent (e.g. claude-code) to run this task here."
+  },
+  "Federation": {
+    "title": "Cross-Project Federation",
+    "subtitle": "Org-wide code search and shared symbols across all registered projects",
+    "projectsIndexed": "{count, plural, one {# project} other {# projects}} indexed",
+    "nodesEdges": "{nodes} nodes · {edges} edges",
+    "sharedSymbolsCount": "{count} shared symbols",
+    "searchPlaceholder": "Search across all projects or type a symbol name...",
+    "modeSearch": "Semantic Search",
+    "modeReferences": "Symbol References",
+    "sharedSymbolsHeading": "Common Symbols Across Repos",
+    "sharedAcross": "in {count} projects",
+    "noResults": "No results found across projects.",
+    "searching": "Searching across projects...",
+    "loading": "Loading federation index...",
+    "degree": "Degree {deg}"
   }
 }

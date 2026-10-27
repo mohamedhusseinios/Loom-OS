@@ -261,5 +261,21 @@
     "noWorkerBody": "هذه المهمة في حالة التشغيل، لكن لا يوجد عامل متصل. اضغط تشغيل لبدء واحد.",
     "externalAgentTitle": "وكيل خارجي — لا يمكن تشغيله من هنا",
     "externalAgentBody": "{agent} يعمل في عمليته الخاصة ولا يمكن بدؤه من لوحة التحكم. عيّن وكيلًا قابلًا للتشغيل (مثل claude-code) لتشغيل هذه المهمة هنا."
+  },
+  "Federation": {
+    "title": "الفهرس الموحّد للمشاريع",
+    "subtitle": "البحث في التعليمات البرمجية والرموز المشتركة عبر جميع المشاريع المسجلة",
+    "projectsIndexed": "{count, plural, zero {لا مشاريع} one {مشروع واحد} two {مشروعان} few {# مشاريع} many {# مشروعًا} other {# مشروع}} مفهرسة",
+    "nodesEdges": "{nodes} عقدة · {edges} رابط",
+    "sharedSymbolsCount": "{count} رمز مشترك",
+    "searchPlaceholder": "ابحث عبر جميع المشاريع أو اكتب اسم رمز...",
+    "modeSearch": "بحث دلالي",
+    "modeReferences": "مراجع الرمز",
+    "sharedSymbolsHeading": "الرموز الشائعة عبر المستودعات",
+    "sharedAcross": "في {count} مشاريع",
+    "noResults": "لم يتم العثور على نتائج عبر المشاريع.",
+    "searching": "جارٍ البحث عبر المشاريع...",
+    "loading": "جارٍ تحميل الفهرس الموحّد...",
+    "degree": "الدرجة {deg}"
   }
 }

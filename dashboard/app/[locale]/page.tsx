@@ -6,6 +6,7 @@ import { listProjects } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/api";
 import { ProjectCard } from "@/components/project-card";
 import { AddProjectModal } from "@/components/add-project-modal";
+import { FederationExplorer } from "@/components/federation-explorer";
 import { useWebSocket } from "@/lib/use-websocket";
 import { Plus } from "lucide-react";
 
@@ -71,6 +72,10 @@ export default function ProjectsPage() {
         onClose={() => setShowAddModal(false)}
         onCreated={refresh}
       />
+
+      <div className="mt-8">
+        <FederationExplorer />
+      </div>
     </div>
   );
 }

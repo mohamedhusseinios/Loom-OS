@@ -472,11 +472,11 @@ Per Global Constraints in `docs/plans/2026-07-01-loom-next-moat-roadmap-implemen
 - Modify: `dashboard/app/[locale]/page.tsx` (or navigation tab on main dashboard)
 - Modify: `dashboard/messages/en.json`, `dashboard/messages/ar.json`
 
-- [ ] **Step 1: Add typed client helpers in `dashboard/lib/api.ts`**
+- [x] **Step 1: Add typed client helpers in `dashboard/lib/api.ts`**
 
 Add `fetchFederatedStats()`, `fetchFederatedQuery(q: string, depth?: number)`, and `fetchFederatedReferences(symbol: string)` pointing to `BASE_URL` (`http://localhost:8472`).
 
-- [ ] **Step 2: Create `dashboard/components/federation-explorer.tsx` and translations**
+- [x] **Step 2: Create `dashboard/components/federation-explorer.tsx` and translations**
 
 1. Add `"Federation"` translation keys to both `dashboard/messages/en.json` and `dashboard/messages/ar.json` (title, search placeholder, shared symbols badge, projects count, empty state).
 2. Build `FederationExplorer` component showing:
@@ -485,7 +485,7 @@ Add `fetchFederatedStats()`, `fetchFederatedQuery(q: string, depth?: number)`, a
    - Interactive chips for top shared symbols across repos; clicking a chip shows every project and file where that symbol appears.
 3. Mount `FederationExplorer` on the home dashboard (`dashboard/app/[locale]/page.tsx`).
 
-- [ ] **Step 3: Lint and build the Next.js 16 dashboard**
+- [x] **Step 3: Lint and build the Next.js 16 dashboard**
 
 Run:
 ```bash
@@ -493,7 +493,7 @@ cd dashboard && npm run lint && npm run build
 ```
 Expected: Exit 0 with no TypeScript or ESLint errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add dashboard/lib/api.ts dashboard/components/federation-explorer.tsx dashboard/app/[locale]/page.tsx dashboard/messages/en.json dashboard/messages/ar.json

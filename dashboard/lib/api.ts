@@ -414,3 +414,61 @@ export async function stopWorker(
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// --- Cross-Project Federation (Feature #5) ---
+
+export interface FederatedStats {
+  projects_indexed: number;
+  total_nodes: number;
+  total_edges: number;
+  shared_symbols_count: number;
+  shared_symbols: {
+    symbol: string;
+    projects: string[];
+    count: number;
+    total_degree: number;
+  }[];
+}
+
+export interface FederatedQueryResult {
+  query: string;
+  results: {
+    id: string;
+    kind: string;
+    semantic_score: number;
+    structural_distance: number;
+    project: string;
+  }[];
+}
+
+export interface FederatedReference {
+  project: string;
+  id: string;
+  label: string;
+  kind: string;
+  file: string;
+  degree: number;
+}
+
+export interface FederatedReferencesResult {
+  symbol: string;
+  references: FederatedReference[];
+}
+
+export async function fetchFederatedStats(): Promise<FederatedStats> {
+  return fetchApi("/api/federated/stats");
+}
+
+export async function fetchFederatedQuery(
+  q: string,
+  depth: number = 2,
+  top_k: number = 10,
+): Promise<FederatedQueryResult> {
+  return fetchApi(`/api/federated/query?q=${encodeURIComponent(q)}&depth=${depth}&top_k=${top_k}`);
+}
+
+export async function fetchFederatedReferences(
+  symbol: string,
+): Promise<FederatedReferencesResult> {
+  return fetchApi(`/api/federated/references?symbol=${encodeURIComponent(symbol)}`);
+}
