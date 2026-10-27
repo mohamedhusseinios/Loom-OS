@@ -835,6 +835,26 @@ def test_task_merge_with_target(client, monkeypatch):
     assert captured == {"target": "origin/dev", "remote": True}
 
 
+def test_task_merge_invalid_target_branch_raises_400(client):
+    res = client.post("/api/projects/noor/tasks",
+                      json={"project": "noor", "title": "T", "instruction": "x"})
+    task_id = res.json()["id"]
+    client.patch(f"/api/projects/noor/tasks/{task_id}",
+                 json={"workspace_path": "/tmp/ws/task-x"})
+
+    # Flag injection attempt
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge",
+                      json={"target": "--orphan"})
+    assert res.status_code == 400
+    assert "Invalid target branch" in res.json()["detail"]
+
+    # Illegal character
+    res = client.post(f"/api/projects/noor/tasks/{task_id}/merge",
+                      json={"target": "feature branch"})
+    assert res.status_code == 400
+
+
+
 def test_project_branches_success(client, monkeypatch):
     import daemon.worktree as worktree_mod
     fake = {"current": "main", "branches": [

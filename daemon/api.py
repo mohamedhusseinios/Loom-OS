@@ -1,6 +1,7 @@
 """FastAPI application for the Loom daemon."""
 
 import os
+import re
 import uuid
 import json as _json
 from typing import Optional
@@ -861,6 +862,14 @@ async def task_diff(project_id: str, task_id: str):
     return {"diff": diff, "branch": branch}
 
 
+def _is_valid_branch_name(name: str) -> bool:
+    if not name or name.startswith("-") or name.startswith("/") or name.endswith("/") or name.endswith(".lock"):
+        return False
+    if any(bad in name for bad in ("..", "@{", "\\", "//", " ")):
+        return False
+    return not any(c in name for c in "~^:?*[")
+
+
 @app.post("/api/projects/{project_id}/tasks/{task_id}/merge")
 async def task_merge(project_id: str, task_id: str,
                      payload: dict | None = Body(default=None)):
@@ -882,7 +891,10 @@ async def task_merge(project_id: str, task_id: str,
     branch = f"loom/task-{task_id}"
     target = (payload or {}).get("target")
     remote = bool((payload or {}).get("remote", False))
-    if not target:
+    if target:
+        if not _is_valid_branch_name(target):
+            raise HTTPException(status_code=400, detail="Invalid target branch name")
+    else:
         target = await asyncio.to_thread(_worktree.current_branch, repo)
         remote = False
     ok, output = await asyncio.to_thread(
