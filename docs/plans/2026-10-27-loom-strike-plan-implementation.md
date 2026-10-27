@@ -508,7 +508,7 @@ git commit -m "feat(dashboard): add bilingual FederationExplorer UI for cross-pr
 - Modify: `CONTEXT.md`
 - Modify: `docs/plans/2026-07-01-loom-next-moat-roadmap-implementation.md`
 
-- [ ] **Step 1: Run full backend + frontend verification**
+- [x] **Step 1: Run full backend + frontend verification**
 
 ```bash
 .venv/bin/python -m pytest tests/ -v
@@ -516,11 +516,11 @@ cd dashboard && npm run lint && npm run build
 ```
 Expected: 100% green test suite and clean Next.js production build.
 
-- [ ] **Step 2: Update `CONTEXT.md` and roadmap table**
+- [x] **Step 2: Update `CONTEXT.md` and roadmap table**
 
 Mark Feature #5 (`Cross-project graph federation`), `NEW-1` (`register-time coordinator guard`), and `loom wire` as ✅ shipped in `CONTEXT.md` and `docs/plans/2026-07-01-loom-next-moat-roadmap-implementation.md`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add CONTEXT.md docs/plans/2026-07-01-loom-next-moat-roadmap-implementation.md

@@ -17,13 +17,13 @@ This roadmap has advanced **two phases** past its original authoring. The sectio
 | 1 | #2 Documentation site + community | ✅ shipped | **PR #9** (`3d3a449`) — MkDocs Material site + CI/Pages deploy + `CONTRIBUTING.md` + GitHub Discussions |
 | 2 | #3 Incremental graph persistence | ❌ **dropped** | A spike falsified the premise: `graphify update` has no scoped/per-file mode (it re-extracts the whole project every run, and crashes if handed a single file), and a full re-extract is already fast (~2s / 134 files). The only real fix lives upstream in graphify, not the daemon. See memory `graphify-no-incremental-update`. |
 | 2 | #4 Mature the five first-gen modules | ✅ shipped | **PR #10** (`7f28495`) — all five modules hardened in one pass (+ a real `patterns` deprecate-resurrection bug fix). Detailed sub-plan: [2026-07-01-phase2-module-hardening-implementation.md](2026-07-01-phase2-module-hardening-implementation.md) |
-| 2 | #5 Cross-project graph federation | ⏳ **next** | Its gating decision (Open Question #4, federation index scope) is **resolved: organization-wide / shared**. Still needs its own detailed sub-plan before build. |
+| 2 | #5 Cross-project graph federation | ✅ **shipped** | **Strike Plan** — Org-wide read-only index (`daemon/federation.py`, `/api/federated/*` endpoints, `federated_search` MCP tool, and bilingual `FederationExplorer` Next.js UI) |
 | 3 | #6 Cloud / hosted offering decision | ◻️ outlined | strategic gate — not started |
 | 3 | #7 MCP ecosystem positioning | ◻️ outlined | not started |
 | 4 | #8 LlamaIndex + CrewAI integrations | ◻️ outlined | not started |
 | 4 | #9 Expanded plugin examples | ◻️ outlined | not started |
 
-**Where the roadmap now stands:** Phase 1 complete; Phase 2 two-thirds resolved (#4 shipped, #3 dropped); **Feature #5 (federation) is the next substantive build** — its privacy/scope blocker is now cleared (org-wide). Phases 3–4 remain outlined.
+**Where the roadmap now stands:** Phase 1 complete; Phase 2 complete (#3 dropped, #4 shipped, #5 shipped); Strike Plan features (perf cache, NEW-1 register overlap guard, `loom wire`, Feature #5 federation) all shipped. Phases 3–4 remain outlined.
 
 ---
 
