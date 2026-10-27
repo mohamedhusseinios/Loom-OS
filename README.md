@@ -12,7 +12,7 @@
 
 > **Naming.** The product is **Loom OS**. The installable package is **`loom-os`** (`pip install loom-os`); the CLI command is **`loom`**. The repository directory and design/plan docs are named **`agentic-os`**. They all refer to the same project.
 
-**Resources:** [Documentation](docs-site/index.md) · [Discussions](https://github.com/mohamedhusseinios/Loom-OS/discussions) · [Contributing](CONTRIBUTING.md)
+**Resources:** [User Guide](docs/USAGE.md) · [Documentation](docs-site/index.md) · [Discussions](https://github.com/mohamedhusseinios/Loom-OS/discussions) · [Contributing](CONTRIBUTING.md)
 
 ---
 
@@ -42,6 +42,8 @@ cd dashboard && npm install && npm run dev   # http://localhost:3000
 
 > Want optional LLM-powered extraction (Ollama / OpenAI / Claude)?  
 > `pip install loom-os[llm]` — the base install works without any LLM.
+
+> Looking for a complete step-by-step walkthrough? See the **[How to Use Guide](docs/USAGE.md)**.
 
 ---
 
@@ -160,6 +162,7 @@ See the [Development Guide](docs/DEVELOPMENT.md) for project structure, test pat
 
 | Guide | Covers |
 |-------|--------|
+| [How to Use / User Guide](docs/USAGE.md) | End-to-end user guide: setup, agent wiring, dashboard, workers, and MCP |
 | [Architecture](docs/ARCHITECTURE.md) | Two-process design, module map, data flow, design principles |
 | [Filesystem Protocol](docs/FILESYSTEM-PROTOCOL.md) | Full inbox protocol spec — every file type, format, processing rule |
 | [API Reference](docs/API.md) | Complete REST + WebSocket API, all endpoints and event types |
