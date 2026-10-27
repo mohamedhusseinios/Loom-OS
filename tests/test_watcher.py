@@ -38,3 +38,19 @@ def test_parse_path_without_inbox():
     project, user, filename = parse_inbox_path("/tmp/some-file.md")
     assert project == "unknown"
     assert user is None
+
+
+def test_inbox_handler_ignores_processed_files():
+    """InboxHandler should ignore files created or modified inside .processed."""
+    from daemon.watcher import InboxHandler
+    from watchdog.events import FileCreatedEvent
+    dispatched = []
+
+    async def fake_cb(project, user, path):
+        dispatched.append(path)
+
+    handler = InboxHandler(fake_cb, None)
+    event = FileCreatedEvent("/home/user/.loom/inbox/proj/.processed/finding-1.md")
+    handler.on_created(event)
+    assert dispatched == []
+

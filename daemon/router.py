@@ -48,8 +48,8 @@ class Router:
         path = Path(filepath)
         filename = path.name.lower()
 
-        # Skip if file was already moved/processed
-        if not path.exists():
+        # Skip if file was already moved/processed or is inside a .processed directory
+        if not path.exists() or ".processed" in path.parts:
             return
 
         try:

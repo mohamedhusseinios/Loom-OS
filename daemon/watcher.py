@@ -56,16 +56,18 @@ class InboxHandler(FileSystemEventHandler):
         self.loop = loop
 
     def on_created(self, event: FileCreatedEvent):
-        if event.is_directory:
+        if event.is_directory or ".processed" in Path(event.src_path).parts:
             return
         self._dispatch(event.src_path)
 
     def on_modified(self, event: FileModifiedEvent):
-        if event.is_directory:
+        if event.is_directory or ".processed" in Path(event.src_path).parts:
             return
         self._dispatch(event.src_path)
 
     def _dispatch(self, filepath: str):
+        if ".processed" in Path(filepath).parts:
+            return
         project, user, _ = parse_inbox_path(filepath)
         asyncio.run_coroutine_threadsafe(
             self.callback(project, user, filepath), self.loop

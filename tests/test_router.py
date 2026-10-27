@@ -238,3 +238,19 @@ async def test_register_seeds_the_cost_gate(router_with_registry, monkeypatch):
     await router._build_project("test-proj", str(tmp_path / "repo"))
 
     assert seeded == [("test-proj", 7.5)]
+
+
+@pytest.mark.asyncio
+async def test_handle_file_ignores_processed_directory(router_with_registry):
+    """Files inside .processed/ must be ignored and not re-processed or re-moved."""
+    router, reg, engine, tmp_path = router_with_registry
+    processed = tmp_path / "inbox" / "test-proj" / ".processed"
+    processed.mkdir(parents=True)
+    f = processed / "finding-001.md"
+    f.write_text("---\nagent: a\nproject: test-proj\ntype: pattern\n---\nbody")
+
+    events_before = router.events.qsize()
+    await router.handle_file("test-proj", str(f))
+    assert router.events.qsize() == events_before
+    assert not (processed / ".processed").exists()
+
