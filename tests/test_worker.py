@@ -224,3 +224,28 @@ def test_process_task_uses_run_stdout_for_non_claude(monkeypatch):
     assert w.patches[-1][1]["status"] == "done"
     body = __import__("json").loads(w.patches[-1][1]["result"])
     assert body["summary"] == "hermes did it"
+
+
+def test_api_sends_auth_token_when_configured(monkeypatch):
+    """Worker HTTP calls must forward LOOM_AUTH_TOKEN as Bearer auth."""
+    import io
+    import json
+    captured = {}
+
+    class _Resp:
+        def read(self):
+            return b"{}"
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=30):
+        captured["Authorization"] = req.headers.get("Authorization")
+        return _Resp()
+
+    monkeypatch.setenv("LOOM_AUTH_TOKEN", "team-secret")
+    monkeypatch.setattr(worker_mod.urllib.request, "urlopen", fake_urlopen)
+    w = Worker(project="noor", agent="claude-code", project_path="/tmp", base_url="http://x")
+    w._api("GET", "/api/projects/noor/tasks")
+    assert captured["Authorization"] == "Bearer team-secret"

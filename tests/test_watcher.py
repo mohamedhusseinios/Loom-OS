@@ -46,11 +46,79 @@ def test_inbox_handler_ignores_processed_files():
     from watchdog.events import FileCreatedEvent
     dispatched = []
 
-    async def fake_cb(project, user, path):
-        dispatched.append(path)
+    async def fake_cb(project, filepath, user=None):
+        dispatched.append(filepath)
 
     handler = InboxHandler(fake_cb, None)
     event = FileCreatedEvent("/home/user/.loom/inbox/proj/.processed/finding-1.md")
     handler.on_created(event)
     assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_watcher_dispatches_filepath_before_user(tmp_path):
+    """InboxHandler must call callback(project, filepath, user) — not (project, user, filepath).
+
+    Regression: team-mode path parsing put user in the second slot, so the router
+    treated None/user as the filepath and never processed flat inbox drops.
+    """
+    import asyncio
+    from daemon.watcher import InboxHandler
+    from watchdog.events import FileCreatedEvent
+
+    seen = []
+
+    async def capture(project, filepath, user=None):
+        seen.append((project, filepath, user))
+
+    loop = asyncio.get_running_loop()
+    handler = InboxHandler(capture, loop)
+    path = str(tmp_path / "inbox" / "my-project" / "finding-1.md")
+    (tmp_path / "inbox" / "my-project").mkdir(parents=True)
+    (tmp_path / "inbox" / "my-project" / "finding-1.md").write_text("x")
+
+    handler.on_created(FileCreatedEvent(path))
+    await asyncio.sleep(0.05)
+
+    assert len(seen) == 1
+    project, filepath, user = seen[0]
+    assert project == "my-project"
+    assert filepath == path
+    assert user is None
+
+
+@pytest.mark.asyncio
+async def test_watcher_to_router_processes_finding(tmp_path):
+    """End-to-end: InboxHandler arity matches Router.handle_file and moves the file."""
+    import asyncio
+    import json
+    from daemon.watcher import InboxHandler
+    from daemon.router import Router
+    from daemon.registry import AgentRegistry
+    from daemon.graph_engine import GraphEngine
+    from watchdog.events import FileCreatedEvent
+
+    db = AgentRegistry(str(tmp_path / "state.db"))
+    await db.initialize()
+    await db.upsert_project("proj", str(tmp_path / "repo"))
+    router = Router(db, GraphEngine())
+    loop = asyncio.get_running_loop()
+    handler = InboxHandler(router.handle_file, loop)
+
+    inbox = tmp_path / "inbox" / "proj"
+    inbox.mkdir(parents=True)
+    finding = inbox / "finding-abc.md"
+    finding.write_text(
+        "---\nagent: claude-code\nproject: proj\ntype: general\n---\nhello auth\n"
+    )
+
+    handler.on_created(FileCreatedEvent(str(finding)))
+    for _ in range(50):
+        if not finding.exists():
+            break
+        await asyncio.sleep(0.02)
+
+    assert not finding.exists()
+    assert (inbox / ".processed" / "finding-abc.md").exists()
+    await db.close()
 

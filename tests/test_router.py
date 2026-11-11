@@ -81,6 +81,39 @@ async def test_handle_heartbeat(router_with_registry):
 
 
 @pytest.mark.asyncio
+async def test_handle_heartbeat_user_scoped(router_with_registry):
+    """User inbox heartbeats must update agent-project-user, not agent-project."""
+    router, reg, engine, tmp_path = router_with_registry
+    from daemon.models import AgentInfo
+    from datetime import datetime, timezone
+
+    await reg.upsert_agent(AgentInfo(
+        agent_id="test-agent-test-proj-alice",
+        agent_name="test-agent",
+        version="1.0",
+        project="test-proj",
+        capabilities=["testing"],
+        user="alice",
+    ))
+
+    inbox = tmp_path / "inbox" / "test-proj" / "alice"
+    inbox.mkdir(parents=True)
+    hb_file = inbox / "heartbeat.json"
+    hb_file.write_text(json.dumps({
+        "agent": "test-agent",
+        "project": "test-proj",
+        "status": "online",
+        "timestamp": "2026-06-25T14:30:00Z",
+    }))
+
+    await router.handle_file("test-proj", str(hb_file), user="alice")
+
+    agent = await reg.get_agent("test-agent-test-proj-alice")
+    assert agent is not None
+    assert agent.last_heartbeat == datetime(2026, 6, 25, 14, 30, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
 async def test_handle_unknown_file_ignored(router_with_registry):
     router, reg, engine, tmp_path = router_with_registry
 

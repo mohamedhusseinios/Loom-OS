@@ -54,8 +54,19 @@ export interface QueryResult {
   communities: string[];
 }
 
-async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = process.env.NEXT_PUBLIC_LOOM_AUTH_TOKEN;
+  if (token) {
+    return { ...extra, Authorization: `Bearer ${token}` };
+  }
+  return extra;
+}
+
+async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) },
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -86,7 +97,10 @@ export async function rebuildGraph(id: string): Promise<{
   edges?: number;
   error?: string;
 }> {
-  const res = await fetch(`${BASE_URL}/api/projects/${id}/rebuild`, { method: "POST" });
+  const res = await fetch(`${BASE_URL}/api/projects/${id}/rebuild`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
   return res.json();
 }
 
@@ -100,7 +114,7 @@ export interface CreateProjectPayload {
 export async function createProject(payload: CreateProjectPayload): Promise<ProjectSummary["project"]> {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -108,7 +122,10 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
 }
 
 export async function deleteProject(id: string): Promise<{ deleted: boolean }> {
-  const res = await fetch(`${BASE_URL}/api/projects/${id}`, { method: "DELETE" });
+  const res = await fetch(`${BASE_URL}/api/projects/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -180,7 +197,7 @@ export async function dispatchTask(
 ): Promise<{ task_id: string; status: string }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/dispatch`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -200,7 +217,7 @@ export async function registerAgent(
 ): Promise<{ status: string; agent: string; project: string }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/register-agent`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -214,6 +231,7 @@ export async function unregisterAgent(
 ): Promise<{ deleted: boolean; agent_id: string }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agents/${agentId}`, {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -284,6 +302,7 @@ export async function scanProjectKnowledge(projectId: string): Promise<{
 }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/knowledge/scan`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -333,7 +352,7 @@ export async function listAgentTasks(projectId: string, status?: AgentTaskStatus
 export async function createAgentTask(projectId: string, payload: CreateAgentTaskPayload): Promise<AgentTask> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ project: projectId, ...payload }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -343,7 +362,7 @@ export async function createAgentTask(projectId: string, payload: CreateAgentTas
 export async function updateAgentTask(projectId: string, taskId: string, payload: UpdateAgentTaskPayload): Promise<AgentTask> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -362,7 +381,7 @@ export async function mergeTask(
 ): Promise<{ merged: boolean; output: string; target: string }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/merge`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ target, remote }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -401,7 +420,7 @@ export async function startWorker(
 ): Promise<{ started: boolean; running: boolean }> {
   const res = await fetch(
     `${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/worker/start`,
-    { method: "POST" },
+    { method: "POST", headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -413,7 +432,7 @@ export async function stopWorker(
 ): Promise<{ stopped: boolean }> {
   const res = await fetch(
     `${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/worker/stop`,
-    { method: "POST" },
+    { method: "POST", headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
