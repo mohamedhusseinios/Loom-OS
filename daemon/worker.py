@@ -139,9 +139,12 @@ class Worker:
 
     def _api(self, method: str, path: str, body: dict | None = None) -> dict | list:
         data = json.dumps(body).encode() if body is not None else None
+        headers = {"Content-Type": "application/json"}
+        token = os.environ.get("LOOM_AUTH_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(
-            f"{self.base_url}{path}", data=data, method=method,
-            headers={"Content-Type": "application/json"},
+            f"{self.base_url}{path}", data=data, method=method, headers=headers,
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode() or "{}")

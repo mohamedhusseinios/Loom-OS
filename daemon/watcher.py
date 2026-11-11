@@ -9,7 +9,7 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifi
 
 logger = logging.getLogger(__name__)
 
-EventHandler = Callable[[str, str | None, str], Awaitable[None]]  # (project, user, filepath)
+EventHandler = Callable[[str, str, str | None], Awaitable[None]]  # (project, filepath, user)
 
 
 def parse_inbox_path(path: str) -> tuple[str, str | None, str]:
@@ -69,8 +69,9 @@ class InboxHandler(FileSystemEventHandler):
         if ".processed" in Path(filepath).parts:
             return
         project, user, _ = parse_inbox_path(filepath)
+        # Router.handle_file(project, filepath, user=None) — filepath before user.
         asyncio.run_coroutine_threadsafe(
-            self.callback(project, user, filepath), self.loop
+            self.callback(project, filepath, user), self.loop
         )
 
 

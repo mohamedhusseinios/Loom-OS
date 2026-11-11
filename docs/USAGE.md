@@ -284,20 +284,23 @@ By default, Loom OS operates in local developer mode (zero authentication requir
 For team or remote setups:
 1. Start the daemon with an authentication token:
    ```bash
-   loom --port 8472 --auth-token "your-team-secret"
-   # Or set the environment variable:
+   loom start --port 8472 --auth-token "your-team-secret"
+   # Or set the environment variable (also used by `loom worker`):
    export LOOM_AUTH_TOKEN="your-team-secret"
    ```
-2. **Behavior:**
-   - Read methods (`GET`, `OPTIONS`, `HEAD`) remain accessible so the dashboard and graph views stay responsive.
-   - Write operations (`POST`, `PUT`, `DELETE`, `PATCH`) require the HTTP header:
-     `Authorization: Bearer your-team-secret`
-3. In remote setups, specify the daemon's URL in the dashboard:
+2. Point the dashboard at the same secret (build-time / browser-visible):
    ```bash
-   export NEXT_PUBLIC_API_URL="http://192.168.1.50:8472"
-   export NEXT_PUBLIC_WS_URL="ws://192.168.1.50:8472/ws"
+   export NEXT_PUBLIC_LOOM_AUTH_TOKEN="your-team-secret"
+   export NEXT_PUBLIC_API_URL="http://192.168.1.50:8472"   # optional remote host
+   export NEXT_PUBLIC_WS_URL="ws://192.168.1.50:8472/ws"    # optional; token is appended as ?token=
    npm run dev
    ```
+3. **Behavior when a token is configured:**
+   - Most reads (`GET` project/graph/task lists) stay open so the UI can poll.
+   - Writes (`POST`, `PUT`, `PATCH`, `DELETE`) require `Authorization: Bearer <secret>`.
+   - `GET /api/discover` also requires the token (it lists arbitrary directories).
+   - WebSocket clients must pass `?token=<secret>` (the dashboard does this when `NEXT_PUBLIC_LOOM_AUTH_TOKEN` is set).
+   - Workers started under the same shell inherit `LOOM_AUTH_TOKEN` and send it on API calls.
 
 ---
 

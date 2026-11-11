@@ -86,3 +86,22 @@ async def test_ingest_directory(ingestor, tmp_path):
     assert len(results) == 3
     ingested = [r for r in results if r["status"] == "ingested"]
     assert len(ingested) == 2  # skip png
+
+
+@pytest.mark.asyncio
+async def test_ingest_directory_rejects_symlink_escape(ingestor, tmp_path):
+    """Symlinks inside the project that resolve outside must not be ingested."""
+    project = tmp_path / "repo"
+    project.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("TOP SECRET")
+    link = project / "leak.txt"
+    link.symlink_to(outside)
+
+    results = await ingestor.ingest_directory(
+        str(project), project="proj", allowed_root=str(project),
+    )
+    assert len(results) == 1
+    assert results[0]["status"] == "error"
+    assert "outside" in results[0]["error"].lower()
+    assert list((tmp_path / "inbox" / "proj").glob("finding-*.md")) == []

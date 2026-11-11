@@ -87,6 +87,68 @@ async def test_create_and_delete_project(registry):
     gone = await registry.get_project("test-proj")
     assert gone is None
 
+
+@pytest.mark.asyncio
+async def test_delete_project_cascades_agents_and_tasks(registry):
+    from daemon.models import AgentTaskCreatePayload
+
+    await registry.create_project("gone", "Gone", "/tmp/gone")
+    await registry.upsert_agent(AgentInfo(
+        agent_id="a-gone", agent_name="a", version="1",
+        project="gone", capabilities=[],
+    ))
+    tid = await registry.create_agent_task(AgentTaskCreatePayload(
+        project="gone", title="t", instruction="do",
+    ))
+    await registry.create_task("legacy-1", "gone", "a", "x", "medium")
+    await registry.append_progress(tid, "text", "hi")
+
+    assert await registry.delete_project("gone") is True
+    assert await registry.get_agent("a-gone") is None
+    assert await registry.get_agent_task(tid) is None
+    assert await registry.list_tasks("gone") == []
+    assert await registry.list_progress(tid) == []
+
+
+@pytest.mark.asyncio
+async def test_list_agents_marks_stale_offline(registry):
+    from datetime import datetime, timedelta, timezone
+
+    stale = datetime.now(timezone.utc) - timedelta(seconds=301)
+    await registry.upsert_agent(AgentInfo(
+        agent_id="old-p", agent_name="old", version="1",
+        project="p", capabilities=[], status=AgentStatus.ONLINE,
+        last_heartbeat=stale,
+    ))
+    fresh = datetime.now(timezone.utc)
+    await registry.upsert_agent(AgentInfo(
+        agent_id="new-p", agent_name="new", version="1",
+        project="p", capabilities=[], status=AgentStatus.ONLINE,
+        last_heartbeat=fresh,
+    ))
+
+    agents = {a.agent_id: a for a in await registry.list_agents("p")}
+    assert agents["old-p"].status == AgentStatus.OFFLINE
+    assert agents["new-p"].status == AgentStatus.ONLINE
+    # Persisted
+    assert (await registry.get_agent("old-p")).status == AgentStatus.OFFLINE
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_finds_processed_findings(registry, tmp_path):
+    """Processed findings under inbox/<project>/.processed must still be searchable."""
+    from pathlib import Path
+
+    # registry db is tmp_path/test.db → loom root is tmp_path
+    processed = Path(registry.db_path).parent / "inbox" / "noor" / ".processed"
+    processed.mkdir(parents=True)
+    (processed / "finding-auth.md").write_text(
+        "---\nagent: a\nproject: noor\n---\nUniqueTokenXYZ authentication flow\n"
+    )
+
+    results = await registry.hybrid_search("noor", "UniqueTokenXYZ")
+    assert any("UniqueTokenXYZ" in r["text"] for r in results)
+
 @pytest.mark.asyncio
 async def test_delete_nonexistent_project(registry):
     deleted = await registry.delete_project("nonexistent")

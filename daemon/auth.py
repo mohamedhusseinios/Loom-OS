@@ -81,20 +81,26 @@ def verify_ws_token(token: Optional[str]) -> bool:
 
 
 class TokenAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware that checks the token on write methods.
+    """Middleware that checks the token on write methods and sensitive GETs.
 
-    Read methods (``GET``, ``OPTIONS``, ``HEAD``) are always allowed so the
-    dashboard continues to work without a token.  When auth is disabled the
-    middleware is a complete no-op — the moat.
+    Most reads stay open so the dashboard can poll without a token in solo
+    mode. ``/api/discover`` lists arbitrary directories, so it requires a
+    token when auth is enabled. When auth is disabled this is a no-op.
     """
 
     _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+    _PROTECTED_GET_PATHS = frozenset({"/api/discover"})
 
     async def dispatch(self, request: Request, call_next):
         if not is_auth_enabled():
             return await call_next(request)
 
-        if request.method.upper() not in self._WRITE_METHODS:
+        method = request.method.upper()
+        path = request.url.path
+        needs_auth = method in self._WRITE_METHODS or (
+            method == "GET" and path in self._PROTECTED_GET_PATHS
+        )
+        if not needs_auth:
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")
