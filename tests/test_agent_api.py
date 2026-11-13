@@ -103,3 +103,49 @@ async def test_dismiss_suggestion(client):
     res = client.post(f"/api/projects/noor/suggestions/{sug.id}/dismiss")
     assert res.status_code == 200
     assert res.json()["status"] == "dismissed"
+
+
+@pytest.mark.asyncio
+async def test_running_workspace_patch_does_not_trigger_suggest(client):
+    """Worker workspace_path-only PATCH must not kick off auto-suggest."""
+    from unittest.mock import AsyncMock, patch
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Run", instruction="work",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.RUNNING, assignee="loom-agent-noor")
+
+    with patch.object(api_module.AgentRuntime, "suggest", new_callable=AsyncMock) as suggest:
+        res = client.patch(
+            f"/api/projects/noor/tasks/{tid}",
+            json={"workspace_path": "/tmp/wt"},
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "running"
+        assert res.json()["workspace_path"] == "/tmp/wt"
+        suggest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_leave_running_schedules_suggest(client):
+    """Leaving Running with an explicit status still schedules auto-suggest."""
+    from unittest.mock import AsyncMock, patch
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Done soon", instruction="work",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.RUNNING, assignee="loom-agent-noor")
+
+    with patch.object(api_module.AgentRuntime, "suggest", new_callable=AsyncMock) as suggest:
+        res = client.patch(
+            f"/api/projects/noor/tasks/{tid}",
+            json={"status": "blocked", "result": "{}"},
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "blocked"
+        # create_task schedules the coroutine; allow the loop a tick.
+        import asyncio
+        await asyncio.sleep(0)
+        suggest.assert_awaited()

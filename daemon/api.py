@@ -785,18 +785,28 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
             promoted = await registry.get_agent_task(pid)
             if promoted and router:
                 await router._emit_event("task:updated", project_id, promoted.model_dump())
-    # Auto-suggest on key transitions (non-blocking best-effort).
-    if payload.status in (
-        AgentTaskStatus.READY, AgentTaskStatus.BLOCKED, AgentTaskStatus.DONE,
-    ) or (record.status == AgentTaskStatus.RUNNING and payload.status != AgentTaskStatus.RUNNING):
-        try:
-            project = await registry.get_project(project_id)
-            if project:
-                await _get_agent_runtime().suggest(
-                    project_id, project.project_path, task_id, force=False,
-                )
-        except Exception:
-            logger.debug("auto-suggest skipped", exc_info=True)
+    # Auto-suggest on explicit status transitions only (never on workspace_path/result-only
+    # patches). Fire-and-forget so worker PATCHes are not blocked by LLM/Jev latency.
+    if payload.status is not None and (
+        payload.status in (
+            AgentTaskStatus.READY, AgentTaskStatus.BLOCKED, AgentTaskStatus.DONE,
+        )
+        or (
+            record.status == AgentTaskStatus.RUNNING
+            and payload.status != AgentTaskStatus.RUNNING
+        )
+    ):
+        async def _auto_suggest() -> None:
+            try:
+                project = await registry.get_project(project_id)
+                if project:
+                    await _get_agent_runtime().suggest(
+                        project_id, project.project_path, task_id, force=False,
+                    )
+            except Exception:
+                logger.debug("auto-suggest skipped", exc_info=True)
+
+        asyncio.create_task(_auto_suggest())
     return updated.model_dump()
 
 
