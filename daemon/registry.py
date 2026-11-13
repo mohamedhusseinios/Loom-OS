@@ -214,6 +214,9 @@ class AgentRegistry:
             return None
         return self._row_to_agent(row)
 
+    # Agents with no heartbeat for this long are marked offline on list.
+    OFFLINE_AFTER_SECONDS = 300
+
     async def list_agents(self, project: Optional[str] = None, user: Optional[str] = None) -> list[AgentInfo]:
         if project and user:
             cursor = await self.db.execute(
@@ -230,7 +233,32 @@ class AgentRegistry:
                 "SELECT * FROM agents ORDER BY registered_at DESC"
             )
         rows = await cursor.fetchall()
-        return [self._row_to_agent(r) for r in rows]
+        agents = [self._row_to_agent(r) for r in rows]
+        await self._mark_stale_agents_offline(agents)
+        return agents
+
+    async def _mark_stale_agents_offline(self, agents: list[AgentInfo]) -> None:
+        """Flip online/working agents past OFFLINE_AFTER_SECONDS to offline."""
+        now = datetime.now(timezone.utc)
+        changed = False
+        for agent in agents:
+            if agent.status == AgentStatus.OFFLINE:
+                continue
+            hb = agent.last_heartbeat
+            if hb is None:
+                continue
+            if hb.tzinfo is None:
+                hb = hb.replace(tzinfo=timezone.utc)
+            age = (now - hb).total_seconds()
+            if age > self.OFFLINE_AFTER_SECONDS:
+                agent.status = AgentStatus.OFFLINE
+                await self.db.execute(
+                    "UPDATE agents SET status = ? WHERE agent_id = ?",
+                    (AgentStatus.OFFLINE.value, agent.agent_id),
+                )
+                changed = True
+        if changed:
+            await self.db.commit()
 
     async def match_capability(self, project: str, need: str) -> list[AgentInfo]:
         """Find agents whose capabilities match the given need (keyword match).
@@ -322,6 +350,26 @@ class AgentRegistry:
         return project
 
     async def delete_project(self, project_id: str) -> bool:
+        # Cascade: agents + both task tables + progress for this project's tasks.
+        cursor = await self.db.execute(
+            "SELECT id FROM agent_tasks WHERE project = ?", (project_id,)
+        )
+        task_ids = [r[0] for r in await cursor.fetchall()]
+        if task_ids:
+            placeholders = ",".join("?" * len(task_ids))
+            await self.db.execute(
+                f"DELETE FROM task_progress WHERE task_id IN ({placeholders})",
+                task_ids,
+            )
+        await self.db.execute(
+            "DELETE FROM agent_tasks WHERE project = ?", (project_id,)
+        )
+        await self.db.execute(
+            "DELETE FROM tasks WHERE project = ?", (project_id,)
+        )
+        await self.db.execute(
+            "DELETE FROM agents WHERE project = ?", (project_id,)
+        )
         cursor = await self.db.execute(
             "DELETE FROM projects WHERE project_id = ?", (project_id,)
         )
@@ -485,52 +533,59 @@ class AgentRegistry:
         Searches inbox finding-*.md files for the project.  If no embeddings
         model is available returns text-only results.
         """
-        from daemon.embeddings import EmbeddingStore, EmbeddingGenerator
+        from daemon.embeddings import EmbeddingGenerator
         from pathlib import Path
 
-        store = EmbeddingStore()
-        await store.initialize()
         gen = EmbeddingGenerator()
 
-        # Look for finding files in the inbox
-        import os
-        loom_dir = os.path.expanduser("~/.loom")
-        inbox = Path(loom_dir) / "inbox" / project
+        # Findings are moved to .processed/ after ingest; search both places.
+        # loom root is the parent of state.db (tests inject a temp db path).
+        loom_dir = Path(self.db_path).expanduser().resolve().parent
+        inbox = loom_dir / "inbox" / project
         results: list[dict] = []
+        seen: set[str] = set()
 
+        candidates: list[Path] = []
         if inbox.exists():
-            for f_path in inbox.glob("finding-*.md"):
-                try:
-                    content = f_path.read_text()
-                except OSError:
-                    continue
+            candidates.extend(inbox.glob("finding-*.md"))
+            processed = inbox / ".processed"
+            if processed.exists():
+                candidates.extend(processed.glob("finding-*.md"))
 
-                # Text match (substring)
-                if query.lower() in content.lower():
-                    # Also compute vector similarity
-                    doc_vec = await gen.embed(content[:500])
-                    query_vec = await gen.embed(query)
-                    import numpy as np
-                    nq = np.linalg.norm(query_vec)
-                    nd = np.linalg.norm(doc_vec)
-                    sim = float(np.dot(query_vec, doc_vec) / (nq * nd + 1e-8)) if nq and nd else 0.0
+        for f_path in candidates:
+            if f_path.stem in seen:
+                continue
+            seen.add(f_path.stem)
+            try:
+                content = f_path.read_text()
+            except OSError:
+                continue
 
-                    # Extract body (skip YAML frontmatter)
-                    lines = content.split("\n")
-                    body_start = 0
-                    if lines and lines[0].strip() == "---":
-                        for i, line in enumerate(lines[1:], 1):
-                            if line.strip() == "---":
-                                body_start = i + 1
-                                break
-                    body = "\n".join(lines[body_start:]).strip()[:300]
+            if query.lower() not in content.lower():
+                continue
 
-                    results.append({
-                        "id": f_path.stem,
-                        "text": body,
-                        "score": sim,
-                        "source": "finding",
-                    })
+            doc_vec = await gen.embed(content[:500])
+            query_vec = await gen.embed(query)
+            import numpy as np
+            nq = np.linalg.norm(query_vec)
+            nd = np.linalg.norm(doc_vec)
+            sim = float(np.dot(query_vec, doc_vec) / (nq * nd + 1e-8)) if nq and nd else 0.0
+
+            lines = content.split("\n")
+            body_start = 0
+            if lines and lines[0].strip() == "---":
+                for i, line in enumerate(lines[1:], 1):
+                    if line.strip() == "---":
+                        body_start = i + 1
+                        break
+            body = "\n".join(lines[body_start:]).strip()[:300]
+
+            results.append({
+                "id": f_path.stem,
+                "text": body,
+                "score": sim,
+                "source": "finding",
+            })
 
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:10]

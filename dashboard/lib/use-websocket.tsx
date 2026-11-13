@@ -29,8 +29,12 @@ interface WebSocketContextValue {
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 function getWsUrl(): string {
+  const token = process.env.NEXT_PUBLIC_LOOM_AUTH_TOKEN;
+  const withToken = (url: string) =>
+    token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
+
   if (process.env.NEXT_PUBLIC_WS_URL) {
-    return process.env.NEXT_PUBLIC_WS_URL;
+    return withToken(process.env.NEXT_PUBLIC_WS_URL);
   }
   if (typeof window !== "undefined") {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -38,9 +42,9 @@ function getWsUrl(): string {
       window.location.hostname === "localhost"
         ? "127.0.0.1"
         : window.location.hostname;
-    return `${proto}//${host}:8472/ws`;
+    return withToken(`${proto}//${host}:8472/ws`);
   }
-  return "ws://127.0.0.1:8472/ws";
+  return withToken("ws://127.0.0.1:8472/ws");
 }
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {

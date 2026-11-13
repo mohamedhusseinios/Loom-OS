@@ -125,6 +125,8 @@ class Router:
     async def _handle_heartbeat(self, project: str, path: Path, user: str | None = None):
         payload = HeartbeatPayload(**json.loads(path.read_text()))
         agent_id = f"{payload.agent}-{project}"
+        if user:
+            agent_id = f"{payload.agent}-{project}-{user}"
         agent = await self.registry.get_agent(agent_id)
         if agent:
             agent.last_heartbeat = payload.timestamp

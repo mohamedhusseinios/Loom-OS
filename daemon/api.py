@@ -10,7 +10,7 @@ import asyncio
 import logging
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
@@ -26,7 +26,7 @@ from daemon.models import (
     AgentTaskStatus, TaskProgressPayload,
     AgentChatRequest, AgentSettingsUpdate,
 )
-from daemon.auth import TokenAuthMiddleware
+from daemon.auth import TokenAuthMiddleware, require_token
 from daemon.agent_runtime import AgentRuntime, ConflictError
 from daemon.llm_client import LlmError
 
@@ -634,7 +634,7 @@ async def delete_project(project_id: str):
     return {"deleted": True}
 
 @app.get("/api/discover")
-async def discover_directories(path: str = "~"):
+async def discover_directories(path: str = "~", _=Depends(require_token)):
     """Browse filesystem directories for project discovery.
 
     Does not follow symlinks (so a malicious link can't redirect browsing
@@ -1240,17 +1240,34 @@ async def expire_fact(fact_id: str, payload: dict = None):
 
 # --- Document ingestion ---
 
-@app.post("/api/projects/{project_id}/ingest")
-async def ingest_document(project_id: str, payload: dict):
-    """Ingest a document into the project knowledge base."""
+def _get_doc_ingestor():
     global doc_ingestor
     if doc_ingestor is None:
         from daemon.ingest import DocumentIngestor
-        doc_ingestor = DocumentIngestor()
-    result = await doc_ingestor.ingest_file(
-        file_path=payload.get("file_path", ""),
+        from pathlib import Path as _Path
+        loom_root = str(_Path(registry.db_path).expanduser().resolve().parent)
+        doc_ingestor = DocumentIngestor(loom_dir=loom_root)
+    return doc_ingestor
+
+
+@app.post("/api/projects/{project_id}/ingest")
+async def ingest_document(project_id: str, payload: dict):
+    """Ingest a document into the project knowledge base."""
+    from daemon.ingest import path_under_root
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    file_path = payload.get("file_path", "")
+    if not file_path or not path_under_root(file_path, project.project_path):
+        raise HTTPException(
+            status_code=400,
+            detail="file_path must be inside the registered project directory",
+        )
+    result = await _get_doc_ingestor().ingest_file(
+        file_path=file_path,
         project=project_id,
         agent_id=payload.get("agent_id", "ingestor"),
+        allowed_root=project.project_path,
     )
     return result
 
@@ -1258,28 +1275,44 @@ async def ingest_document(project_id: str, payload: dict):
 @app.post("/api/projects/{project_id}/ingest/directory")
 async def ingest_directory(project_id: str, payload: dict):
     """Ingest all files in a directory."""
-    global doc_ingestor
-    if doc_ingestor is None:
-        from daemon.ingest import DocumentIngestor
-        doc_ingestor = DocumentIngestor()
-    results = await doc_ingestor.ingest_directory(
-        dir_path=payload.get("dir_path", ""),
+    from daemon.ingest import path_under_root
+    project = await registry.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    dir_path = payload.get("dir_path", "")
+    if not dir_path or not path_under_root(dir_path, project.project_path):
+        raise HTTPException(
+            status_code=400,
+            detail="dir_path must be inside the registered project directory",
+        )
+    results = await _get_doc_ingestor().ingest_directory(
+        dir_path=dir_path,
         project=project_id,
         agent_id=payload.get("agent_id", "ingestor"),
+        allowed_root=project.project_path,
     )
     return {"results": results}
 
 
 # --- Cross-Project Federation (Feature #5) ---
 
+_federation_cache_key = None
+
+
 async def _get_federated_index():
-    global federation_index
+    """Reuse the in-memory index until project set / graph timestamps change."""
+    global federation_index, _federation_cache_key
     if federation_index is None:
         from daemon.federation import FederatedIndex
         federation_index = FederatedIndex()
     if registry is not None:
         projs = await registry.list_projects()
-        await federation_index.build_index(projs)
+        key = tuple(
+            (p.project_id, p.project_path, p.last_graph_update) for p in projs
+        )
+        if key != _federation_cache_key:
+            await federation_index.build_index(projs)
+            _federation_cache_key = key
     return federation_index
 
 

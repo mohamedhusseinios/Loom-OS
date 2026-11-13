@@ -66,6 +66,9 @@ async def client(tmp_path):
     api_module.router = None
     api_module.watcher = None
     api_module.supervisor = None
+    api_module.doc_ingestor = None
+    api_module._federation_cache_key = None
+    api_module.federation_index = None
     api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
 
     # lifespan="off" skips startup/shutdown (no watcher/broadcast task).
@@ -1008,8 +1011,58 @@ def test_token_auth_middleware_blocks_writes_when_token_configured(client, tmp_p
             headers={"Authorization": "Bearer secret-token"},
         )
         assert authed_resp.status_code in (200, 201)
+
+        # Discover is a sensitive GET — requires token when auth is on
+        assert client.get("/api/discover?path=/tmp").status_code == 401
+        ok = client.get(
+            "/api/discover?path=/tmp",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert ok.status_code == 200
     finally:
         configure_auth_token(None)
+
+
+def test_ingest_rejects_paths_outside_project(client, tmp_path):
+    """Ingest must not read arbitrary files outside the registered project tree."""
+    outside = tmp_path / "secret.txt"
+    outside.write_text("leak")
+    res = client.post(
+        "/api/projects/noor/ingest",
+        json={"file_path": str(outside)},
+    )
+    assert res.status_code == 400
+    assert "inside" in res.json()["detail"].lower()
+
+
+def test_ingest_allows_paths_inside_project(client, tmp_path):
+    proj = tmp_path / "noor"
+    proj.mkdir(exist_ok=True)
+    doc = proj / "notes.md"
+    doc.write_text("# hello ingest")
+    # Fixture registered noor at tmp_path/noor
+    res = client.post(
+        "/api/projects/noor/ingest",
+        json={"file_path": str(doc)},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "ingested"
+
+
+def test_ingest_directory_rejects_symlink_escape(client, tmp_path):
+    """API directory ingest must not follow symlinks out of the project tree."""
+    proj = tmp_path / "noor"
+    proj.mkdir(exist_ok=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("TOP SECRET")
+    (proj / "leak.txt").symlink_to(outside)
+    res = client.post(
+        "/api/projects/noor/ingest/directory",
+        json={"dir_path": str(proj)},
+    )
+    assert res.status_code == 200
+    results = res.json()["results"]
+    assert results and all(r["status"] == "error" for r in results)
 
 
 def test_cors_allows_localhost_and_127_0_0_1(client):

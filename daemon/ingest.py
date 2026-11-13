@@ -13,11 +13,22 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def path_under_root(candidate: str | Path, root: str | Path) -> bool:
+    """True when candidate resolves inside root (follows symlinks via realpath)."""
+    try:
+        root_r = os.path.realpath(os.path.expanduser(str(root)))
+        target = os.path.realpath(os.path.expanduser(str(candidate)))
+    except OSError:
+        return False
+    return target == root_r or target.startswith(root_r + os.sep)
 
 
 class DocumentIngestor:
@@ -46,8 +57,12 @@ class DocumentIngestor:
         file_path: str | Path,
         project: str,
         agent_id: str = "ingestor",
+        allowed_root: str | Path | None = None,
     ) -> dict:
         """Ingest a single file and return the finding id.
+
+        When ``allowed_root`` is set, the resolved path (after following
+        symlinks) must stay under that root — blocks symlink escapes.
 
         Returns:
             dict with ``status``, ``finding_id``, ``file_path``, and
@@ -56,6 +71,8 @@ class DocumentIngestor:
         path = Path(file_path)
         if not path.exists():
             return {"status": "error", "error": "File not found"}
+        if allowed_root is not None and not path_under_root(path, allowed_root):
+            return {"status": "error", "error": "Path outside allowed root"}
 
         ext = path.suffix.lower()
         content = await self._extract(path, ext)
@@ -95,16 +112,22 @@ FOUND: Document ingested from {path.name}
         dir_path: str | Path,
         project: str,
         agent_id: str = "ingestor",
+        allowed_root: str | Path | None = None,
     ) -> list[dict]:
         """Ingest all supported files in a directory (non-recursive)."""
         path = Path(dir_path)
         if not path.is_dir():
             return [{"status": "error", "error": "Not a directory"}]
+        if allowed_root is not None and not path_under_root(path, allowed_root):
+            return [{"status": "error", "error": "Path outside allowed root"}]
 
         results = []
         for entry in sorted(path.iterdir()):
+            # is_file() follows symlinks; ingest_file re-checks realpath vs allowed_root.
             if entry.is_file():
-                result = await self.ingest_file(entry, project, agent_id)
+                result = await self.ingest_file(
+                    entry, project, agent_id, allowed_root=allowed_root,
+                )
                 results.append(result)
         return results
 
