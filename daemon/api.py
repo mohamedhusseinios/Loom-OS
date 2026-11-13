@@ -24,8 +24,11 @@ from daemon.models import WsEvent, ProjectCreatePayload, DispatchRequest, TaskPa
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskUpdatePayload, AgentTaskRecord, AgentStatus,
     AgentTaskStatus, TaskProgressPayload,
+    AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware
+from daemon.agent_runtime import AgentRuntime, ConflictError
+from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,20 @@ supervisor: Optional[WorkerSupervisor] = None
 
 LOOM_WORKER_AGENTS = runners.runnable_agents()   # registry-derived: agents the worker can spawn
 LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
+agent_runtime: Optional[AgentRuntime] = None
+
+
+def _get_agent_runtime() -> AgentRuntime:
+    global agent_runtime
+    if agent_runtime is None:
+        async def _emit(event, project, data):
+            if router:
+                await router._emit_event(event, project, data)
+        agent_runtime = AgentRuntime(registry, graph_engine, emit_event=_emit)
+    else:
+        agent_runtime.registry = registry
+        agent_runtime.graph_engine = graph_engine
+    return agent_runtime
 
 
 @asynccontextmanager
@@ -768,6 +785,18 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
             promoted = await registry.get_agent_task(pid)
             if promoted and router:
                 await router._emit_event("task:updated", project_id, promoted.model_dump())
+    # Auto-suggest on key transitions (non-blocking best-effort).
+    if payload.status in (
+        AgentTaskStatus.READY, AgentTaskStatus.BLOCKED, AgentTaskStatus.DONE,
+    ) or (record.status == AgentTaskStatus.RUNNING and payload.status != AgentTaskStatus.RUNNING):
+        try:
+            project = await registry.get_project(project_id)
+            if project:
+                await _get_agent_runtime().suggest(
+                    project_id, project.project_path, task_id, force=False,
+                )
+        except Exception:
+            logger.debug("auto-suggest skipped", exc_info=True)
     return updated.model_dump()
 
 
@@ -831,6 +860,97 @@ async def list_workers(project_id: str):
     if supervisor is None:
         return {"running": []}
     return {"running": supervisor.running_ids()}
+
+
+# --- Loom Agent (chat + orchestration loop) ---
+
+@app.get("/api/agent/settings")
+async def get_agent_settings():
+    return (await registry.get_agent_settings(mask_keys=True)).model_dump()
+
+
+@app.put("/api/agent/settings")
+async def put_agent_settings(payload: AgentSettingsUpdate):
+    return (await registry.update_agent_settings(payload)).model_dump()
+
+
+@app.post("/api/projects/{project_id}/agent/chat")
+async def agent_chat(project_id: str, payload: AgentChatRequest):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        result = await _get_agent_runtime().chat(project_id, project.project_path, payload)
+    except LlmError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return result.model_dump()
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/suggest")
+async def suggest_task(project_id: str, task_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        sug = await _get_agent_runtime().suggest(project_id, project.project_path, task_id, force=True)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except LlmError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return sug.model_dump(mode="json")
+
+
+@app.post("/api/projects/{project_id}/suggestions/{suggestion_id}/accept")
+async def accept_suggestion(project_id: str, suggestion_id: str):
+    try:
+        sug = await _get_agent_runtime().accept_suggestion(project_id, suggestion_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return sug.model_dump(mode="json") if sug else {}
+
+
+@app.post("/api/projects/{project_id}/suggestions/{suggestion_id}/dismiss")
+async def dismiss_suggestion(project_id: str, suggestion_id: str):
+    try:
+        sug = await _get_agent_runtime().dismiss_suggestion(project_id, suggestion_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return sug.model_dump(mode="json") if sug else {}
+
+
+@app.get("/api/projects/{project_id}/tasks/{task_id}/suggestion")
+async def get_pending_suggestion(project_id: str, task_id: str):
+    sug = await registry.get_pending_suggestion(task_id)
+    if sug is None or sug.project != project_id:
+        return {"suggestion": None}
+    return {"suggestion": sug.model_dump(mode="json")}
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/implement")
+async def implement_task(project_id: str, task_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    def _spawn(updated):
+        pass
+
+    try:
+        updated = await _get_agent_runtime().implement(
+            project_id, task_id, spawn_worker=_spawn,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if updated:
+        await _route_task_execution(project_id, updated)
+    return updated.model_dump() if updated else {}
+
 
 
 def _task_base_branch(record: AgentTaskRecord) -> str:

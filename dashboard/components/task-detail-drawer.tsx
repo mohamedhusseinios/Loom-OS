@@ -13,11 +13,18 @@ import {
   getTaskProgress,
   startWorker,
   stopWorker,
+  getPendingSuggestion,
+  suggestTask,
+  acceptSuggestion,
+  dismissSuggestion,
+  implementTask,
   type AgentTask,
   type AgentInfo,
   type AgentTaskStatus,
   type TaskProgressItem,
+  type TaskSuggestion,
 } from "@/lib/api";
+import { SuggestionChip } from "@/components/suggestion-chip";
 
 const STATUSES: AgentTaskStatus[] = [
   "triage", "todo", "ready", "running", "blocked", "done", "archived",
@@ -70,6 +77,8 @@ export function TaskDetailDrawer({
   const [progress, setProgress] = useState<TaskProgressItem[]>([]);
   const [busy, setBusy] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
+  const [suggestion, setSuggestion] = useState<TaskSuggestion | null>(null);
+  const [sugBusy, setSugBusy] = useState(false);
 
   // Load diff for completed/blocked tasks.
   useEffect(() => {
@@ -82,6 +91,19 @@ export function TaskDetailDrawer({
       return () => { cancelled = true; };
     }
   }, [task, projectId]);
+
+  useEffect(() => {
+    if (!task) return;
+    let cancelled = false;
+    getPendingSuggestion(projectId, task.id)
+      .then((s) => { if (!cancelled) setSuggestion(s); })
+      .catch(() => { if (!cancelled) setSuggestion(null); });
+    const unsub = subscribe("task:suggestion", (event) => {
+      const d = event.data as TaskSuggestion;
+      if (d.task_id === task.id) setSuggestion(d.status === "pending" ? d : null);
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [task, projectId, subscribe]);
 
   // Load branch list + default target for completed/blocked tasks.
   useEffect(() => {
@@ -146,6 +168,42 @@ export function TaskDetailDrawer({
     } finally {
       setMerging(false);
     }
+  }
+
+  async function handleSuggest() {
+    if (!task) return;
+    setSugBusy(true);
+    try {
+      setSuggestion(await suggestTask(projectId, task.id));
+    } catch { /* ignore */ } finally { setSugBusy(false); }
+  }
+
+  async function handleAcceptSuggestion() {
+    if (!suggestion) return;
+    setSugBusy(true);
+    try {
+      await acceptSuggestion(projectId, suggestion.id);
+      setSuggestion(null);
+      onChanged();
+    } catch { /* ignore */ } finally { setSugBusy(false); }
+  }
+
+  async function handleDismissSuggestion() {
+    if (!suggestion) return;
+    setSugBusy(true);
+    try {
+      await dismissSuggestion(projectId, suggestion.id);
+      setSuggestion(null);
+    } catch { /* ignore */ } finally { setSugBusy(false); }
+  }
+
+  async function handleImplement() {
+    if (!task) return;
+    setSugBusy(true);
+    try {
+      await implementTask(projectId, task.id);
+      onChanged();
+    } catch { /* ignore */ } finally { setSugBusy(false); }
   }
 
   async function handleStatus(status: AgentTaskStatus) {
@@ -250,6 +308,17 @@ export function TaskDetailDrawer({
         )}
 
         <div>
+          <div className="mb-4">
+            <SuggestionChip
+              suggestion={suggestion}
+              busy={sugBusy}
+              onAccept={() => void handleAcceptSuggestion()}
+              onDismiss={() => void handleDismissSuggestion()}
+              onSuggest={() => void handleSuggest()}
+              onImplement={() => void handleImplement()}
+            />
+          </div>
+
           <label htmlFor="task-status" className="text-zinc-500 block mb-1">{t("status")}</label>
           <select
             id="task-status"
