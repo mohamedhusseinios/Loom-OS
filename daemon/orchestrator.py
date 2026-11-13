@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -164,7 +165,7 @@ class Orchestrator:
         filtered = hits[:8]
         if hits and self.jev.available:
             try:
-                filtered = self._jev_filter(hits, task)
+                filtered = await asyncio.to_thread(self._jev_filter, hits, task)
             except JevError:
                 logger.warning("Jev filter failed; using top hybrid hits", exc_info=True)
                 jev_skipped = True
@@ -181,7 +182,9 @@ class Orchestrator:
         candidates: list[dict] = []
         if self.llm.available:
             try:
-                reply, candidates = self._llm_propose(pack, task, chat_messages, user_message, model)
+                reply, candidates = await asyncio.to_thread(
+                    self._llm_propose, pack, task, chat_messages, user_message, model,
+                )
             except LlmError as e:
                 reply = f"(Main model unavailable: {e})"
         else:
@@ -196,7 +199,9 @@ class Orchestrator:
         confidence = 0.5
         if self.jev.available and not jev_skipped:
             try:
-                action_id, action_label, confidence = self._jev_choose(pack, task, catalog)
+                action_id, action_label, confidence = await asyncio.to_thread(
+                    self._jev_choose, pack, task, catalog,
+                )
             except JevError:
                 logger.warning("Jev choice failed; using first catalog option", exc_info=True)
                 jev_skipped = True

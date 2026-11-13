@@ -530,7 +530,7 @@ export async function updateAgentSettings(payload: {
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -543,7 +543,7 @@ export async function agentChat(
 ): Promise<{ chat_id: string; reply: string; suggestion_id: string | null }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -556,6 +556,7 @@ export async function agentChat(
 export async function suggestTask(projectId: string, taskId: string): Promise<TaskSuggestion> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/suggest`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -574,7 +575,7 @@ export async function getPendingSuggestion(
 export async function acceptSuggestion(projectId: string, suggestionId: string): Promise<TaskSuggestion> {
   const res = await fetch(
     `${BASE_URL}/api/projects/${projectId}/suggestions/${suggestionId}/accept`,
-    { method: "POST" },
+    { method: "POST", headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -583,7 +584,7 @@ export async function acceptSuggestion(projectId: string, suggestionId: string):
 export async function dismissSuggestion(projectId: string, suggestionId: string): Promise<TaskSuggestion> {
   const res = await fetch(
     `${BASE_URL}/api/projects/${projectId}/suggestions/${suggestionId}/dismiss`,
-    { method: "POST" },
+    { method: "POST", headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -592,6 +593,7 @@ export async function dismissSuggestion(projectId: string, suggestionId: string)
 export async function implementTask(projectId: string, taskId: string): Promise<AgentTask> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();

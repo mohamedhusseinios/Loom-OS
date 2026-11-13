@@ -59,3 +59,12 @@ async def test_single_pending_suggestion_per_task(reg):
     pending = await reg.get_pending_suggestion("t1")
     assert pending is not None
     assert pending.id == s2.id
+
+
+@pytest.mark.asyncio
+async def test_list_agent_messages_returns_latest(reg):
+    chat = await reg.create_agent_chat("proj")
+    for i in range(5):
+        await reg.add_agent_message(chat.id, "user", f"m{i}")
+    msgs = await reg.list_agent_messages(chat.id, limit=3)
+    assert [m.content for m in msgs] == ["m2", "m3", "m4"]

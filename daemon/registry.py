@@ -819,8 +819,12 @@ class AgentRegistry:
         return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now)
 
     async def list_agent_messages(self, chat_id: str, limit: int = 50) -> list[AgentMessageRecord]:
+        """Return the latest ``limit`` messages in chronological order."""
         cursor = await self.db.execute(
-            "SELECT * FROM agent_messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT ?",
+            "SELECT * FROM ("
+            " SELECT * FROM agent_messages WHERE chat_id = ?"
+            " ORDER BY created_at DESC LIMIT ?"
+            ") AS recent ORDER BY created_at ASC",
             (chat_id, limit),
         )
         rows = await cursor.fetchall()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -83,7 +84,7 @@ class AgentRuntime:
         else:
             messages = [{"role": "system", "content": "You are the Loom agent. Help with project tasks."}]
             messages.extend(chat_msgs)
-            reply = llm.chat(messages, model=model)
+            reply = await asyncio.to_thread(llm.chat, messages, model)
 
         await self.registry.add_agent_message(chat.id, "assistant", reply)
         if self.emit_event:

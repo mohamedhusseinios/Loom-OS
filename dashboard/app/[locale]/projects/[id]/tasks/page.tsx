@@ -121,7 +121,7 @@ export default function TasksPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 flex-1 min-h-0">
       <TaskBoard tasks={tasks} onMove={handleMove} onSelect={setSelected} />
       <div className="min-h-[280px] xl:min-h-0">
-        <LoomAgentChat projectId={id} taskId={selected?.id} />
+        <LoomAgentChat key={selected?.id ?? "project"} projectId={id} taskId={selected?.id} />
       </div>
       </div>
 

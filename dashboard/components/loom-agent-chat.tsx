@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,13 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    setMessages([]);
+    setChatId(undefined);
+    setInput("");
+    setError("");
+  }, [taskId, projectId]);
 
   async function send() {
     const text = input.trim();
