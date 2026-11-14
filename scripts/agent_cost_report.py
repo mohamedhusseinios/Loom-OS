@@ -105,17 +105,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _keys_present() -> bool:
-    return bool(os.environ.get("TYPESAFE_API_KEY")) and bool(
-        os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LOOM_AGENT_API_KEY")
+def resolve_benchmark_credentials(db_path: str | None = None):
+    """Settings first, then env. Returns (typesafe_key, typesafe_base, deepseek_key, deepseek_base, model)."""
+    from daemon.agent_credentials import (
+        load_stored_credentials,
+        resolve_deepseek_key,
+        resolve_typesafe_base_url,
+        resolve_typesafe_key,
     )
+    creds = load_stored_credentials(db_path)
+    stored_llm_key, deepseek_base, model = creds.llm_from_stored()
+    deepseek_key = resolve_deepseek_key(stored_llm_key)
+    if not deepseek_key:
+        deepseek_key = os.environ.get("LOOM_AGENT_API_KEY", "")
+    typesafe_key = resolve_typesafe_key(creds.typesafe_key)
+    typesafe_base = resolve_typesafe_base_url(creds.typesafe_base_url)
+    return typesafe_key, typesafe_base, deepseek_key, deepseek_base, model
 
 
-async def _run_benchmark_cycle(always_llm: bool) -> list[dict]:
+def _keys_present(db_path: str | None = None) -> bool:
+    typesafe_key, _, deepseek_key, _, _ = resolve_benchmark_credentials(db_path)
+    return bool(typesafe_key) and bool(deepseek_key)
+
+
+async def _run_benchmark_cycle(always_llm: bool, db_path: str | None = None) -> list[dict]:
     from daemon.jev_client import JevClient
     from daemon.llm_client import LlmClient
     from daemon.models import AgentTaskRecord, AgentTaskStatus
     from daemon.orchestrator import Orchestrator, clear_filter_cache
+
+    typesafe_key, typesafe_base, deepseek_key, deepseek_base, model = resolve_benchmark_credentials(db_path)
 
     class _GE:
         def __init__(self, hits):
@@ -138,13 +157,14 @@ async def _run_benchmark_cycle(always_llm: bool) -> list[dict]:
         )
         orch = Orchestrator(
             _GE(spec["hits"]),
-            jev=JevClient(),
-            llm=LlmClient(),
+            jev=JevClient(api_key=typesafe_key or None, base_url=typesafe_base),
+            llm=LlmClient(api_key=deepseek_key, base_url=deepseek_base),
         )
         result = await orch.run_suggest_cycle(
             str(tmp), "benchmark", task,
             prefetched_hits=spec["hits"],
             always_llm=always_llm,
+            model=model,
         )
         rows.append({
             "jev_input_tokens": result.jev_input_tokens,
@@ -157,16 +177,17 @@ async def _run_benchmark_cycle(always_llm: bool) -> list[dict]:
     return rows
 
 
-def run_benchmark() -> int:
-    if not _keys_present():
+def run_benchmark(db_path: str | None = None) -> int:
+    if not _keys_present(db_path):
         print(
-            "Skipping benchmark: TYPESAFE_API_KEY and/or DEEPSEEK_API_KEY is not set.",
+            "Skipping benchmark: TYPESAFE_API_KEY and/or DEEPSEEK_API_KEY is not set "
+            "(dashboard Agent settings and env).",
             file=sys.stderr,
         )
         return 0
     print("Running benchmark: baseline (always-DeepSeek) vs new path...")
-    baseline = asyncio.run(_run_benchmark_cycle(always_llm=True))
-    current = asyncio.run(_run_benchmark_cycle(always_llm=False))
+    baseline = asyncio.run(_run_benchmark_cycle(always_llm=True, db_path=db_path))
+    current = asyncio.run(_run_benchmark_cycle(always_llm=False, db_path=db_path))
     print("\n== baseline (always-DeepSeek) ==")
     print(format_report(summarize_suggestions(baseline)))
     print("== new path ==")
@@ -177,7 +198,7 @@ def run_benchmark() -> int:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.benchmark:
-        return run_benchmark()
+        return run_benchmark(args.db)
     try:
         rows = load_suggestions(args.db, args.project)
     except FileNotFoundError as e:

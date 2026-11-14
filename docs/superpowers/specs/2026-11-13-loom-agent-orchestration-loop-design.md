@@ -54,7 +54,7 @@ SQLite (chats, suggestions, settings) + existing task APIs
 
 | Unit | Purpose | Depends on |
 |------|---------|------------|
-| `jev_client` | TypeSafe `/v1/systemone` | `TYPESAFE_API_KEY` |
+| `jev_client` | TypeSafe `/v1/systemone` | dashboard Agent settings, then `TYPESAFE_API_KEY` |
 | `llm_client` | OpenAI-compatible chat | user settings / env |
 | `orchestrator` | One suggest/chat cycle | graph_engine, jev, llm, registry |
 | `agent_runtime` | Chat history + suggest/implement glue | orchestrator, registry |
@@ -99,7 +99,7 @@ Optional `{project_path}/loom-playbook.json`:
 | POST | `/api/projects/{id}/suggestions/{sid}/accept` | Apply Loom action if applicable; 409 if stale |
 | POST | `/api/projects/{id}/suggestions/{sid}/dismiss` | Mark dismissed |
 | POST | `/api/projects/{id}/tasks/{tid}/implement` | Assign `loom-agent`, status Running |
-| GET/PUT | `/api/agent/settings` | Masked keys on GET |
+| GET/PUT | `/api/agent/settings` | Masked keys + `has_keys` on GET; auth as for other settings |
 
 WebSocket events: `agent:message`, `task:suggestion`.
 
@@ -125,10 +125,13 @@ Accept of a Loom `move_*` action calls existing `update_agent_task`. Non-Loom ac
 
 ## 7. Keys & providers
 
-- Jev: `TYPESAFE_API_KEY` env on daemon.
-- Main model: user settings (BYOK); bootstrap from `DEEPSEEK_API_KEY` if settings empty.
+- Both Jev (TypeSafe) and the main chat model are configured from dashboard **Agent settings** (BYOK). Environment variables remain a fallback only.
+- Jev key: `api_keys_json.typesafe` in `agent_settings`; optional base URL on the `typesafe` provider (empty = official TypeSafe API, or e.g. `http://localhost:11434` for Ollama). Runtime order: dashboard settings first, then `TYPESAFE_API_KEY` / `TYPESAFE_BASE_URL`.
+- Main model key: `api_keys_json.deepseek` (existing BYOK). Runtime order: dashboard settings first, then `DEEPSEEK_API_KEY`.
 - Default model id: `deepseek-chat` (DeepSeek OpenAI-compatible API at `https://api.deepseek.com`).
-- GET `/api/agent/settings` returns `api_keys` as `{provider_id: "••••" + last4}` or null.
+- Keys are stored in `api_keys_json` as plaintext on the local daemon DB (the existing DeepSeek BYOK path has no at-rest encryption). Both providers use the same masking. GET never returns raw secrets.
+- GET `/api/agent/settings` returns `api_keys_masked` as `{provider_id: "••••" + last4}` or omits unset keys, plus `has_keys` booleans. PUT accepts a new key, or an empty string to clear. Masked placeholders are ignored. Auth is required when the daemon token is enabled (same as other settings writes / the settings GET).
+- Settings changes are read on every chat/suggest cycle; the daemon does not need a restart.
 
 ## 8. Worker / `loom-agent`
 
@@ -140,7 +143,7 @@ Accept of a Loom `move_*` action calls existing `update_agent_task`. Non-Loom ac
 
 - Project-level **Loom Agent** chat panel (optional `task_id` from selected card).
 - Task card: suggestion chip (action, confidence, prose) + Accept / Dismiss / Implement.
-- Settings: default model, API key, add provider (base URL + models).
+- Settings (Loom Agent chat panel → Settings): default model, DeepSeek key + base URL, Jev/TypeSafe key + optional base URL; masked display, set/clear.
 - i18n: `en` + `ar`.
 
 ## 10. Guards

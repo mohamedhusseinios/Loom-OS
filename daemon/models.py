@@ -243,6 +243,7 @@ class AgentSettings(BaseModel):
     default_model: str = "deepseek-chat"
     providers: list[AgentProviderConfig] = Field(default_factory=list)
     api_keys_masked: dict[str, Optional[str]] = Field(default_factory=dict)
+    has_keys: dict[str, bool] = Field(default_factory=dict)
 
 
 class AgentSettingsUpdate(BaseModel):

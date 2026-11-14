@@ -40,8 +40,12 @@ def test_settings_put_and_masked_get(client):
     assert res.status_code == 200
     body = res.json()
     assert body["api_keys_masked"]["deepseek"] == "••••1234"
+    assert body["has_keys"]["deepseek"] is True
+    assert "sk-abcdef1234" not in res.text
     get = client.get("/api/agent/settings")
     assert get.json()["api_keys_masked"]["deepseek"] == "••••1234"
+    assert get.json()["has_keys"]["deepseek"] is True
+    assert "sk-abcdef1234" not in get.text
 
 
 def test_chat_without_key_returns_400(client):
@@ -155,3 +159,72 @@ async def test_explicit_leave_running_schedules_suggest(client):
         assert len(scheduled) == 1
         await scheduled[0]
         suggest.assert_awaited()
+
+
+def test_settings_typesafe_and_clear(client):
+    secret = "ts-secret-key-9999"
+    res = client.put("/api/agent/settings", json={
+        "api_keys": {"typesafe": secret, "deepseek": "sk-abcdef1234"},
+        "providers": [{
+            "id": "typesafe", "name": "TypeSafe (Jev)",
+            "base_url": "http://localhost:11434", "model_ids": ["jev-latest"],
+        }],
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["api_keys_masked"]["typesafe"] == "••••9999"
+    assert body["api_keys_masked"]["deepseek"] == "••••1234"
+    assert body["has_keys"]["typesafe"] is True
+    assert body["has_keys"]["deepseek"] is True
+    assert secret not in res.text
+    assert "sk-abcdef1234" not in res.text
+    typesafe = next(p for p in body["providers"] if p["id"] == "typesafe")
+    assert typesafe["base_url"] == "http://localhost:11434"
+
+    got = client.get("/api/agent/settings")
+    assert got.status_code == 200
+    data = got.json()
+    assert data["has_keys"]["typesafe"] is True
+    assert secret not in got.text
+    assert "api_keys" not in data or data.get("api_keys") is None
+
+    cleared = client.put("/api/agent/settings", json={"api_keys": {"typesafe": ""}})
+    assert cleared.status_code == 200
+    body = cleared.json()
+    assert body["has_keys"]["typesafe"] is False
+    assert "typesafe" not in (body.get("api_keys_masked") or {})
+    assert body["has_keys"]["deepseek"] is True
+    # typesafe provider (and its base URL) is kept after clearing the key
+    typesafe = next(p for p in body["providers"] if p["id"] == "typesafe")
+    assert typesafe["base_url"] == "http://localhost:11434"
+
+
+def test_settings_ignores_masked_placeholder(client):
+    client.put("/api/agent/settings", json={"api_keys": {"deepseek": "sk-live-key-4242"}})
+    res = client.put("/api/agent/settings", json={"api_keys": {"deepseek": "••••4242"}})
+    assert res.status_code == 200
+    raw_get = client.get("/api/agent/settings")
+    assert raw_get.json()["api_keys_masked"]["deepseek"] == "••••4242"
+    assert raw_get.json()["has_keys"]["deepseek"] is True
+
+
+def test_settings_requires_auth_when_enabled(client):
+    from daemon.auth import configure_auth_token
+    client.put("/api/agent/settings", json={"api_keys": {"deepseek": "sk-auth-secret-7777"}})
+    configure_auth_token("settings-token")
+    try:
+        denied_get = client.get("/api/agent/settings")
+        assert denied_get.status_code == 401
+        assert "sk-auth-secret-7777" not in denied_get.text
+        denied_put = client.put("/api/agent/settings", json={"api_keys": {"typesafe": "should-not-store"}})
+        assert denied_put.status_code == 401
+        ok = client.get(
+            "/api/agent/settings",
+            headers={"Authorization": "Bearer settings-token"},
+        )
+        assert ok.status_code == 200
+        assert ok.json()["has_keys"]["deepseek"] is True
+        assert "sk-auth-secret-7777" not in ok.text
+        assert ok.json()["api_keys_masked"]["deepseek"] == "••••7777"
+    finally:
+        configure_auth_token(None)

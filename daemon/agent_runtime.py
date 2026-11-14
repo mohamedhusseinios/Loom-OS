@@ -7,6 +7,11 @@ import logging
 import time
 from typing import Optional
 
+from daemon.agent_credentials import (
+    resolve_deepseek_key,
+    resolve_typesafe_base_url,
+    resolve_typesafe_key,
+)
 from daemon.jev_client import JevClient
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
@@ -39,23 +44,25 @@ class AgentRuntime:
             logger.warning("hybrid_query failed while hashing context", exc_info=True)
             return []
 
+    async def _stored_credentials(self):
+        cursor = await self.registry.db.execute(
+            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        return self.registry._settings_from_row(row)
+
     async def _llm_from_settings(self) -> tuple[LlmClient, str]:
-        settings = await self.registry.get_agent_settings(mask_keys=False)
-        keys = await self.registry.get_raw_api_keys()
-        model = settings.default_model or "deepseek-chat"
-        base_url = "https://api.deepseek.com"
-        api_key = keys.get("deepseek") or ""
-        for p in settings.providers:
-            if model in (p.model_ids or []) or p.id == "deepseek":
-                if model in (p.model_ids or []) or not api_key:
-                    base_url = p.base_url or base_url
-                    api_key = keys.get(p.id) or api_key
-                if model in (p.model_ids or []):
-                    break
-        if not api_key:
-            import os
-            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        creds = await self._stored_credentials()
+        stored_key, base_url, model = creds.llm_from_stored()
+        api_key = resolve_deepseek_key(stored_key)
         return LlmClient(api_key=api_key, base_url=base_url), model
+
+    async def _jev_from_settings(self) -> JevClient:
+        creds = await self._stored_credentials()
+        return JevClient(
+            api_key=resolve_typesafe_key(creds.typesafe_key) or None,
+            base_url=resolve_typesafe_base_url(creds.typesafe_base_url),
+        )
 
     async def chat(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AgentChatResponse:
         llm, model = await self._llm_from_settings()
@@ -78,7 +85,7 @@ class AgentRuntime:
             task = await self.registry.get_agent_task(payload.task_id)
             if task is None:
                 raise ValueError(f"task not found: {payload.task_id}")
-            orch = Orchestrator(self.graph_engine, jev=JevClient(), llm=llm)
+            orch = Orchestrator(self.graph_engine, jev=await self._jev_from_settings(), llm=llm)
             result = await orch.run_suggest_cycle(
                 project_path, project_id, task,
                 chat_messages=chat_msgs[:-1],
@@ -125,7 +132,7 @@ class AgentRuntime:
                 logger.info("auto-suggest skipped; context hash unchanged for task %s", task_id)
                 return pending
         llm, model = await self._llm_from_settings()
-        orch = Orchestrator(self.graph_engine, jev=JevClient(), llm=llm)
+        orch = Orchestrator(self.graph_engine, jev=await self._jev_from_settings(), llm=llm)
         result = await orch.run_suggest_cycle(
             project_path, project_id, task, model=model, prefetched_hits=hits,
         )

@@ -13,6 +13,16 @@ from daemon.models import (
     AgentChatRecord, AgentMessageRecord,
     TaskSuggestionRecord, SuggestionStatus,
 )
+from daemon.agent_credentials import (
+    DEFAULT_DEEPSEEK_PROVIDER,
+    DEFAULT_TYPESAFE_PROVIDER,
+    StoredAgentCredentials,
+    ensure_default_providers,
+    is_masked_key,
+    mask_key,
+    merge_providers,
+    parse_settings_row,
+)
 
 
 class ProjectExistsError(Exception):
@@ -128,13 +138,9 @@ class AgentRegistry:
         await self.db.execute(
             "INSERT OR IGNORE INTO agent_settings (id, default_model, providers_json, api_keys_json)"
             " VALUES (1, 'deepseek-chat', ?, '{}')",
-            (json.dumps([{
-                "id": "deepseek",
-                "name": "DeepSeek",
-                "base_url": "https://api.deepseek.com",
-                "model_ids": ["deepseek-chat"],
-            }]),),
+            (json.dumps([DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_TYPESAFE_PROVIDER]),),
         )
+        await self._ensure_default_agent_providers()
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS agent_chats (
                 id TEXT PRIMARY KEY,
@@ -747,33 +753,52 @@ class AgentRegistry:
 
     @staticmethod
     def _mask_key(raw: str | None) -> str | None:
-        if not raw:
-            return None
-        if len(raw) <= 4:
-            return "••••"
-        return "••••" + raw[-4:]
+        return mask_key(raw)
+
+    def _settings_from_row(self, row) -> StoredAgentCredentials:
+        if row is None:
+            return parse_settings_row(
+                "deepseek-chat",
+                [DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_TYPESAFE_PROVIDER],
+                {},
+            )
+        return parse_settings_row(
+            row["default_model"], row["providers_json"], row["api_keys_json"],
+        )
+
+    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool) -> AgentSettings:
+        providers = [AgentProviderConfig(**p) for p in creds.providers]
+        masked = creds.masked_keys() if mask_keys else dict(creds.keys)
+        return AgentSettings(
+            default_model=creds.default_model,
+            providers=providers,
+            api_keys_masked=masked,
+            has_keys=creds.has_keys(),
+        )
+
+    async def _ensure_default_agent_providers(self) -> None:
+        """Migration: add the TypeSafe provider to existing singleton rows."""
+        cursor = await self.db.execute(
+            "SELECT providers_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return
+        current = json.loads(row["providers_json"] or "[]")
+        ensured = ensure_default_providers(current)
+        if ensured != current:
+            await self.db.execute(
+                "UPDATE agent_settings SET providers_json = ? WHERE id = 1",
+                (json.dumps(ensured),),
+            )
+            await self.db.commit()
 
     async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
         cursor = await self.db.execute(
             "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
-        if row is None:
-            return AgentSettings(
-                providers=[AgentProviderConfig(
-                    id="deepseek", name="DeepSeek",
-                    base_url="https://api.deepseek.com",
-                    model_ids=["deepseek-chat"],
-                )],
-            )
-        providers = [AgentProviderConfig(**p) for p in json.loads(row["providers_json"] or "[]")]
-        keys = json.loads(row["api_keys_json"] or "{}")
-        masked = {k: self._mask_key(v) for k, v in keys.items()} if mask_keys else keys
-        return AgentSettings(
-            default_model=row["default_model"] or "deepseek-chat",
-            providers=providers,
-            api_keys_masked=masked,
-        )
+        return self._agent_settings_view(self._settings_from_row(row), mask_keys)
 
     async def get_raw_api_keys(self) -> dict[str, str]:
         cursor = await self.db.execute(
@@ -782,21 +807,33 @@ class AgentRegistry:
         row = await cursor.fetchone()
         if row is None:
             return {}
-        return json.loads(row["api_keys_json"] or "{}")
+        keys = json.loads(row["api_keys_json"] or "{}")
+        return {k: v for k, v in keys.items() if v}
 
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
-        current = await self.get_agent_settings(mask_keys=False)
-        raw_keys = await self.get_raw_api_keys()
-        default_model = payload.default_model or current.default_model
-        providers = payload.providers if payload.providers is not None else current.providers
-        if payload.api_keys:
+        cursor = await self.db.execute(
+            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        creds = self._settings_from_row(row)
+        default_model = payload.default_model or creds.default_model
+        if payload.providers is not None:
+            providers = merge_providers(creds.providers, payload.providers)
+        else:
+            providers = creds.providers
+        raw_keys = dict(creds.keys)
+        if payload.api_keys is not None:
             for pid, key in payload.api_keys.items():
-                if key and not key.startswith("••••"):
+                if key is None or is_masked_key(key):
+                    continue
+                if key == "":
+                    raw_keys.pop(pid, None)
+                else:
                     raw_keys[pid] = key
         await self.db.execute(
             "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?"
             " WHERE id = 1",
-            (default_model, json.dumps([p.model_dump() for p in providers]), json.dumps(raw_keys)),
+            (default_model, json.dumps(providers), json.dumps(raw_keys)),
         )
         await self.db.commit()
         return await self.get_agent_settings(mask_keys=True)

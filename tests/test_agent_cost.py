@@ -70,15 +70,82 @@ def test_report_script_reads_db(tmp_path, capsys):
     assert "jev_input_tokens:      100" in out
 
 
-def test_benchmark_exits_cleanly_without_keys(capsys):
+def test_benchmark_exits_cleanly_without_keys(tmp_path, capsys):
     env = {k: v for k, v in os.environ.items()
-           if k not in ("TYPESAFE_API_KEY", "DEEPSEEK_API_KEY", "LOOM_AGENT_API_KEY")}
+           if k not in ("TYPESAFE_API_KEY", "DEEPSEEK_API_KEY", "LOOM_AGENT_API_KEY", "LOOM_DB_PATH")}
+    empty_db = tmp_path / "empty.db"
     with patch.dict(os.environ, env, clear=True):
-        rc = report_main(["--benchmark"])
+        rc = report_main(["--benchmark", "--db", str(empty_db)])
     err = capsys.readouterr().err
     assert rc == 0
     assert "Skipping benchmark" in err
     assert "API_KEY" in err
+
+
+def test_benchmark_keys_present_from_settings(tmp_path, monkeypatch):
+    import json
+    from scripts.agent_cost_report import _keys_present, resolve_benchmark_credentials
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+        (
+            "deepseek-chat",
+            json.dumps([
+                {"id": "deepseek", "name": "DeepSeek",
+                 "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"]},
+                {"id": "typesafe", "name": "TypeSafe (Jev)",
+                 "base_url": "http://localhost:11434", "model_ids": ["jev-latest"]},
+            ]),
+            json.dumps({"deepseek": "sk-dash-ds", "typesafe": "ts-dash-jev"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    assert _keys_present(str(db)) is True
+    ts_key, ts_base, ds_key, ds_base, model = resolve_benchmark_credentials(str(db))
+    assert ts_key == "ts-dash-jev"
+    assert ts_base == "http://localhost:11434"
+    assert ds_key == "sk-dash-ds"
+    assert "deepseek" in ds_base
+    assert model == "deepseek-chat"
+
+
+def test_benchmark_settings_key_wins_over_env(tmp_path, monkeypatch):
+    import json
+    from scripts.agent_cost_report import resolve_benchmark_credentials
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+        (
+            "deepseek-chat",
+            json.dumps([]),
+            json.dumps({"deepseek": "sk-from-settings", "typesafe": "ts-from-settings"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-from-env")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
+    ts_key, _, ds_key, _, _ = resolve_benchmark_credentials(str(db))
+    assert ts_key == "ts-from-settings"
+    assert ds_key == "sk-from-settings"
 
 
 @pytest.mark.asyncio

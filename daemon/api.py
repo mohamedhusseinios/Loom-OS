@@ -880,7 +880,7 @@ async def get_agent_settings(_=Depends(require_token)):
 
 
 @app.put("/api/agent/settings")
-async def put_agent_settings(payload: AgentSettingsUpdate):
+async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
     return (await registry.update_agent_settings(payload)).model_dump()
 
 

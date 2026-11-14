@@ -18,6 +18,9 @@ async def test_default_settings_mask_empty_keys(reg):
     settings = await reg.get_agent_settings()
     assert settings.default_model == "deepseek-chat"
     assert any(p.id == "deepseek" for p in settings.providers)
+    assert any(p.id == "typesafe" for p in settings.providers)
+    assert settings.has_keys.get("deepseek") is False
+    assert settings.has_keys.get("typesafe") is False
     assert settings.api_keys_masked == {} or all(
         (v is None or v.startswith("••••")) for v in settings.api_keys_masked.values()
     )
@@ -30,6 +33,7 @@ async def test_update_settings_stores_key_masked_on_read(reg):
     ))
     settings = await reg.get_agent_settings(mask_keys=True)
     assert settings.api_keys_masked["deepseek"] == "••••1234"
+    assert settings.has_keys["deepseek"] is True
     raw = await reg.get_raw_api_keys()
     assert raw["deepseek"] == "sk-test-secret-key-1234"
 
@@ -133,3 +137,63 @@ async def test_suggestion_persists_context_hash(reg):
     summary = await reg.suggestion_cost_summary("proj")
     assert summary["suggestion_count"] == 1
     assert summary["pending"] == 1
+
+
+@pytest.mark.asyncio
+async def test_typesafe_provider_migrated_and_keys_cleared(tmp_path):
+    import json
+    import aiosqlite
+    db = tmp_path / "legacy.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "CREATE TABLE agent_settings ("
+            " id INTEGER PRIMARY KEY, default_model TEXT,"
+            " providers_json TEXT, api_keys_json TEXT)"
+        )
+        await conn.execute(
+            "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+            (
+                "deepseek-chat",
+                json.dumps([{
+                    "id": "deepseek", "name": "DeepSeek",
+                    "base_url": "https://api.deepseek.com",
+                    "model_ids": ["deepseek-chat"],
+                }]),
+                json.dumps({"deepseek": "sk-legacy-1111"}),
+            ),
+        )
+        await conn.commit()
+
+    # The file above is not a full loom db; AgentRegistry.initialize creates
+    # remaining tables and must migrate the typesafe provider into the row.
+    from daemon.registry import AgentRegistry
+    from daemon.models import AgentSettingsUpdate
+    reg = AgentRegistry(str(db))
+    await reg.initialize()
+    try:
+        settings = await reg.get_agent_settings()
+        ids = {p.id for p in settings.providers}
+        assert "deepseek" in ids
+        assert "typesafe" in ids
+        assert settings.has_keys["deepseek"] is True
+        assert settings.has_keys["typesafe"] is False
+        await reg.update_agent_settings(AgentSettingsUpdate(
+            api_keys={"typesafe": "jev-legacy-2222"},
+            providers=[{
+                "id": "typesafe", "name": "TypeSafe (Jev)",
+                "base_url": "http://localhost:11434", "model_ids": ["jev-latest"],
+            }],
+        ))
+        settings = await reg.get_agent_settings()
+        assert settings.has_keys["typesafe"] is True
+        assert settings.api_keys_masked["typesafe"] == "••••2222"
+        raw = await reg.get_raw_api_keys()
+        assert raw["typesafe"] == "jev-legacy-2222"
+        await reg.update_agent_settings(AgentSettingsUpdate(api_keys={"typesafe": ""}))
+        settings = await reg.get_agent_settings()
+        assert settings.has_keys["typesafe"] is False
+        raw = await reg.get_raw_api_keys()
+        assert "typesafe" not in raw
+        assert raw["deepseek"] == "sk-legacy-1111"
+    finally:
+        await reg.close()

@@ -12,9 +12,7 @@ Prints the model response to stdout for the worker to capture.
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import sqlite3
 import sys
 
 from daemon.llm_client import LlmClient, LlmError, DEFAULT_MODEL, DEFAULT_BASE_URL
@@ -26,36 +24,9 @@ def _settings_db_path() -> str:
 
 def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str, str]:
     """Return ``(api_key, base_url, model)`` from agent_settings, or empty key."""
-    path = db_path or _settings_db_path()
-    if not os.path.exists(path):
-        return "", DEFAULT_BASE_URL, DEFAULT_MODEL
-    try:
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
-        ).fetchone()
-        conn.close()
-    except sqlite3.Error:
-        return "", DEFAULT_BASE_URL, DEFAULT_MODEL
-    if row is None:
-        return "", DEFAULT_BASE_URL, DEFAULT_MODEL
-    model = row["default_model"] or DEFAULT_MODEL
-    keys = json.loads(row["api_keys_json"] or "{}")
-    providers = json.loads(row["providers_json"] or "[]")
-    base_url = DEFAULT_BASE_URL
-    api_key = keys.get("deepseek") or ""
-    for p in providers:
-        if not isinstance(p, dict):
-            continue
-        pid = p.get("id") or ""
-        models = p.get("model_ids") or []
-        if model in models or pid == "deepseek":
-            base_url = p.get("base_url") or base_url
-            api_key = keys.get(pid) or api_key
-            if model in models:
-                break
-    return api_key or "", base_url, model
+    from daemon.agent_credentials import load_stored_credentials
+    creds = load_stored_credentials(db_path or _settings_db_path())
+    return creds.llm_from_stored()
 
 
 def resolve_llm_config() -> tuple[str, str, str]:
