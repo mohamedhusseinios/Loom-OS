@@ -875,7 +875,7 @@ async def list_workers(project_id: str):
 # --- Loom Agent (chat + orchestration loop) ---
 
 @app.get("/api/agent/settings")
-async def get_agent_settings():
+async def get_agent_settings(_=Depends(require_token)):
     return (await registry.get_agent_settings(mask_keys=True)).model_dump()
 
 

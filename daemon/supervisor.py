@@ -37,6 +37,25 @@ class WorkerSupervisor:
             env = self._loom_agent_env()
         self._procs[task_id] = subprocess.Popen(cmd, env=env)
 
+    @staticmethod
+    def _loom_agent_env() -> dict[str, str]:
+        """Pass dashboard BYOK keys into the loom-agent worker process."""
+        import os
+        env = os.environ.copy()
+        try:
+            from daemon.agent_run import load_llm_config_from_settings
+            api_key, base_url, model = load_llm_config_from_settings()
+        except Exception:
+            return env
+        if api_key and not env.get("LOOM_AGENT_API_KEY") and not env.get("DEEPSEEK_API_KEY"):
+            env["LOOM_AGENT_API_KEY"] = api_key
+            env["DEEPSEEK_API_KEY"] = api_key
+        if base_url and not env.get("LOOM_AGENT_BASE_URL"):
+            env["LOOM_AGENT_BASE_URL"] = base_url
+        if model and not env.get("LOOM_AGENT_MODEL"):
+            env["LOOM_AGENT_MODEL"] = model
+        return env
+
     def is_running(self, task_id: str) -> bool:
         proc = self._procs.get(task_id)
         if proc is None:
