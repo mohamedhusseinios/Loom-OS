@@ -62,3 +62,37 @@ def test_agent_run_loads_key_from_settings_db(tmp_path, monkeypatch):
     monkeypatch.setenv("LOOM_DB_PATH", str(db))
     key2, _, _ = resolve_llm_config()
     assert key2 == "sk-from-dashboard"
+
+
+def test_supervisor_loom_agent_env_injects_settings_key(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from daemon.supervisor import WorkerSupervisor
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+        (
+            "deepseek-chat",
+            json.dumps([{
+                "id": "deepseek", "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+            }]),
+            json.dumps({"deepseek": "sk-injected"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    env = WorkerSupervisor._loom_agent_env()
+    assert env["LOOM_AGENT_API_KEY"] == "sk-injected"
+    assert env["DEEPSEEK_API_KEY"] == "sk-injected"

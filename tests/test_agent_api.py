@@ -108,7 +108,7 @@ async def test_dismiss_suggestion(client):
 @pytest.mark.asyncio
 async def test_running_workspace_patch_does_not_trigger_suggest(client):
     """Worker workspace_path-only PATCH must not kick off auto-suggest."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     reg = api_module.registry
     tid = await reg.create_agent_task(AgentTaskCreatePayload(
@@ -116,7 +116,7 @@ async def test_running_workspace_patch_does_not_trigger_suggest(client):
     ))
     await reg.update_agent_task(tid, status=AgentTaskStatus.RUNNING, assignee="loom-agent-noor")
 
-    with patch.object(api_module.AgentRuntime, "suggest", new_callable=AsyncMock) as suggest:
+    with patch("daemon.api.asyncio.create_task") as create_task:
         res = client.patch(
             f"/api/projects/noor/tasks/{tid}",
             json={"workspace_path": "/tmp/wt"},
@@ -124,7 +124,7 @@ async def test_running_workspace_patch_does_not_trigger_suggest(client):
         assert res.status_code == 200
         assert res.json()["status"] == "running"
         assert res.json()["workspace_path"] == "/tmp/wt"
-        suggest.assert_not_called()
+        create_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -138,14 +138,20 @@ async def test_explicit_leave_running_schedules_suggest(client):
     ))
     await reg.update_agent_task(tid, status=AgentTaskStatus.RUNNING, assignee="loom-agent-noor")
 
+    scheduled = []
+
+    def capture(coro):
+        scheduled.append(coro)
+        return AsyncMock()  # stand-in Task
+
     with patch.object(api_module.AgentRuntime, "suggest", new_callable=AsyncMock) as suggest:
-        res = client.patch(
-            f"/api/projects/noor/tasks/{tid}",
-            json={"status": "blocked", "result": "{}"},
-        )
+        with patch("daemon.api.asyncio.create_task", side_effect=capture):
+            res = client.patch(
+                f"/api/projects/noor/tasks/{tid}",
+                json={"status": "blocked", "result": "{}"},
+            )
         assert res.status_code == 200
         assert res.json()["status"] == "blocked"
-        # create_task schedules the coroutine; allow the loop a tick.
-        import asyncio
-        await asyncio.sleep(0)
+        assert len(scheduled) == 1
+        await scheduled[0]
         suggest.assert_awaited()
