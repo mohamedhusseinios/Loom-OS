@@ -18,6 +18,16 @@
 
 ## Quick Start
 
+**From this repo (one command):**
+
+```bash
+./run.sh            # starts daemon :8472 + dashboard :3000 (creates .venv / installs deps if needed)
+./run.sh --open     # same, then opens the dashboard in your browser
+./run.sh --help     # flags: --reload, --port, --auth-token, --dashboard-port, …
+```
+
+**From PyPI (daemon only), then wire a project:**
+
 ```bash
 pip install loom-os                         # base install — no LLM keys required
 loom start                                  # starts daemon on http://127.0.0.1:8472
@@ -25,13 +35,7 @@ loom init --project my-app --project-path . # bootstraps inbox + starter registe
 # (or register a specific agent instead of init):
 #   loom register --agent claude-code --project my-app --project-path /abs/path
 #   loom wire --project my-app --project-path .
-open http://localhost:3000                  # dashboard (run the Next.js app — see below)
-```
-
-The dashboard is a Next.js app under `dashboard/`. Start it with:
-
-```bash
-cd dashboard && npm install && npm run dev   # http://localhost:3000
+cd dashboard && npm install && npm run dev  # http://localhost:3000
 ```
 
 | What | Where |
