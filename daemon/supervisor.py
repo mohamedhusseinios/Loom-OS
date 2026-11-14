@@ -32,7 +32,10 @@ class WorkerSupervisor:
             "--max-budget-usd", str(max_budget_usd),
         ]
         logger.info("spawning one-shot worker for task %s", task_id)
-        self._procs[task_id] = subprocess.Popen(cmd)
+        env = None
+        if agent == "loom-agent":
+            env = self._loom_agent_env()
+        self._procs[task_id] = subprocess.Popen(cmd, env=env)
 
     def is_running(self, task_id: str) -> bool:
         proc = self._procs.get(task_id)

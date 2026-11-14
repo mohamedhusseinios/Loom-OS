@@ -8,6 +8,9 @@ from daemon.models import AgentInfo, ProjectInfo, AgentStatus
 from daemon.models import (
     AgentTaskCreatePayload, AgentTaskRecord, AgentTaskStatus,
     AgentTaskUpdatePayload, TaskProgressRecord,
+    AgentSettings, AgentSettingsUpdate, AgentProviderConfig,
+    AgentChatRecord, AgentMessageRecord,
+    TaskSuggestionRecord, SuggestionStatus,
 )
 
 
@@ -112,6 +115,66 @@ class AgentRegistry:
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_task_progress_task"
             " ON task_progress(task_id)"
+        )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                default_model TEXT NOT NULL DEFAULT 'deepseek-chat',
+                providers_json TEXT NOT NULL DEFAULT '[]',
+                api_keys_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        await self.db.execute(
+            "INSERT OR IGNORE INTO agent_settings (id, default_model, providers_json, api_keys_json)"
+            " VALUES (1, 'deepseek-chat', ?, '{}')",
+            (json.dumps([{
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+            }]),),
+        )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_chats (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                task_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_messages (
+                id TEXT PRIMARY KEY,
+                chat_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_messages_chat"
+            " ON agent_messages(chat_id, created_at)"
+        )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS task_suggestions (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                action_label TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                prose TEXT NOT NULL DEFAULT '',
+                catalog_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pending',
+                jev_skipped INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_suggestions_task_status"
+            " ON task_suggestions(task_id, status)"
         )
         await self.db.commit()
 
@@ -661,3 +724,196 @@ class AgentRegistry:
             (nodes, edges, communities, datetime.now(timezone.utc).isoformat(), project_id),
         )
         await self.db.commit()
+
+    # --- Loom agent settings / chats / suggestions ---
+
+    @staticmethod
+    def _mask_key(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        if len(raw) <= 4:
+            return "••••"
+        return "••••" + raw[-4:]
+
+    async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
+        cursor = await self.db.execute(
+            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return AgentSettings(
+                providers=[AgentProviderConfig(
+                    id="deepseek", name="DeepSeek",
+                    base_url="https://api.deepseek.com",
+                    model_ids=["deepseek-chat"],
+                )],
+            )
+        providers = [AgentProviderConfig(**p) for p in json.loads(row["providers_json"] or "[]")]
+        keys = json.loads(row["api_keys_json"] or "{}")
+        masked = {k: self._mask_key(v) for k, v in keys.items()} if mask_keys else keys
+        return AgentSettings(
+            default_model=row["default_model"] or "deepseek-chat",
+            providers=providers,
+            api_keys_masked=masked,
+        )
+
+    async def get_raw_api_keys(self) -> dict[str, str]:
+        cursor = await self.db.execute(
+            "SELECT api_keys_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return {}
+        return json.loads(row["api_keys_json"] or "{}")
+
+    async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
+        current = await self.get_agent_settings(mask_keys=False)
+        raw_keys = await self.get_raw_api_keys()
+        default_model = payload.default_model or current.default_model
+        providers = payload.providers if payload.providers is not None else current.providers
+        if payload.api_keys:
+            for pid, key in payload.api_keys.items():
+                if key and not key.startswith("••••"):
+                    raw_keys[pid] = key
+        await self.db.execute(
+            "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?"
+            " WHERE id = 1",
+            (default_model, json.dumps([p.model_dump() for p in providers]), json.dumps(raw_keys)),
+        )
+        await self.db.commit()
+        return await self.get_agent_settings(mask_keys=True)
+
+    async def create_agent_chat(self, project: str, task_id: str | None = None) -> AgentChatRecord:
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        chat_id = str(uuid.uuid4())
+        await self.db.execute(
+            "INSERT INTO agent_chats (id, project, task_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, project, task_id, now, now),
+        )
+        await self.db.commit()
+        return AgentChatRecord(id=chat_id, project=project, task_id=task_id, created_at=now, updated_at=now)
+
+    async def get_agent_chat(self, chat_id: str) -> AgentChatRecord | None:
+        cursor = await self.db.execute("SELECT * FROM agent_chats WHERE id = ?", (chat_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return AgentChatRecord(
+            id=row["id"], project=row["project"], task_id=row["task_id"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    async def add_agent_message(self, chat_id: str, role: str, content: str) -> AgentMessageRecord:
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        msg_id = str(uuid.uuid4())
+        await self.db.execute(
+            "INSERT INTO agent_messages (id, chat_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (msg_id, chat_id, role, content, now),
+        )
+        await self.db.execute(
+            "UPDATE agent_chats SET updated_at = ? WHERE id = ?", (now, chat_id),
+        )
+        await self.db.commit()
+        return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now)
+
+    async def list_agent_messages(self, chat_id: str, limit: int = 50) -> list[AgentMessageRecord]:
+        """Return the latest ``limit`` messages in chronological order."""
+        cursor = await self.db.execute(
+            "SELECT * FROM ("
+            " SELECT * FROM agent_messages WHERE chat_id = ?"
+            " ORDER BY created_at DESC LIMIT ?"
+            ") AS recent ORDER BY created_at ASC",
+            (chat_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            AgentMessageRecord(
+                id=r["id"], chat_id=r["chat_id"], role=r["role"],
+                content=r["content"], created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    async def dismiss_pending_suggestions(self, task_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE task_suggestions SET status = ?, updated_at = ?"
+            " WHERE task_id = ? AND status = ?",
+            (SuggestionStatus.DISMISSED.value, now, task_id, SuggestionStatus.PENDING.value),
+        )
+        await self.db.commit()
+
+    async def create_task_suggestion(
+        self,
+        project: str,
+        task_id: str,
+        action_id: str,
+        action_label: str,
+        confidence: float,
+        prose: str,
+        catalog: list[dict],
+        jev_skipped: bool = False,
+    ) -> TaskSuggestionRecord:
+        import uuid
+        await self.dismiss_pending_suggestions(task_id)
+        now = datetime.now(timezone.utc).isoformat()
+        sid = str(uuid.uuid4())
+        await self.db.execute(
+            "INSERT INTO task_suggestions"
+            " (id, project, task_id, action_id, action_label, confidence, prose,"
+            " catalog_json, status, jev_skipped, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                sid, project, task_id, action_id, action_label, confidence, prose,
+                json.dumps(catalog), SuggestionStatus.PENDING.value,
+                1 if jev_skipped else 0, now, now,
+            ),
+        )
+        await self.db.commit()
+        return TaskSuggestionRecord(
+            id=sid, project=project, task_id=task_id, action_id=action_id,
+            action_label=action_label, confidence=confidence, prose=prose,
+            catalog_json=json.dumps(catalog), status=SuggestionStatus.PENDING,
+            jev_skipped=jev_skipped, created_at=now, updated_at=now,
+        )
+
+    async def get_task_suggestion(self, suggestion_id: str) -> TaskSuggestionRecord | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM task_suggestions WHERE id = ?", (suggestion_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_suggestion(row)
+
+    async def get_pending_suggestion(self, task_id: str) -> TaskSuggestionRecord | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM task_suggestions WHERE task_id = ? AND status = ?"
+            " ORDER BY created_at DESC LIMIT 1",
+            (task_id, SuggestionStatus.PENDING.value),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_suggestion(row) if row else None
+
+    async def set_suggestion_status(self, suggestion_id: str, status: SuggestionStatus) -> TaskSuggestionRecord | None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE task_suggestions SET status = ?, updated_at = ? WHERE id = ?",
+            (status.value, now, suggestion_id),
+        )
+        await self.db.commit()
+        return await self.get_task_suggestion(suggestion_id)
+
+    @staticmethod
+    def _row_to_suggestion(row) -> TaskSuggestionRecord:
+        return TaskSuggestionRecord(
+            id=row["id"], project=row["project"], task_id=row["task_id"],
+            action_id=row["action_id"], action_label=row["action_label"],
+            confidence=float(row["confidence"] or 0), prose=row["prose"] or "",
+            catalog_json=row["catalog_json"] or "[]",
+            status=SuggestionStatus(row["status"]),
+            jev_skipped=bool(row["jev_skipped"]),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )

@@ -219,7 +219,13 @@
     "count": "{count} مهمة",
     "newTask": "مهمة جديدة",
     "emptyColumn": "لا توجد مهام",
-    "columns": { "todo": "قيد الانتظار", "ready": "جاهزة", "running": "قيد التنفيذ", "blocked": "متوقفة", "done": "منجزة" }
+    "columns": {
+      "todo": "قيد الانتظار",
+      "ready": "جاهزة",
+      "running": "قيد التنفيذ",
+      "blocked": "متوقفة",
+      "done": "منجزة"
+    }
   },
   "NewTaskModal": {
     "heading": "مهمة جديدة",
@@ -277,5 +283,32 @@
     "searching": "جارٍ البحث عبر المشاريع...",
     "loading": "جارٍ تحميل الفهرس الموحّد...",
     "degree": "الدرجة {deg}"
+  },
+  "LoomAgent": {
+    "title": "وكيل Loom",
+    "settings": "الإعدادات",
+    "settingsTitle": "إعدادات الوكيل",
+    "defaultModel": "النموذج الافتراضي",
+    "apiKey": "مفتاح DeepSeek",
+    "apiKeyPlaceholder": "الصق مفتاح API",
+    "byokHint": "المفاتيح تبقى على الخادم المحلي.",
+    "saveSettings": "حفظ",
+    "saving": "جارٍ الحفظ…",
+    "settingsSaved": "تم الحفظ.",
+    "settingsSaveError": "تعذر حفظ الإعدادات.",
+    "settingsLoadError": "تعذر تحميل الإعدادات.",
+    "placeholder": "اسأل عن المشروع أو المهمة…",
+    "emptyHint": "تحدث عن مهام اللوحة. السياق من ذاكرة الرسم البياني؛ Jev يساعد في اختيار الخطوة التالية.",
+    "chatError": "فشل الدردشة",
+    "taskScoped": "مرتبط بالمهمة المحددة",
+    "projectScoped": "دردشة على مستوى المشروع",
+    "suggestion": "الخطوة التالية المقترحة",
+    "suggestNext": "اقترح الخطوة التالية",
+    "accept": "قبول",
+    "dismiss": "رفض",
+    "implement": "تنفيذ",
+    "refresh": "تحديث",
+    "confidence": "ثقة {pct}%",
+    "jevSkipped": "تم تخطي Jev"
   }
 }

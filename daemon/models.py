@@ -228,3 +228,73 @@ class TaskProgressRecord(BaseModel):
     kind: str
     message: str
     ts: str
+
+
+# --- Loom Agent / Orchestration Loop ---
+
+class AgentProviderConfig(BaseModel):
+    id: str
+    name: str
+    base_url: str
+    model_ids: list[str] = Field(default_factory=list)
+
+
+class AgentSettings(BaseModel):
+    default_model: str = "deepseek-chat"
+    providers: list[AgentProviderConfig] = Field(default_factory=list)
+    api_keys_masked: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class AgentSettingsUpdate(BaseModel):
+    default_model: Optional[str] = None
+    providers: Optional[list[AgentProviderConfig]] = None
+    api_keys: Optional[dict[str, str]] = None  # write-only raw keys
+
+
+class AgentChatRecord(BaseModel):
+    id: str
+    project: str
+    task_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class AgentMessageRecord(BaseModel):
+    id: str
+    chat_id: str
+    role: str  # user | assistant | system
+    content: str
+    created_at: str
+
+
+class AgentChatRequest(BaseModel):
+    message: str
+    task_id: Optional[str] = None
+    chat_id: Optional[str] = None
+
+
+class AgentChatResponse(BaseModel):
+    chat_id: str
+    reply: str
+    suggestion_id: Optional[str] = None
+
+
+class SuggestionStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DISMISSED = "dismissed"
+
+
+class TaskSuggestionRecord(BaseModel):
+    id: str
+    project: str
+    task_id: str
+    action_id: str
+    action_label: str
+    confidence: float = 0.0
+    prose: str = ""
+    catalog_json: str = "[]"
+    status: SuggestionStatus = SuggestionStatus.PENDING
+    jev_skipped: bool = False
+    created_at: str
+    updated_at: str

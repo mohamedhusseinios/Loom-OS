@@ -495,3 +495,106 @@ export async function fetchFederatedReferences(
 ): Promise<FederatedReferencesResult> {
   return fetchApi(`/api/federated/references?symbol=${encodeURIComponent(symbol)}`);
 }
+
+// --- Loom Agent (orchestration loop) ---
+
+export interface AgentSettings {
+  default_model: string;
+  providers: { id: string; name: string; base_url: string; model_ids: string[] }[];
+  api_keys_masked: Record<string, string | null>;
+}
+
+export interface TaskSuggestion {
+  id: string;
+  project: string;
+  task_id: string;
+  action_id: string;
+  action_label: string;
+  confidence: number;
+  prose: string;
+  catalog_json: string;
+  status: "pending" | "accepted" | "dismissed";
+  jev_skipped: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAgentSettings(): Promise<AgentSettings> {
+  return fetchApi("/api/agent/settings");
+}
+
+export async function updateAgentSettings(payload: {
+  default_model?: string;
+  providers?: AgentSettings["providers"];
+  api_keys?: Record<string, string>;
+}): Promise<AgentSettings> {
+  const res = await fetch(`${BASE_URL}/api/agent/settings`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function agentChat(
+  projectId: string,
+  payload: { message: string; task_id?: string; chat_id?: string },
+): Promise<{ chat_id: string; reply: string; suggestion_id: string | null }> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chat`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    throw new Error(detail.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function suggestTask(projectId: string, taskId: string): Promise<TaskSuggestion> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/suggest`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function getPendingSuggestion(
+  projectId: string,
+  taskId: string,
+): Promise<TaskSuggestion | null> {
+  const data = await fetchApi<{ suggestion: TaskSuggestion | null }>(
+    `/api/projects/${projectId}/tasks/${taskId}/suggestion`,
+  );
+  return data.suggestion;
+}
+
+export async function acceptSuggestion(projectId: string, suggestionId: string): Promise<TaskSuggestion> {
+  const res = await fetch(
+    `${BASE_URL}/api/projects/${projectId}/suggestions/${suggestionId}/accept`,
+    { method: "POST", headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function dismissSuggestion(projectId: string, suggestionId: string): Promise<TaskSuggestion> {
+  const res = await fetch(
+    `${BASE_URL}/api/projects/${projectId}/suggestions/${suggestionId}/dismiss`,
+    { method: "POST", headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function implementTask(projectId: string, taskId: string): Promise<AgentTask> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

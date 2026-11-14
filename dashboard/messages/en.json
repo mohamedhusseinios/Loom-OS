@@ -219,7 +219,13 @@
     "count": "{count} tasks",
     "newTask": "New Task",
     "emptyColumn": "No tasks",
-    "columns": { "todo": "To Do", "ready": "Ready", "running": "Running", "blocked": "Blocked", "done": "Done" }
+    "columns": {
+      "todo": "To Do",
+      "ready": "Ready",
+      "running": "Running",
+      "blocked": "Blocked",
+      "done": "Done"
+    }
   },
   "NewTaskModal": {
     "heading": "New Task",
@@ -277,5 +283,32 @@
     "searching": "Searching across projects...",
     "loading": "Loading federation index...",
     "degree": "Degree {deg}"
+  },
+  "LoomAgent": {
+    "title": "Loom Agent",
+    "settings": "Settings",
+    "settingsTitle": "Agent settings",
+    "defaultModel": "Default model",
+    "apiKey": "DeepSeek API key",
+    "apiKeyPlaceholder": "Paste API key",
+    "byokHint": "Keys stay on the daemon. Add OpenAI-compatible providers via API later.",
+    "saveSettings": "Save",
+    "saving": "Saving…",
+    "settingsSaved": "Saved.",
+    "settingsSaveError": "Could not save settings.",
+    "settingsLoadError": "Could not load settings.",
+    "placeholder": "Ask about this project or task…",
+    "emptyHint": "Chat about board tasks. Context comes from project graph memory; Jev helps choose the next step.",
+    "chatError": "Chat failed",
+    "taskScoped": "Scoped to selected task",
+    "projectScoped": "Project-wide chat",
+    "suggestion": "Suggested next step",
+    "suggestNext": "Suggest next step",
+    "accept": "Accept",
+    "dismiss": "Dismiss",
+    "implement": "Implement",
+    "refresh": "Refresh",
+    "confidence": "{pct}% confidence",
+    "jevSkipped": "Jev skipped"
   }
 }
