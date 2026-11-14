@@ -132,6 +132,19 @@ def _avg(total: float, count: int) -> float | None:
     return total / count
 
 
+def _include_role_latency(provider: str, reason: str | None, tokens: int | None) -> bool:
+    """NullDecisionClient latency is not a measured provider call.
+
+    ``provider == none`` is the explicit case. A ``none`` skip with no tokens
+    is the same call when the provider field was left blank.
+    """
+    if provider == "none":
+        return False
+    if (reason or "").strip().lower() == "none" and not tokens:
+        return False
+    return True
+
+
 def summarize_suggestions(rows: Iterable[Any]) -> dict[str, Any]:
     """Aggregate usage, provider cost, skip reasons, latency, and outcomes."""
     rows = list(rows)
@@ -197,12 +210,13 @@ def summarize_suggestions(rows: Iterable[Any]) -> dict[str, Any]:
             if latency is not None:
                 item["latency_sum"] += latency
                 item["latency_n"] += 1
-                if role == "filter":
-                    filter_latency_sum += latency
-                    filter_latency_n += 1
-                else:
-                    judgment_latency_sum += latency
-                    judgment_latency_n += 1
+                if _include_role_latency(provider_name, reason, tokens):
+                    if role == "filter":
+                        filter_latency_sum += latency
+                        filter_latency_n += 1
+                    else:
+                        judgment_latency_sum += latency
+                        judgment_latency_n += 1
             if skipped:
                 item["skipped"] += 1
                 reason_key = _reason_key(reason)

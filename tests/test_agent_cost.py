@@ -99,6 +99,25 @@ def test_summarize_reports_providers_skips_and_gliclass_cost():
     assert gliclass["latency_ms_avg"] == pytest.approx(20)
 
 
+def test_none_judgment_latency_stays_on_filter_sample():
+    from scripts.agent_cost_report import format_comparison
+
+    summary = summarize_suggestions([{
+        "filter_provider": "gliclass", "filter_model": "gli",
+        "filter_input_tokens": None, "filter_skipped": 0, "filter_skip_reason": None,
+        "filter_latency_ms": 40.0,
+        "judgment_provider": "none", "judgment_model": "",
+        "judgment_input_tokens": None, "judgment_skipped": 1, "judgment_skip_reason": "none",
+        "judgment_latency_ms": 0.02,
+        "llm_prompt_tokens": 0, "llm_completion_tokens": 0,
+        "escalated": 1, "status": "pending",
+    }])
+    assert summary["filter_latency_ms_avg"] == pytest.approx(40.0)
+    assert summary["judgment_latency_ms_avg"] is None
+    table = format_comparison([("gliclass/gli judgment none/-", summary)])
+    assert table.splitlines()[1].split()[-1] == "40.0"
+
+
 def test_report_script_reads_db(tmp_path, capsys):
     db = tmp_path / "state.db"
     conn = sqlite3.connect(db)

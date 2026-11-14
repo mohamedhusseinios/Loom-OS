@@ -394,10 +394,29 @@ def _cost_cell(summary: dict) -> str:
 
 
 def _latency_cell(summary: dict) -> str:
-    values = [value for value in (summary.get("filter_latency_ms_avg"), summary.get("judgment_latency_ms_avg")) if value is not None]
+    """Mean of measured role latencies. Provider ``none`` is already omitted from those averages."""
+    values = []
+    for role, key in (("filter", "filter_latency_ms_avg"), ("judgment", "judgment_latency_ms_avg")):
+        if _role_latency_is_null_only(summary, role):
+            continue
+        value = summary.get(key)
+        if value is not None:
+            values.append(value)
     if not values:
         return "n/a"
     return f"{sum(values) / len(values):.1f}"
+
+
+def _role_latency_is_null_only(summary: dict, role: str) -> bool:
+    rows = [item for item in (summary.get("providers") or []) if item.get("role") == role and item.get("latency_ms_avg") is not None]
+    if not rows:
+        return False
+    return all(item.get("provider") == "none" or _null_skip_only(item) for item in rows)
+
+
+def _null_skip_only(item: dict) -> bool:
+    reasons = item.get("skips_by_reason") or {}
+    return "none" in reasons and not item.get("input_tokens") and set(reasons) <= {"none"}
 
 
 def format_comparison(items: list[tuple[str, dict]]) -> str:
