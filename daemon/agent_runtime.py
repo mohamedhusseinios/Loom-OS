@@ -5,20 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
-from daemon.agent_credentials import (
-    resolve_deepseek_key,
-    resolve_typesafe_base_url,
-    resolve_typesafe_key,
-)
-from daemon.jev_client import JevClient
+from daemon.agent_credentials import resolve_deepseek_key
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, SuggestionStatus,
 )
 from daemon.orchestrator import (
-    LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, context_hash,
+    LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult, context_hash,
 )
 
 logger = logging.getLogger("loom.agent_runtime")
@@ -57,12 +51,10 @@ class AgentRuntime:
         api_key = resolve_deepseek_key(stored_key)
         return LlmClient(api_key=api_key, base_url=base_url), model
 
-    async def _jev_from_settings(self) -> JevClient:
-        creds = await self._stored_credentials()
-        return JevClient(
-            api_key=resolve_typesafe_key(creds.typesafe_key) or None,
-            base_url=resolve_typesafe_base_url(creds.typesafe_base_url),
-        )
+    async def _decision_settings(self) -> tuple[object, dict[str, str]]:
+        settings = await self.registry.get_agent_settings(mask_keys=True)
+        raw_keys = await self.registry.get_raw_api_keys()
+        return settings, raw_keys
 
     async def chat(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AgentChatResponse:
         llm, model = await self._llm_from_settings()
@@ -85,22 +77,20 @@ class AgentRuntime:
             task = await self.registry.get_agent_task(payload.task_id)
             if task is None:
                 raise ValueError(f"task not found: {payload.task_id}")
-            orch = Orchestrator(self.graph_engine, jev=await self._jev_from_settings(), llm=llm)
+            settings, raw_keys = await self._decision_settings()
+            orch = Orchestrator(self.graph_engine, llm=llm)
             result = await orch.run_suggest_cycle(
                 project_path, project_id, task,
                 chat_messages=chat_msgs[:-1],
                 user_message=payload.message,
                 model=model,
+                settings=settings,
+                raw_keys=raw_keys,
             )
             reply = result.reply
             sug = await self.registry.create_task_suggestion(
                 project_id, task.id, result.action_id, result.action_label,
-                result.confidence, result.prose, result.catalog, result.jev_skipped,
-                jev_input_tokens=result.jev_input_tokens,
-                llm_prompt_tokens=result.llm_prompt_tokens,
-                llm_completion_tokens=result.llm_completion_tokens,
-                escalated=result.escalated,
-                context_hash=result.context_hash,
+                result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
             )
             suggestion_id = sug.id
             if self.emit_event:
@@ -132,18 +122,15 @@ class AgentRuntime:
                 logger.info("auto-suggest skipped; context hash unchanged for task %s", task_id)
                 return pending
         llm, model = await self._llm_from_settings()
-        orch = Orchestrator(self.graph_engine, jev=await self._jev_from_settings(), llm=llm)
+        settings, raw_keys = await self._decision_settings()
+        orch = Orchestrator(self.graph_engine, llm=llm)
         result = await orch.run_suggest_cycle(
             project_path, project_id, task, model=model, prefetched_hits=hits,
+            settings=settings, raw_keys=raw_keys,
         )
         sug = await self.registry.create_task_suggestion(
             project_id, task.id, result.action_id, result.action_label,
-            result.confidence, result.prose, result.catalog, result.jev_skipped,
-            jev_input_tokens=result.jev_input_tokens,
-            llm_prompt_tokens=result.llm_prompt_tokens,
-            llm_completion_tokens=result.llm_completion_tokens,
-            escalated=result.escalated,
-            context_hash=result.context_hash,
+            result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
         )
         _suggest_cooldown[task_id] = time.monotonic()
         if self.emit_event:
@@ -202,6 +189,30 @@ class AgentRuntime:
         if self.emit_event and updated:
             await self.emit_event("task:updated", project_id, updated.model_dump(mode="json"))
         return updated
+
+
+def _suggestion_fields(result: SuggestResult) -> dict:
+    return {
+        "jev_skipped": result.jev_skipped,
+        "jev_input_tokens": result.jev_input_tokens,
+        "llm_prompt_tokens": result.llm_prompt_tokens,
+        "llm_completion_tokens": result.llm_completion_tokens,
+        "escalated": result.escalated,
+        "context_hash": result.context_hash,
+        "filter_provider": result.filter_provider or None,
+        "filter_model": result.filter_model or None,
+        "judgment_provider": result.judgment_provider or None,
+        "judgment_model": result.judgment_model or None,
+        "filter_skipped": result.filter_skipped,
+        "judgment_skipped": result.judgment_skipped,
+        "filter_skip_reason": result.filter_skip_reason,
+        "judgment_skip_reason": result.judgment_skip_reason,
+        "filter_input_tokens": result.filter_input_tokens,
+        "judgment_input_tokens": result.judgment_input_tokens,
+        "filter_latency_ms": result.filter_latency_ms,
+        "judgment_latency_ms": result.judgment_latency_ms,
+        "effective_thresholds_json": result.effective_thresholds_json or None,
+    }
 
 
 class ConflictError(Exception):

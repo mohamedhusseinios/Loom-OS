@@ -1,4 +1,4 @@
-"""Orchestration loop: graph → Jev filter → judgments → optional main LLM → suggestion."""
+"""Orchestration loop: graph → decision filter → judgments → optional main LLM → suggestion."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from daemon.jev_client import JevClient, JevError
+from daemon.decision import DecisionClient, DecisionConfig, DecisionResult, ProviderId, build_decision_clients, effective_thresholds, resolve_decision_config
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import AgentTaskRecord, AgentTaskStatus
 
@@ -24,6 +25,7 @@ PACK_CHAR_CAP = 2000
 INSTRUCTION_CHAR_CAP = 1000
 CHAT_HISTORY_LIMIT = 8
 FILTER_CACHE_TTL_SEC = 30.0
+FILTER_SKIP_TOP_HITS = 5
 
 # (key -> (monotonic_ts, selected_hits, mid_keys))
 _filter_cache: dict[str, tuple[float, list[dict], list[str]]] = {}
@@ -82,6 +84,19 @@ class SuggestResult:
     mid_band_keys: list[str] = field(default_factory=list)
     context_hash: str = ""
     filter_cache_hit: bool = False
+    filter_provider: str = ""
+    filter_model: str = ""
+    judgment_provider: str = ""
+    judgment_model: str = ""
+    filter_skipped: bool = False
+    judgment_skipped: bool = False
+    filter_skip_reason: str | None = None
+    judgment_skip_reason: str | None = None
+    filter_input_tokens: int | None = None
+    judgment_input_tokens: int | None = None
+    filter_latency_ms: float | None = None
+    judgment_latency_ms: float | None = None
+    effective_thresholds_json: str = ""
 
 
 @dataclass
@@ -227,41 +242,6 @@ def _filter_cache_put(key: str, selected: list[dict], mid_keys: list[str]) -> No
     _filter_cache[key] = (time.monotonic(), selected, mid_keys)
 
 
-def noul_value(ans: Any) -> float:
-    """Extract a noul / probability from a Jev answer object."""
-    if not isinstance(ans, dict):
-        return 0.0
-    if ans.get("type") == "noul" or "noul" in ans:
-        try:
-            return float(ans.get("noul") or 0)
-        except (TypeError, ValueError):
-            return 0.0
-    if ans.get("type") == "choice":
-        probs = ans.get("probabilities") or {}
-        choice = ans.get("choice")
-        if choice is not None and choice in probs:
-            try:
-                return float(probs[choice])
-            except (TypeError, ValueError):
-                return 0.0
-    try:
-        return float(ans.get("score") or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def usage_input_tokens(payload: Any) -> int:
-    if not isinstance(payload, dict):
-        return 0
-    usage = payload.get("usage") or {}
-    if not isinstance(usage, dict):
-        return 0
-    try:
-        return int(usage.get("input_tokens") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def llm_usage_tokens(usage: Any) -> tuple[int, int]:
     """Return (prompt_tokens, completion_tokens) from an OpenAI-style usage object."""
     if not isinstance(usage, dict):
@@ -279,10 +259,10 @@ def llm_usage_tokens(usage: Any) -> tuple[int, int]:
     return _int("prompt_tokens", "input_tokens"), _int("completion_tokens", "output_tokens")
 
 
-def _band(value: float) -> str:
-    if value >= NOUL_YES:
+def _band(value: float, yes: float = NOUL_YES, no: float = NOUL_NO) -> str:
+    if value >= yes:
         return "yes"
-    if value < NOUL_NO:
+    if value < no:
         return "no"
     return "mid"
 
@@ -308,12 +288,11 @@ def partition_relevance(
     return selected, [h for _, h in mid_hits[:keep_mid]], mid_keys
 
 
-def map_judgments_to_action(
-    status: str,
-    judgments: Judgments,
-    catalog: list[dict],
-) -> ActionDecision:
-    """Map atomic Jev judgments onto a catalog action. Confidence is a real noul."""
+def map_judgments_to_action(status: str, judgments: Judgments, catalog: list[dict], yes_threshold: float = NOUL_YES, no_threshold: float = NOUL_NO) -> ActionDecision:
+    """Map atomic decision judgments onto a catalog action. Confidence is a real noul."""
+    def band(value: float) -> str:
+        return _band(value, yes_threshold, no_threshold)
+
     if not catalog:
         return ActionDecision(
             "loom.move_ready", "Move task to Ready", 0.5, True, ["empty_catalog"],
@@ -325,7 +304,7 @@ def map_judgments_to_action(
             ("blocked", judgments.blocked),
             ("ready_to_implement", judgments.ready_to_implement),
         )
-        if _band(val) == "mid"
+        if band(val) == "mid"
     ]
     uncertain = bool(mid_keys)
 
@@ -334,13 +313,13 @@ def map_judgments_to_action(
         if item is None:
             return None
         flag = uncertain if force_uncertain is None else (force_uncertain or uncertain)
-        if confidence < NOUL_YES:
+        if confidence < yes_threshold:
             flag = True
         return ActionDecision(action_id, item["label"], float(confidence), flag, mid_keys)
 
     grounded = [
         c for c in judgments.candidates
-        if (c.get("noul") or 0) >= NOUL_YES and c.get("id") in by_id
+        if (c.get("noul") or 0) >= yes_threshold and c.get("id") in by_id
     ]
 
     def fallback(force_uncertain: bool = True) -> ActionDecision:
@@ -359,48 +338,48 @@ def map_judgments_to_action(
     blocked, ready, complete = judgments.blocked, judgments.ready_to_implement, judgments.complete
 
     if status == AgentTaskStatus.TODO.value:
-        if _band(blocked) == "yes":
+        if band(blocked) == "yes":
             return pick("loom.move_blocked", blocked) or fallback()
-        if _band(ready) == "yes":
+        if band(ready) == "yes":
             return pick("loom.move_ready", ready) or fallback()
-        if _band(blocked) == "mid" and blocked >= ready:
+        if band(blocked) == "mid" and blocked >= ready:
             return pick("loom.move_blocked", blocked, True) or fallback()
-        if _band(ready) == "mid":
+        if band(ready) == "mid":
             return pick("loom.move_ready", ready, True) or fallback()
         return fallback()
 
     if status == AgentTaskStatus.READY.value:
-        if _band(blocked) == "yes":
+        if band(blocked) == "yes":
             return pick("loom.move_blocked", blocked) or fallback()
-        if _band(ready) == "yes":
+        if band(ready) == "yes":
             return pick("loom.move_running", ready) or fallback()
-        if _band(blocked) == "mid" and blocked >= ready:
+        if band(blocked) == "mid" and blocked >= ready:
             return pick("loom.move_blocked", blocked, True) or fallback()
-        if _band(ready) == "mid":
+        if band(ready) == "mid":
             return pick("loom.move_running", ready, True) or fallback()
         return fallback()
 
     if status == AgentTaskStatus.RUNNING.value:
-        if _band(blocked) == "yes":
+        if band(blocked) == "yes":
             return pick("loom.move_blocked", blocked) or fallback()
-        if _band(complete) == "yes":
+        if band(complete) == "yes":
             return pick("loom.move_done", complete) or fallback()
-        if _band(blocked) == "mid" and blocked >= complete:
+        if band(blocked) == "mid" and blocked >= complete:
             return pick("loom.move_blocked", blocked, True) or fallback()
-        if _band(complete) == "mid":
+        if band(complete) == "mid":
             return pick("loom.move_done", complete, True) or fallback()
         return fallback()
 
     if status == AgentTaskStatus.BLOCKED.value:
-        if _band(blocked) == "yes":
+        if band(blocked) == "yes":
             return fallback(force_uncertain=True)
-        if _band(blocked) == "no" and _band(ready) == "yes":
+        if band(blocked) == "no" and band(ready) == "yes":
             return pick("loom.move_ready", ready) or fallback()
-        if _band(blocked) == "no" and "loom.move_todo" in by_id:
+        if band(blocked) == "no" and "loom.move_todo" in by_id:
             # Not-blocked noul is the complement of the blocked question.
-            conf = (1.0 - blocked) if _band(ready) == "no" else ready
+            conf = (1.0 - blocked) if band(ready) == "no" else ready
             return pick("loom.move_todo", conf) or fallback()
-        if _band(blocked) == "mid":
+        if band(blocked) == "mid":
             if ready >= blocked:
                 return pick("loom.move_ready", ready, True) or fallback()
             return fallback(force_uncertain=True)
@@ -408,13 +387,13 @@ def map_judgments_to_action(
 
     if status == AgentTaskStatus.DONE.value:
         conf = complete if complete else 0.5
-        return pick("loom.move_archived", conf, _band(complete) != "yes") or fallback()
+        return pick("loom.move_archived", conf, band(complete) != "yes") or fallback()
 
     if status == AgentTaskStatus.TRIAGE.value:
-        if _band(ready) == "yes":
+        if band(ready) == "yes":
             return pick("loom.move_ready", ready) or fallback()
         if "loom.move_todo" in by_id:
-            conf = (1.0 - ready) if _band(ready) == "no" else ready
+            conf = (1.0 - ready) if band(ready) == "no" else ready
             return pick("loom.move_todo", conf) or fallback()
         return fallback()
 
@@ -425,32 +404,167 @@ def template_reply(action_label: str) -> str:
     return f"Suggested next step: {action_label}"
 
 
-def _answers_of(payload: Any) -> dict:
-    if not isinstance(payload, dict):
-        return {}
-    answers = payload.get("answers")
-    return answers if isinstance(answers, dict) else {}
+def filter_cache_key(provider: str, model: str, ctx_hash: str) -> str:
+    return f"{provider}\x1f{model}\x1f{ctx_hash}"
+
+
+def _provider_id(value: str) -> ProviderId:
+    if value in ("typesafe", "ollama", "gliclass", "none"):
+        return cast(ProviderId, value)
+    return "none"
+
+
+def _settings_value(settings: Any, name: str) -> Any:
+    if settings is None:
+        return None
+    if isinstance(settings, Mapping):
+        return settings.get(name)
+    return getattr(settings, name, None)
+
+
+def _provider_overrides(settings: Any, provider: str) -> dict[str, Any] | None:
+    raw = _settings_value(settings, "threshold_overrides")
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, Mapping):
+        return None
+    item = raw.get(provider)
+    if isinstance(item, Mapping):
+        return dict(item)
+    return None
+
+
+def _role_identity(client: Any, config: DecisionConfig | None, role: str) -> tuple[str, str]:
+    if config is not None:
+        if role == "filter":
+            return config.filter_provider, config.filter_model
+        return config.judgment_provider, config.judgment_model
+    provider = getattr(client, "provider", None) or ""
+    model = getattr(client, "model", None) or ""
+    return str(provider), str(model)
+
+
+def _role_thresholds(provider: str, settings: Any, config: DecisionConfig | None, role: str) -> dict[str, float]:
+    if config is not None:
+        chosen = config.filter_thresholds if role == "filter" else config.judgment_thresholds
+        return chosen.as_dict()
+    return effective_thresholds(provider or "none", _provider_overrides(settings, provider or "none"))
+
+
+def _score_or_mid(scores: Mapping[str, Any], key: str, mid: float) -> float:
+    if key not in scores:
+        return mid
+    try:
+        return float(scores[key])
+    except (TypeError, ValueError):
+        return mid
+
+
+def select_relevant_hits(hits: list[dict], scores: Mapping[str, Any], thresholds: Mapping[str, float]) -> tuple[list[dict], list[str]]:
+    """Apply keep / mid / drop. Missing per-hit scores stay in the mid band; unknown keys are ignored."""
+    mid = float(thresholds["mid"])
+    scored = [(_score_or_mid(scores, f"rel_{index}", mid), hit) for index, hit in enumerate(hits[:12])]
+    selected, _mid_hits, mid_keys = partition_relevance(scored, yes_threshold=float(thresholds["keep"]), no_threshold=float(thresholds["drop"]))
+    return selected, mid_keys
+
+
+def judgments_from_scores(scores: Mapping[str, Any], candidates: list[dict], thresholds: Mapping[str, float]) -> Judgments:
+    """Read complete / blocked / ready / grounded only. A missing score is mid-band."""
+    mid = float(thresholds["mid"])
+    cited = [c for c in candidates if isinstance(c, dict) and c.get("id") and c.get("graph_ids")]
+    grounded = [{"id": cand["id"], "label": cand.get("label") or cand["id"], "noul": _score_or_mid(scores, f"grounded_{index}", mid)} for index, cand in enumerate(cited)]
+    return Judgments(complete=_score_or_mid(scores, "complete", mid), blocked=_score_or_mid(scores, "blocked", mid), ready_to_implement=_score_or_mid(scores, "ready_to_implement", mid), candidates=grounded)
+
+
+def _skipped_decision(catalog: list[dict]) -> ActionDecision:
+    first = catalog[0]
+    return ActionDecision(first["id"], first["label"], 0.5, True, [])
+
+
+def _apply_judgment(status: str, result: DecisionResult, candidates: list[dict], catalog: list[dict], thresholds: Mapping[str, float]) -> tuple[ActionDecision, Judgments, bool, str | None]:
+    if result.skipped:
+        return _skipped_decision(catalog), Judgments(), True, result.skip_reason or "error"
+    judgments = judgments_from_scores(result.scores, candidates, thresholds)
+    decision = map_judgments_to_action(status, judgments, catalog, yes_threshold=float(thresholds["keep"]), no_threshold=float(thresholds["drop"]))
+    return decision, judgments, False, None
+
+
+def _should_escalate(filter_skipped: bool, judgment_skipped: bool, decision: ActionDecision, judgments: Judgments, thresholds: Mapping[str, float]) -> bool:
+    keep = float(thresholds["keep"])
+    drop = float(thresholds["drop"])
+    escalate_at = float(thresholds["escalate"])
+    key_mid = any(_band(value, keep, drop) == "mid" for value in (judgments.complete, judgments.blocked, judgments.ready_to_implement))
+    return bool(filter_skipped or judgment_skipped or decision.uncertain or decision.confidence < escalate_at or key_mid)
+
+
+def _merge_tokens(current: int | None, incoming: int | None) -> int | None:
+    if incoming is None:
+        return current
+    if current is None:
+        return int(incoming)
+    return int(current) + int(incoming)
+
+
+def _legacy_token_sum(filter_tokens: int | None, judgment_tokens: int | None) -> int:
+    total = 0
+    if isinstance(filter_tokens, int):
+        total += filter_tokens
+    if isinstance(judgment_tokens, int):
+        total += judgment_tokens
+    return total
+
+
+def _thresholds_json(filter_thresholds: Mapping[str, float], judgment_thresholds: Mapping[str, float]) -> str:
+    return json.dumps({"filter": dict(filter_thresholds), "judgment": dict(judgment_thresholds)}, sort_keys=True)
+
+
+def _error_result(provider: str, model: str) -> DecisionResult:
+    return DecisionResult(provider=_provider_id(provider), model=model, skipped=True, skip_reason="error")
 
 
 class Orchestrator:
-    """Runs one suggest/chat cycle against graph memory + Jev + main LLM."""
+    """One suggest/chat cycle: graph, two DecisionClients, optional main LLM."""
 
-    def __init__(self, graph_engine, jev: JevClient | None = None, llm: LlmClient | None = None):
+    def __init__(self, graph_engine, jev: DecisionClient | None = None, llm: LlmClient | None = None, relevance_client: DecisionClient | None = None, judgment_client: DecisionClient | None = None):
         self.graph_engine = graph_engine
-        self.jev = jev or JevClient()
         self.llm = llm or LlmClient()
+        if relevance_client is None and judgment_client is None and jev is None:
+            self._injected: tuple[DecisionClient, DecisionClient] | None = None
+        else:
+            relevance = relevance_client if relevance_client is not None else jev
+            judgment = judgment_client if judgment_client is not None else jev
+            if relevance is None:
+                relevance = judgment
+            if judgment is None:
+                judgment = relevance
+            assert relevance is not None and judgment is not None
+            self._injected = (relevance, judgment)
 
-    async def run_suggest_cycle(
-        self,
-        project_path: str,
-        project: str,
-        task: AgentTaskRecord,
-        chat_messages: list[dict[str, str]] | None = None,
-        user_message: str | None = None,
-        model: str | None = None,
-        prefetched_hits: list[dict] | None = None,
-        always_llm: bool = False,
-    ) -> SuggestResult:
+    def _open_clients(self, settings: Any, raw_keys: Mapping[str, str] | None) -> tuple[DecisionClient | None, DecisionClient | None, DecisionConfig | None]:
+        if self._injected is not None:
+            return self._injected[0], self._injected[1], None
+        try:
+            config = resolve_decision_config(settings, raw_keys)
+        except ValueError:
+            logger.warning("decision config invalid; skipping filter and judgment", exc_info=True)
+            return None, None, None
+        relevance, judgment = build_decision_clients(config)
+        return relevance, judgment, config
+
+    async def _call_client(self, client: DecisionClient, method: str, **kwargs: Any) -> DecisionResult:
+        try:
+            return await asyncio.to_thread(getattr(client, method), **kwargs)
+        except Exception:
+            logger.warning("decision %s failed; treating the call as skipped", method, exc_info=True)
+            provider, model = _role_identity(client, None, "filter" if method == "filter_relevance" else "judgment")
+            return _error_result(provider, model)
+
+    async def run_suggest_cycle(self, project_path: str, project: str, task: AgentTaskRecord, chat_messages: list[dict[str, str]] | None = None, user_message: str | None = None, model: str | None = None, prefetched_hits: list[dict] | None = None, always_llm: bool = False, settings: Any = None, raw_keys: Mapping[str, str] | None = None) -> SuggestResult:
         question = f"{task.title}\n{task.instruction}"
         if user_message:
             question = f"{question}\n{user_message}"
@@ -473,29 +587,42 @@ class Orchestrator:
                 context_hash=ctx_hash,
             )
 
-        jev_skipped = False
-        jev_input_tokens = 0
+        relevance, judgment, config = self._open_clients(settings, raw_keys)
+        filter_provider, filter_model = _role_identity(relevance, config, "filter") if relevance is not None else (str(_settings_value(settings, "filter_provider") or ""), "")
+        judgment_provider, judgment_model = _role_identity(judgment, config, "judgment") if judgment is not None else (str(_settings_value(settings, "judgment_provider") or ""), "")
+        filter_thresholds = _role_thresholds(filter_provider or "none", settings, config, "filter")
+        judgment_thresholds = _role_thresholds(judgment_provider or "none", settings, config, "judgment")
+        effective_json = _thresholds_json(filter_thresholds, judgment_thresholds) if relevance is not None or config is not None else ""
+
         mid_from_filter: list[str] = []
         filter_cache_hit = False
-        filtered = hits[:8]
-        if hits and self.jev.available:
-            cached = _filter_cache_get(ctx_hash)
+        filter_skipped = False
+        filter_skip_reason: str | None = None
+        filter_input_tokens: int | None = None
+        filter_latency_ms: float | None = None
+        filtered = hits[:FILTER_SKIP_TOP_HITS]
+        if hits and relevance is None:
+            filter_skipped = True
+            filter_skip_reason = "error"
+        elif hits and relevance is not None:
+            cache_key = filter_cache_key(filter_provider, filter_model, ctx_hash)
+            cached = _filter_cache_get(cache_key)
             if cached is not None:
                 filtered, mid_from_filter = cached
                 filter_cache_hit = True
             else:
-                try:
-                    filtered, mid_from_filter, used = await asyncio.to_thread(
-                        self._jev_filter, hits, task,
-                    )
-                    jev_input_tokens += used
-                    _filter_cache_put(ctx_hash, filtered, mid_from_filter)
-                except JevError:
-                    logger.warning("Jev filter failed; using top hybrid hits", exc_info=True)
-                    jev_skipped = True
-                    filtered = hits[:5]
-        elif hits:
-            jev_skipped = True
+                filter_result = await self._call_client(relevance, "filter_relevance", pack=build_context_pack(hits), task=task, catalog=[], hits=hits)
+                filter_provider = filter_result.provider or filter_provider
+                filter_model = filter_result.model or filter_model
+                filter_input_tokens = filter_result.usage.input_tokens
+                filter_latency_ms = filter_result.latency_ms
+                if filter_result.skipped:
+                    filter_skipped = True
+                    filter_skip_reason = filter_result.skip_reason or "error"
+                    filtered = hits[:FILTER_SKIP_TOP_HITS]
+                else:
+                    filtered, mid_from_filter = select_relevant_hits(hits, filter_result.scores, filter_thresholds)
+                    _filter_cache_put(cache_key, filtered, mid_from_filter)
 
         pack = build_context_pack(filtered)
         playbook = load_playbook(project_path)
@@ -522,8 +649,7 @@ class Orchestrator:
             else:
                 reply = "Add a DeepSeek (or other) API key in Agent settings to enable chat."
 
-        # Chat with a user message always calls the main LLM first so Jev can
-        # also score whether proposed candidates are grounded in cited nodes.
+        # Chat always calls the main model first so judgment can score cited candidates.
         if user_message or always_llm:
             await _propose()
 
@@ -531,51 +657,43 @@ class Orchestrator:
         if not catalog:
             catalog = loom or [{"id": "loom.move_ready", "label": "Move task to Ready", "source": "loom"}]
 
-        decision = ActionDecision(catalog[0]["id"], catalog[0]["label"], 0.5, True, [])
+        decision = _skipped_decision(catalog)
         judgments = Judgments()
-        if self.jev.available and not jev_skipped:
-            try:
-                decision, judgments, used = await asyncio.to_thread(
-                    self._jev_judge, pack, task, catalog, candidates,
-                )
-                jev_input_tokens += used
-            except JevError:
-                logger.warning("Jev judgments failed; using first catalog option", exc_info=True)
-                jev_skipped = True
+        judgment_skipped = False
+        judgment_skip_reason: str | None = None
+        judgment_input_tokens: int | None = None
+        judgment_latency_ms: float | None = None
+        if judgment is None:
+            judgment_skipped = True
+            judgment_skip_reason = "error"
+        else:
+            judgment_result = await self._call_client(judgment, "judge", pack=pack, task=task, catalog=catalog, candidates=candidates)
+            judgment_provider = judgment_result.provider or judgment_provider
+            judgment_model = judgment_result.model or judgment_model
+            judgment_input_tokens = _merge_tokens(judgment_input_tokens, judgment_result.usage.input_tokens)
+            judgment_latency_ms = judgment_result.latency_ms
+            decision, judgments, judgment_skipped, judgment_skip_reason = _apply_judgment(task.status.value, judgment_result, candidates, catalog, judgment_thresholds)
 
-        mid_band_keys = list(dict.fromkeys(list(decision.mid_band_keys) + mid_from_filter))
-        escalated = (
-            jev_skipped
-            or decision.uncertain
-            or decision.confidence < NOUL_YES
-            or any(_band(v) == "mid" for v in (
-                judgments.complete, judgments.blocked, judgments.ready_to_implement,
-            ))
-        )
+        escalated = _should_escalate(filter_skipped, judgment_skipped, decision, judgments, judgment_thresholds)
 
-        # Auto-suggest: call DeepSeek only when Jev is uncertain or skipped.
-        # always_llm (benchmark baseline) already proposed above.
+        # Auto-suggest calls DeepSeek when escalation rules fire, then grounds new candidates.
         if not user_message and not always_llm and escalated:
             await _propose()
             if candidates:
                 catalog = merge_catalog(loom, pb, candidates)
                 if not catalog:
                     catalog = loom or [{"id": "loom.move_ready", "label": "Move task to Ready", "source": "loom"}]
-                if self.jev.available and not jev_skipped:
-                    try:
-                        grounded, used = await asyncio.to_thread(
-                            self._jev_ground_candidates, pack, task, candidates,
-                        )
-                        jev_input_tokens += used
-                        judgments.candidates = grounded
-                        decision = map_judgments_to_action(
-                            task.status.value, judgments, catalog,
-                        )
-                    except JevError:
-                        logger.warning(
-                            "Jev grounding pass failed; keeping prior decision",
-                            exc_info=True,
-                        )
+                if judgment is not None:
+                    ground = await self._call_client(judgment, "judge", pack=pack, task=task, catalog=catalog, candidates=candidates)
+                    judgment_provider = ground.provider or judgment_provider
+                    judgment_model = ground.model or judgment_model
+                    judgment_input_tokens = _merge_tokens(judgment_input_tokens, ground.usage.input_tokens)
+                    judgment_latency_ms = ground.latency_ms
+                    if ground.skipped:
+                        judgment_skipped = True
+                        judgment_skip_reason = ground.skip_reason or "error"
+                    else:
+                        decision, judgments, judgment_skipped, judgment_skip_reason = _apply_judgment(task.status.value, ground, candidates, catalog, judgment_thresholds)
                 for item in catalog:
                     if item["id"] == decision.action_id:
                         decision.action_label = item["label"]
@@ -584,30 +702,24 @@ class Orchestrator:
         if not reply:
             reply = template_reply(decision.action_label)
 
+        mid_band_keys = list(dict.fromkeys(list(decision.mid_band_keys) + mid_from_filter))
+        jev_skipped = filter_skipped or judgment_skipped
+        jev_input_tokens = _legacy_token_sum(filter_input_tokens, judgment_input_tokens)
         logger.info(
-            "orchestrator cycle project=%s task=%s action=%s confidence=%.3f "
-            "jev_input_tokens=%s llm_prompt_tokens=%s llm_completion_tokens=%s "
-            "jev_skipped=%s escalated=%s mid_band=%s",
+            "orchestrator cycle project=%s task=%s action=%s confidence=%.3f filter=%s/%s judgment=%s/%s filter_skipped=%s judgment_skipped=%s escalated=%s",
             project, task.id, decision.action_id, decision.confidence,
-            jev_input_tokens, llm_prompt_tokens, llm_completion_tokens,
-            jev_skipped, escalated, ",".join(mid_band_keys) or "-",
+            filter_provider or "-", filter_model or "-", judgment_provider or "-", judgment_model or "-",
+            filter_skipped, judgment_skipped, escalated,
         )
-
         return SuggestResult(
-            action_id=decision.action_id,
-            action_label=decision.action_label,
-            confidence=decision.confidence,
-            prose=reply,
-            catalog=catalog,
-            reply=reply,
-            jev_skipped=jev_skipped,
-            escalated=escalated,
-            jev_input_tokens=jev_input_tokens,
-            llm_prompt_tokens=llm_prompt_tokens,
-            llm_completion_tokens=llm_completion_tokens,
-            mid_band_keys=mid_band_keys,
-            context_hash=ctx_hash,
-            filter_cache_hit=filter_cache_hit,
+            action_id=decision.action_id, action_label=decision.action_label, confidence=decision.confidence,
+            prose=reply, catalog=catalog, reply=reply, jev_skipped=jev_skipped, escalated=escalated,
+            jev_input_tokens=jev_input_tokens, llm_prompt_tokens=llm_prompt_tokens, llm_completion_tokens=llm_completion_tokens,
+            mid_band_keys=mid_band_keys, context_hash=ctx_hash, filter_cache_hit=filter_cache_hit,
+            filter_provider=filter_provider, filter_model=filter_model, judgment_provider=judgment_provider, judgment_model=judgment_model,
+            filter_skipped=filter_skipped, judgment_skipped=judgment_skipped, filter_skip_reason=filter_skip_reason, judgment_skip_reason=judgment_skip_reason,
+            filter_input_tokens=filter_input_tokens, judgment_input_tokens=judgment_input_tokens, filter_latency_ms=filter_latency_ms, judgment_latency_ms=judgment_latency_ms,
+            effective_thresholds_json=effective_json,
         )
 
     async def _retrieve(self, project_path: str, project: str, question: str) -> list[dict]:
@@ -618,35 +730,6 @@ class Orchestrator:
         except Exception:
             logger.warning("hybrid_query failed", exc_info=True)
             return []
-
-    def _jev_filter(
-        self, hits: list[dict], task: AgentTaskRecord,
-    ) -> tuple[list[dict], list[str], int]:
-        questions: dict[str, dict] = {}
-        for i, h in enumerate(hits[:12]):
-            nid = h.get("id") or h.get("name") or f"hit-{i}"
-            questions[f"rel_{i}"] = {
-                "type": "noul",
-                "instructions": (
-                    f"Is graph node `{nid}` relevant to the task described in `task`?"
-                ),
-                "criteria": {
-                    "true": "The node is needed to understand or implement the task.",
-                    "false": "The node is unrelated to the task.",
-                },
-            }
-        state = {
-            "task": {"title": task.title, "instruction": task.instruction, "status": task.status.value},
-            "nodes": [_node_snippet(h) for h in hits[:12]],
-        }
-        payload = self.jev.ask(state, questions)
-        answers = _answers_of(payload)
-        scored: list[tuple[float, dict]] = []
-        for i, h in enumerate(hits[:12]):
-            scored.append((noul_value(answers.get(f"rel_{i}") or {}), h))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        selected, _mid, mid_keys = partition_relevance(scored)
-        return selected, mid_keys, usage_input_tokens(payload)
 
     def _llm_propose(
         self,
@@ -679,120 +762,3 @@ class Orchestrator:
         if not isinstance(candidates, list):
             candidates = []
         return reply, [c for c in candidates if isinstance(c, dict)]
-
-    def _jev_judge(
-        self,
-        pack: str,
-        task: AgentTaskRecord,
-        catalog: list[dict],
-        candidates: list[dict],
-    ) -> tuple[ActionDecision, Judgments, int]:
-        state = {
-            "task": {
-                "title": task.title,
-                "instruction": task.instruction,
-                "status": task.status.value,
-            },
-            "graph": pack,
-            "catalog": {c["id"]: c["label"] for c in catalog},
-        }
-        questions: dict[str, dict] = {
-            "complete": {
-                "type": "noul",
-                "instructions": "Is the work on this task already complete?",
-                "criteria": {
-                    "true": "The graph context and task description show the work is finished.",
-                    "false": "The work is not finished, or there is not enough evidence it is done.",
-                },
-            },
-            "blocked": {
-                "type": "noul",
-                "instructions": "Is this task blocked?",
-                "criteria": {
-                    "true": "The task cannot proceed because of a missing dependency, decision, or obstacle.",
-                    "false": "The task can proceed.",
-                },
-            },
-            "ready_to_implement": {
-                "type": "noul",
-                "instructions": "Is this task ready to implement?",
-                "criteria": {
-                    "true": "The task is clear enough to start implementation now.",
-                    "false": "The task still needs planning, unblocking, or more definition.",
-                },
-            },
-        }
-        cited = [c for c in candidates if c.get("id") and c.get("graph_ids")]
-        for i, c in enumerate(cited):
-            nid = ", ".join(str(g) for g in (c.get("graph_ids") or [])[:4])
-            questions[f"grounded_{i}"] = {
-                "type": "noul",
-                "instructions": (
-                    f"Is proposed step `{c['id']}` ({c.get('label') or c['id']}) "
-                    f"grounded in the cited graph node(s) `{nid}`?"
-                ),
-                "criteria": {
-                    "true": "The cited graph node actually supports this step.",
-                    "false": "The citation is missing, unrelated, or does not support the step.",
-                },
-            }
-        payload = self.jev.ask(state, questions)
-        answers = _answers_of(payload)
-        grounded_cands = []
-        for i, c in enumerate(cited):
-            grounded_cands.append({
-                "id": c["id"],
-                "label": c.get("label") or c["id"],
-                "noul": noul_value(answers.get(f"grounded_{i}") or {}),
-            })
-        judgments = Judgments(
-            complete=noul_value(answers.get("complete") or {}),
-            blocked=noul_value(answers.get("blocked") or {}),
-            ready_to_implement=noul_value(answers.get("ready_to_implement") or {}),
-            candidates=grounded_cands,
-        )
-        decision = map_judgments_to_action(task.status.value, judgments, catalog)
-        return decision, judgments, usage_input_tokens(payload)
-
-    def _jev_ground_candidates(
-        self,
-        pack: str,
-        task: AgentTaskRecord,
-        candidates: list[dict],
-    ) -> tuple[list[dict], int]:
-        """Score cited LLM candidates with noul questions only (no complete/blocked/ready)."""
-        cited = [c for c in candidates if c.get("id") and c.get("graph_ids")]
-        if not cited:
-            return [], 0
-        questions: dict[str, dict] = {}
-        for i, c in enumerate(cited):
-            nid = ", ".join(str(g) for g in (c.get("graph_ids") or [])[:4])
-            questions[f"grounded_{i}"] = {
-                "type": "noul",
-                "instructions": (
-                    f"Is proposed step `{c['id']}` ({c.get('label') or c['id']}) "
-                    f"grounded in the cited graph node(s) `{nid}`?"
-                ),
-                "criteria": {
-                    "true": "The cited graph node actually supports this step.",
-                    "false": "The citation is missing, unrelated, or does not support the step.",
-                },
-            }
-        state = {
-            "task": {
-                "title": task.title,
-                "instruction": task.instruction,
-                "status": task.status.value,
-            },
-            "graph": pack,
-        }
-        payload = self.jev.ask(state, questions)
-        answers = _answers_of(payload)
-        grounded = []
-        for i, c in enumerate(cited):
-            grounded.append({
-                "id": c["id"],
-                "label": c.get("label") or c["id"],
-                "noul": noul_value(answers.get(f"grounded_{i}") or {}),
-            })
-        return grounded, usage_input_tokens(payload)
