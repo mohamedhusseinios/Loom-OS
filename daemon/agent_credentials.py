@@ -183,9 +183,10 @@ class StoredAgentCredentials:
         return api_key or "", base_url, model
 
     def has_keys(self) -> dict[str, bool]:
+        """Stored keys. TypeSafe also counts ``TYPESAFE_API_KEY`` so the panel can default judgment."""
         flags = {
             DEEPSEEK_PROVIDER_ID: bool(self.deepseek_key),
-            TYPESAFE_PROVIDER_ID: bool(self.typesafe_key),
+            TYPESAFE_PROVIDER_ID: bool(resolve_typesafe_key(self.typesafe_key)),
         }
         for key, value in self.keys.items():
             if key not in flags:

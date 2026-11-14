@@ -161,7 +161,8 @@ async def test_explicit_leave_running_schedules_suggest(client):
         suggest.assert_awaited()
 
 
-def test_settings_typesafe_and_clear(client):
+def test_settings_typesafe_and_clear(client, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     secret = "ts-secret-key-9999"
     res = client.put("/api/agent/settings", json={
         "api_keys": {"typesafe": secret, "deepseek": "sk-abcdef1234"},
@@ -228,6 +229,23 @@ def test_settings_requires_auth_when_enabled(client):
         assert ok.json()["api_keys_masked"]["deepseek"] == "••••7777"
     finally:
         configure_auth_token(None)
+
+
+def test_get_settings_typesafe_has_key_from_env(client, monkeypatch):
+    """GLiClass judgment defaults from has_keys, so an env-only TypeSafe key must count."""
+    secret = "ts-env-only-key-4242"
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    missing = client.get("/api/agent/settings")
+    assert missing.status_code == 200
+    assert missing.json()["has_keys"]["typesafe"] is False
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", secret)
+    res = client.get("/api/agent/settings")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["has_keys"]["typesafe"] is True
+    assert secret not in res.text
+    assert not (body.get("api_keys_masked") or {}).get("typesafe")
 
 
 def test_get_settings_includes_decision_providers(client):

@@ -14,7 +14,8 @@ async def reg(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_default_settings_mask_empty_keys(reg):
+async def test_default_settings_mask_empty_keys(reg, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     settings = await reg.get_agent_settings()
     assert settings.default_model == "deepseek-chat"
     assert any(p.id == "deepseek" for p in settings.providers)
@@ -331,7 +332,8 @@ async def test_suggestion_persists_context_hash(reg):
 
 
 @pytest.mark.asyncio
-async def test_typesafe_provider_migrated_and_keys_cleared(tmp_path):
+async def test_typesafe_provider_migrated_and_keys_cleared(tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     import json
     import aiosqlite
     db = tmp_path / "legacy.db"
