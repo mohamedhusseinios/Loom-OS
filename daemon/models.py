@@ -244,12 +244,18 @@ class AgentSettings(BaseModel):
     providers: list[AgentProviderConfig] = Field(default_factory=list)
     api_keys_masked: dict[str, Optional[str]] = Field(default_factory=dict)
     has_keys: dict[str, bool] = Field(default_factory=dict)
+    filter_provider: Optional[str] = None
+    judgment_provider: Optional[str] = None
+    threshold_overrides: Optional[dict] = None
 
 
 class AgentSettingsUpdate(BaseModel):
     default_model: Optional[str] = None
     providers: Optional[list[AgentProviderConfig]] = None
     api_keys: Optional[dict[str, str]] = None  # write-only raw keys
+    filter_provider: Optional[str] = None
+    judgment_provider: Optional[str] = None
+    threshold_overrides: Optional[dict] = None
 
 
 class AgentChatRecord(BaseModel):
@@ -302,5 +308,19 @@ class TaskSuggestionRecord(BaseModel):
     llm_completion_tokens: int = 0
     escalated: bool = False
     context_hash: str = ""
+    filter_provider: Optional[str] = None
+    filter_model: Optional[str] = None
+    judgment_provider: Optional[str] = None
+    judgment_model: Optional[str] = None
+    filter_skipped: Optional[bool] = None
+    judgment_skipped: Optional[bool] = None
+    filter_skip_reason: Optional[str] = None
+    judgment_skip_reason: Optional[str] = None
+    filter_input_tokens: Optional[int] = None
+    judgment_input_tokens: Optional[int] = None
+    filter_latency_ms: Optional[float] = None
+    judgment_latency_ms: Optional[float] = None
+    effective_thresholds_json: Optional[str] = None
+    legacy_decision_input_tokens: Optional[int] = None
     created_at: str
     updated_at: str

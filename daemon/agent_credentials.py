@@ -20,6 +20,9 @@ TYPESAFE_PROVIDER_ID = "typesafe"
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
 DEFAULT_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_PROVIDER_ID = "ollama"
+GLICLASS_PROVIDER_ID = "gliclass"
 
 DEFAULT_DEEPSEEK_PROVIDER: dict[str, Any] = {
     "id": DEEPSEEK_PROVIDER_ID,
@@ -34,6 +37,27 @@ DEFAULT_TYPESAFE_PROVIDER: dict[str, Any] = {
     "base_url": "",
     "model_ids": ["jev-latest"],
 }
+
+DEFAULT_OLLAMA_PROVIDER: dict[str, Any] = {
+    "id": OLLAMA_PROVIDER_ID,
+    "name": "Ollama",
+    "base_url": DEFAULT_OLLAMA_BASE_URL,
+    "model_ids": [],
+}
+
+DEFAULT_GLICLASS_PROVIDER: dict[str, Any] = {
+    "id": GLICLASS_PROVIDER_ID,
+    "name": "GLiClass",
+    "base_url": "",
+    "model_ids": [],
+}
+
+DEFAULT_AGENT_PROVIDERS: tuple[dict[str, Any], ...] = (
+    DEFAULT_DEEPSEEK_PROVIDER,
+    DEFAULT_TYPESAFE_PROVIDER,
+    DEFAULT_OLLAMA_PROVIDER,
+    DEFAULT_GLICLASS_PROVIDER,
+)
 
 
 def mask_key(raw: str | None) -> str | None:
@@ -64,7 +88,7 @@ def _as_provider_dict(provider: Any) -> dict[str, Any]:
 
 
 def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]]:
-    """Keep existing providers and append DeepSeek / TypeSafe defaults if missing."""
+    """Keep existing providers and append built-in defaults if missing."""
     by_id: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for item in providers or []:
@@ -75,7 +99,7 @@ def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]
         if pid not in by_id:
             order.append(pid)
         by_id[pid] = parsed
-    for default in (DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_TYPESAFE_PROVIDER):
+    for default in DEFAULT_AGENT_PROVIDERS:
         if default["id"] not in by_id:
             by_id[default["id"]] = dict(default)
             order.append(default["id"])

@@ -14,14 +14,39 @@ from daemon.models import (
     TaskSuggestionRecord, SuggestionStatus,
 )
 from daemon.agent_credentials import (
-    DEFAULT_DEEPSEEK_PROVIDER,
-    DEFAULT_TYPESAFE_PROVIDER,
+    DEFAULT_AGENT_PROVIDERS,
     StoredAgentCredentials,
     ensure_default_providers,
     is_masked_key,
     mask_key,
     merge_providers,
     parse_settings_row,
+)
+
+# Nullable decision telemetry. No DEFAULT so migrated rows stay NULL.
+# legacy_decision_input_tokens is backfilled from jev_input_tokens only when
+# that column is first added — never copied into filter_input_tokens.
+_SUGGESTION_DECISION_COLUMNS = (
+    ("filter_provider", "TEXT"),
+    ("filter_model", "TEXT"),
+    ("judgment_provider", "TEXT"),
+    ("judgment_model", "TEXT"),
+    ("filter_skipped", "INTEGER"),
+    ("judgment_skipped", "INTEGER"),
+    ("filter_skip_reason", "TEXT"),
+    ("judgment_skip_reason", "TEXT"),
+    ("filter_input_tokens", "INTEGER"),
+    ("judgment_input_tokens", "INTEGER"),
+    ("filter_latency_ms", "REAL"),
+    ("judgment_latency_ms", "REAL"),
+    ("effective_thresholds_json", "TEXT"),
+    ("legacy_decision_input_tokens", "INTEGER"),
+)
+
+_SETTINGS_DECISION_COLUMNS = (
+    ("filter_provider", "TEXT"),
+    ("judgment_provider", "TEXT"),
+    ("threshold_overrides_json", "TEXT"),
 )
 
 
@@ -132,13 +157,21 @@ class AgentRegistry:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 default_model TEXT NOT NULL DEFAULT 'deepseek-chat',
                 providers_json TEXT NOT NULL DEFAULT '[]',
-                api_keys_json TEXT NOT NULL DEFAULT '{}'
+                api_keys_json TEXT NOT NULL DEFAULT '{}',
+                filter_provider TEXT,
+                judgment_provider TEXT,
+                threshold_overrides_json TEXT
             )
         """)
+        cursor = await self.db.execute("PRAGMA table_info(agent_settings)")
+        settings_cols = [r[1] for r in await cursor.fetchall()]
+        for name, ddl in _SETTINGS_DECISION_COLUMNS:
+            if name not in settings_cols:
+                await self.db.execute(f"ALTER TABLE agent_settings ADD COLUMN {name} {ddl}")
         await self.db.execute(
             "INSERT OR IGNORE INTO agent_settings (id, default_model, providers_json, api_keys_json)"
             " VALUES (1, 'deepseek-chat', ?, '{}')",
-            (json.dumps([DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_TYPESAFE_PROVIDER]),),
+            (json.dumps(list(DEFAULT_AGENT_PROVIDERS)),),
         )
         await self._ensure_default_agent_providers()
         await self.db.execute("""
@@ -180,6 +213,20 @@ class AgentRegistry:
                 llm_completion_tokens INTEGER NOT NULL DEFAULT 0,
                 escalated INTEGER NOT NULL DEFAULT 0,
                 context_hash TEXT NOT NULL DEFAULT '',
+                filter_provider TEXT,
+                filter_model TEXT,
+                judgment_provider TEXT,
+                judgment_model TEXT,
+                filter_skipped INTEGER,
+                judgment_skipped INTEGER,
+                filter_skip_reason TEXT,
+                judgment_skip_reason TEXT,
+                filter_input_tokens INTEGER,
+                judgment_input_tokens INTEGER,
+                filter_latency_ms REAL,
+                judgment_latency_ms REAL,
+                effective_thresholds_json TEXT,
+                legacy_decision_input_tokens INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -191,6 +238,7 @@ class AgentRegistry:
         # Migration: usage / escalation columns on existing DBs.
         cursor = await self.db.execute("PRAGMA table_info(task_suggestions)")
         sug_cols = [r[1] for r in await cursor.fetchall()]
+        had_jev_input_tokens = "jev_input_tokens" in sug_cols
         for name, ddl in (
             ("jev_input_tokens", "INTEGER NOT NULL DEFAULT 0"),
             ("llm_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
@@ -200,6 +248,19 @@ class AgentRegistry:
         ):
             if name not in sug_cols:
                 await self.db.execute(f"ALTER TABLE task_suggestions ADD COLUMN {name} {ddl}")
+        added_legacy_tokens = False
+        for name, ddl in _SUGGESTION_DECISION_COLUMNS:
+            if name not in sug_cols:
+                await self.db.execute(f"ALTER TABLE task_suggestions ADD COLUMN {name} {ddl}")
+                if name == "legacy_decision_input_tokens":
+                    added_legacy_tokens = True
+        # Old rows only. Do not copy jev_input_tokens into filter_input_tokens,
+        # and do not repeat this after the column exists (new rows keep legacy NULL).
+        if added_legacy_tokens and had_jev_input_tokens:
+            await self.db.execute(
+                "UPDATE task_suggestions SET legacy_decision_input_tokens = jev_input_tokens"
+                " WHERE legacy_decision_input_tokens IS NULL"
+            )
         await self.db.commit()
 
     async def close(self):
@@ -759,14 +820,31 @@ class AgentRegistry:
         if row is None:
             return parse_settings_row(
                 "deepseek-chat",
-                [DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_TYPESAFE_PROVIDER],
+                list(DEFAULT_AGENT_PROVIDERS),
                 {},
             )
         return parse_settings_row(
             row["default_model"], row["providers_json"], row["api_keys_json"],
         )
 
-    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool) -> AgentSettings:
+    @staticmethod
+    def _threshold_overrides_from_raw(raw: str | None) -> dict | None:
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+
+    @staticmethod
+    def _decision_settings_from_row(row) -> tuple[str | None, str | None, dict | None]:
+        if row is None:
+            return None, None, None
+        keys = set(row.keys())
+        filt = row["filter_provider"] if "filter_provider" in keys else None
+        judg = row["judgment_provider"] if "judgment_provider" in keys else None
+        raw = row["threshold_overrides_json"] if "threshold_overrides_json" in keys else None
+        return filt, judg, AgentRegistry._threshold_overrides_from_raw(raw)
+
+    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool, filter_provider: str | None = None, judgment_provider: str | None = None, threshold_overrides: dict | None = None) -> AgentSettings:
         providers = [AgentProviderConfig(**p) for p in creds.providers]
         masked = creds.masked_keys() if mask_keys else dict(creds.keys)
         return AgentSettings(
@@ -774,10 +852,13 @@ class AgentRegistry:
             providers=providers,
             api_keys_masked=masked,
             has_keys=creds.has_keys(),
+            filter_provider=filter_provider,
+            judgment_provider=judgment_provider,
+            threshold_overrides=threshold_overrides,
         )
 
     async def _ensure_default_agent_providers(self) -> None:
-        """Migration: add the TypeSafe provider to existing singleton rows."""
+        """Migration: add built-in provider rows missing from the singleton."""
         cursor = await self.db.execute(
             "SELECT providers_json FROM agent_settings WHERE id = 1"
         )
@@ -795,10 +876,16 @@ class AgentRegistry:
 
     async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
         cursor = await self.db.execute(
-            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+            "SELECT default_model, providers_json, api_keys_json,"
+            " filter_provider, judgment_provider, threshold_overrides_json"
+            " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
-        return self._agent_settings_view(self._settings_from_row(row), mask_keys)
+        filt, judg, overrides = self._decision_settings_from_row(row)
+        return self._agent_settings_view(
+            self._settings_from_row(row), mask_keys,
+            filter_provider=filt, judgment_provider=judg, threshold_overrides=overrides,
+        )
 
     async def get_raw_api_keys(self) -> dict[str, str]:
         cursor = await self.db.execute(
@@ -812,7 +899,9 @@ class AgentRegistry:
 
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
         cursor = await self.db.execute(
-            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+            "SELECT default_model, providers_json, api_keys_json,"
+            " filter_provider, judgment_provider, threshold_overrides_json"
+            " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
         creds = self._settings_from_row(row)
@@ -830,10 +919,21 @@ class AgentRegistry:
                     raw_keys.pop(pid, None)
                 else:
                     raw_keys[pid] = key
+        filt, judg, _overrides = self._decision_settings_from_row(row)
+        raw_overrides = None
+        if row is not None and "threshold_overrides_json" in row.keys():
+            raw_overrides = row["threshold_overrides_json"]
+        if payload.filter_provider is not None:
+            filt = payload.filter_provider
+        if payload.judgment_provider is not None:
+            judg = payload.judgment_provider
+        if payload.threshold_overrides is not None:
+            raw_overrides = json.dumps(payload.threshold_overrides)
         await self.db.execute(
-            "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?"
+            "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?,"
+            " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?"
             " WHERE id = 1",
-            (default_model, json.dumps(providers), json.dumps(raw_keys)),
+            (default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg, raw_overrides),
         )
         await self.db.commit()
         return await self.get_agent_settings(mask_keys=True)
@@ -900,23 +1000,19 @@ class AgentRegistry:
         )
         await self.db.commit()
 
-    async def create_task_suggestion(
-        self,
-        project: str,
-        task_id: str,
-        action_id: str,
-        action_label: str,
-        confidence: float,
-        prose: str,
-        catalog: list[dict],
-        jev_skipped: bool = False,
-        jev_input_tokens: int = 0,
-        llm_prompt_tokens: int = 0,
-        llm_completion_tokens: int = 0,
-        escalated: bool = False,
-        context_hash: str = "",
-    ) -> TaskSuggestionRecord:
+    async def create_task_suggestion(self, project: str, task_id: str, action_id: str, action_label: str, confidence: float, prose: str, catalog: list[dict], jev_skipped: bool = False, jev_input_tokens: int = 0, llm_prompt_tokens: int = 0, llm_completion_tokens: int = 0, escalated: bool = False, context_hash: str = "", filter_provider: str | None = None, filter_model: str | None = None, judgment_provider: str | None = None, judgment_model: str | None = None, filter_skipped: bool | None = None, judgment_skipped: bool | None = None, filter_skip_reason: str | None = None, judgment_skip_reason: str | None = None, filter_input_tokens: int | None = None, judgment_input_tokens: int | None = None, filter_latency_ms: float | None = None, judgment_latency_ms: float | None = None, effective_thresholds_json: str | None = None) -> TaskSuggestionRecord:
         import uuid
+
+        def _bit(value: bool | None) -> int | None:
+            if value is None:
+                return None
+            return 1 if value else 0
+
+        def _opt_int(value: int | None) -> int | None:
+            if value is None:
+                return None
+            return int(value)
+
         await self.dismiss_pending_suggestions(task_id)
         now = datetime.now(timezone.utc).isoformat()
         sid = str(uuid.uuid4())
@@ -925,14 +1021,23 @@ class AgentRegistry:
             " (id, project, task_id, action_id, action_label, confidence, prose,"
             " catalog_json, status, jev_skipped, jev_input_tokens,"
             " llm_prompt_tokens, llm_completion_tokens, escalated, context_hash,"
-            " created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " filter_provider, filter_model, judgment_provider, judgment_model,"
+            " filter_skipped, judgment_skipped, filter_skip_reason, judgment_skip_reason,"
+            " filter_input_tokens, judgment_input_tokens, filter_latency_ms, judgment_latency_ms,"
+            " effective_thresholds_json, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 sid, project, task_id, action_id, action_label, confidence, prose,
                 json.dumps(catalog), SuggestionStatus.PENDING.value,
                 1 if jev_skipped else 0, int(jev_input_tokens or 0),
                 int(llm_prompt_tokens or 0), int(llm_completion_tokens or 0),
-                1 if escalated else 0, context_hash or "", now, now,
+                1 if escalated else 0, context_hash or "",
+                filter_provider, filter_model, judgment_provider, judgment_model,
+                _bit(filter_skipped), _bit(judgment_skipped),
+                filter_skip_reason, judgment_skip_reason,
+                _opt_int(filter_input_tokens), _opt_int(judgment_input_tokens),
+                filter_latency_ms, judgment_latency_ms,
+                effective_thresholds_json, now, now,
             ),
         )
         await self.db.commit()
@@ -944,6 +1049,14 @@ class AgentRegistry:
             llm_prompt_tokens=int(llm_prompt_tokens or 0),
             llm_completion_tokens=int(llm_completion_tokens or 0),
             escalated=escalated, context_hash=context_hash or "",
+            filter_provider=filter_provider, filter_model=filter_model,
+            judgment_provider=judgment_provider, judgment_model=judgment_model,
+            filter_skipped=filter_skipped, judgment_skipped=judgment_skipped,
+            filter_skip_reason=filter_skip_reason, judgment_skip_reason=judgment_skip_reason,
+            filter_input_tokens=_opt_int(filter_input_tokens),
+            judgment_input_tokens=_opt_int(judgment_input_tokens),
+            filter_latency_ms=filter_latency_ms, judgment_latency_ms=judgment_latency_ms,
+            effective_thresholds_json=effective_thresholds_json,
             created_at=now, updated_at=now,
         )
 
@@ -1005,6 +1118,28 @@ class AgentRegistry:
                 return int(row[name] or 0)
             except (TypeError, ValueError):
                 return 0
+        def _opt_int(name: str) -> int | None:
+            if name not in keys or row[name] is None:
+                return None
+            try:
+                return int(row[name])
+            except (TypeError, ValueError):
+                return None
+        def _opt_float(name: str) -> float | None:
+            if name not in keys or row[name] is None:
+                return None
+            try:
+                return float(row[name])
+            except (TypeError, ValueError):
+                return None
+        def _opt_bool(name: str) -> bool | None:
+            if name not in keys or row[name] is None:
+                return None
+            return bool(row[name])
+        def _opt_text(name: str) -> str | None:
+            if name not in keys or row[name] is None:
+                return None
+            return row[name]
         return TaskSuggestionRecord(
             id=row["id"], project=row["project"], task_id=row["task_id"],
             action_id=row["action_id"], action_label=row["action_label"],
@@ -1017,5 +1152,19 @@ class AgentRegistry:
             llm_completion_tokens=_int("llm_completion_tokens"),
             escalated=bool(_int("escalated")),
             context_hash=(row["context_hash"] if "context_hash" in keys and row["context_hash"] else ""),
+            filter_provider=_opt_text("filter_provider"),
+            filter_model=_opt_text("filter_model"),
+            judgment_provider=_opt_text("judgment_provider"),
+            judgment_model=_opt_text("judgment_model"),
+            filter_skipped=_opt_bool("filter_skipped"),
+            judgment_skipped=_opt_bool("judgment_skipped"),
+            filter_skip_reason=_opt_text("filter_skip_reason"),
+            judgment_skip_reason=_opt_text("judgment_skip_reason"),
+            filter_input_tokens=_opt_int("filter_input_tokens"),
+            judgment_input_tokens=_opt_int("judgment_input_tokens"),
+            filter_latency_ms=_opt_float("filter_latency_ms"),
+            judgment_latency_ms=_opt_float("judgment_latency_ms"),
+            effective_thresholds_json=_opt_text("effective_thresholds_json"),
+            legacy_decision_input_tokens=_opt_int("legacy_decision_input_tokens"),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
