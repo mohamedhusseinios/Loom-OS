@@ -166,10 +166,13 @@ def test_ollama_defaults_base_url_and_allows_missing_key():
     relevance, judgment = build_decision_clients(config)
     assert isinstance(relevance, JevClient)
     assert relevance is judgment
+    assert relevance.provider == "ollama"
+    assert relevance.available is True
+    assert relevance.timeout == 5.0
     assert "11434" in relevance.base_url
 
 
-def test_gliclass_filter_builds_placeholder_client():
+def test_gliclass_filter_builds_http_client():
     config = resolve_decision_config(
         _settings(
             filter_provider="gliclass",
@@ -184,8 +187,10 @@ def test_gliclass_filter_builds_placeholder_client():
     )
     relevance, judgment = build_decision_clients(config)
     assert isinstance(relevance, GLiClassClient)
+    assert relevance.__class__.__module__ == "daemon.gliclass_client"
     assert relevance.base_url == "http://127.0.0.1:8090"
     assert relevance.model == "gliclass-edge"
+    assert relevance.timeout == 5.0
     assert isinstance(judgment, NullDecisionClient)
     assert relevance is not judgment
 

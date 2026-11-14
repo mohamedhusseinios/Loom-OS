@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from daemon.agent_credentials import DEFAULT_OLLAMA_BASE_URL, DEFAULT_TYPESAFE_BASE_URL
+from daemon.gliclass_client import GLiClassClient
 from daemon.jev_client import DEFAULT_MODEL as DEFAULT_TYPESAFE_MODEL
 from daemon.jev_client import JevClient
 
@@ -71,35 +72,6 @@ class NullDecisionClient:
 
     def judge(self, *, pack: str, task: Any, catalog: list[dict], candidates: list[dict], **kwargs: Any) -> DecisionResult:
         return _null_result()
-
-
-class GLiClassClient:
-    """Filter-only placeholder until Task 4 ships the Knowledgator HTTP client.
-
-    Does not import torch. ``judge`` is skipped with reason ``unsupported``.
-    """
-
-    def __init__(self, base_url: str = "", model: str = "", timeout: float = 10.0):
-        self.base_url = (base_url or "").rstrip("/")
-        self.model = model or ""
-        self.timeout = timeout
-
-    def filter_relevance(self, *, pack: str, task: Any, catalog: list[dict], hits: list[dict], **kwargs: Any) -> DecisionResult:
-        return _gliclass_placeholder_result(self.model)
-
-    def judge(self, *, pack: str, task: Any, catalog: list[dict], candidates: list[dict], **kwargs: Any) -> DecisionResult:
-        return _gliclass_placeholder_result(self.model)
-
-
-def _gliclass_placeholder_result(model: str) -> DecisionResult:
-    t0 = time.perf_counter()
-    return DecisionResult(
-        provider="gliclass",
-        model=model,
-        skipped=True,
-        skip_reason="unsupported",
-        latency_ms=(time.perf_counter() - t0) * 1000.0,
-    )
 
 
 # Jev band edges match orchestrator NOUL_NO / NOUL_YES. ``mid`` is the midpoint
@@ -387,10 +359,10 @@ def _same_endpoint(config: DecisionConfig) -> bool:
 
 def _build_one(provider: str, model: str, base_url: str, api_key: str) -> DecisionClient:
     if provider == "gliclass":
-        return GLiClassClient(base_url=base_url, model=model)
+        return GLiClassClient(base_url=base_url, model=model, timeout=5.0)
     if provider in ("typesafe", "ollama"):
         timeout = 10.0 if provider == "typesafe" else 5.0
-        return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout)
+        return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout, provider=provider, model=model or DEFAULT_TYPESAFE_MODEL)
     return NullDecisionClient()
 
 

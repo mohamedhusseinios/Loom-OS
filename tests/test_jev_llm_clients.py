@@ -63,8 +63,29 @@ def test_jev_ask_returns_full_response():
 
 def test_jev_missing_key_raises():
     client = JevClient(api_key="")
+    assert client.available is False
+    assert client.timeout == 10.0
     with pytest.raises(JevError):
         client.ask("x", {"q": {"type": "noul", "instructions": "y"}})
+
+
+def test_ollama_ask_without_key_omits_authorization():
+    payload = {"answers": {"q": {"type": "noul", "noul": 0.4}}, "usage": {}}
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["auth"] = req.get_header("Authorization")
+        captured["timeout"] = timeout
+        return _ok_response(payload)
+
+    with patch("daemon.jev_client.urllib.request.urlopen", side_effect=fake_urlopen):
+        client = JevClient(api_key="", provider="ollama", base_url="http://127.0.0.1:11434", model="nimble")
+        result = client.ask("state", {"q": {"type": "noul", "instructions": "x"}}, model="nimble")
+    assert client.available is True
+    assert client.timeout == 5.0
+    assert captured["auth"] is None
+    assert captured["timeout"] == 5.0
+    assert result["answers"]["q"]["noul"] == 0.4
 
 
 def test_jev_retries_429_then_succeeds():
