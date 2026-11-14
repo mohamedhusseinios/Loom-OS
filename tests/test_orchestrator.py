@@ -7,6 +7,7 @@ from daemon.orchestrator import (
     Orchestrator, merge_catalog, loom_catalog_for_status, SuggestResult,
     Judgments, map_judgments_to_action, partition_relevance, NOUL_YES,
     template_reply, build_context_pack, context_hash, clear_filter_cache,
+    select_relevant_hits,
 )
 from daemon.jev_client import JevClient
 from daemon.llm_client import LlmClient
@@ -545,3 +546,46 @@ async def test_runtime_persists_decision_telemetry(tmp_path, monkeypatch):
         assert "escalate" in payload["judgment"]
     finally:
         await reg.close()
+
+
+def test_all_below_drop_fallback_keeps_highest_scores():
+    hits = [{"id": name, "label": name} for name in ("a", "b", "c", "d", "e", "f")]
+    scores = {"rel_0": 0.05, "rel_1": 0.25, "rel_2": 0.01, "rel_3": 0.22, "rel_4": 0.18, "rel_5": 0.02}
+    selected, mid_keys = select_relevant_hits(hits, scores, {"drop": 0.3, "mid": 0.5, "keep": 0.7, "escalate": 0.7})
+    assert [hit["id"] for hit in selected] == ["b", "d", "e", "a"]
+    assert mid_keys == []
+
+
+@pytest.mark.asyncio
+async def test_grounding_failure_keeps_successful_judgment(tmp_path, caplog):
+    _graph(tmp_path)
+
+    class GroundFails(FakeDecision):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._judgments = 0
+
+        def judge(self, *, pack, task, catalog, candidates, **kwargs):
+            self._judgments += 1
+            if self._judgments > 1:
+                self.judge_calls.append({"pack": pack, "candidates": candidates})
+                return DecisionResult(provider=self.provider, model="ground-fail", skipped=True, skip_reason="timeout", latency_ms=99.0, usage=DecisionUsage(input_tokens=50))
+            result = super().judge(pack=pack, task=task, catalog=catalog, candidates=candidates)
+            result.latency_ms = 12.0
+            return result
+
+    client = GroundFails(ready=0.5, blocked=0.2, complete=0.1)
+    llm = FakeLlm(reply="still the first judgment")
+    orch = Orchestrator(FakeGE(), relevance_client=client, judgment_client=client, llm=llm)
+    with caplog.at_level("WARNING"):
+        result = await orch.run_suggest_cycle(str(tmp_path), "p", _task(AgentTaskStatus.TODO))
+    assert llm.called == 1
+    assert len(client.judge_calls) == 2
+    assert result.escalated is True
+    assert result.action_id == "loom.move_ready"
+    assert result.confidence == 0.5
+    assert result.judgment_skipped is False
+    assert result.judgment_skip_reason is None
+    assert result.judgment_latency_ms == 12.0
+    assert result.judgment_model == "jev-latest"
+    assert "keeping prior decision" in caplog.text

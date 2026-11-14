@@ -469,6 +469,7 @@ def select_relevant_hits(hits: list[dict], scores: Mapping[str, Any], thresholds
     """Apply keep / mid / drop. Missing per-hit scores stay in the mid band; unknown keys are ignored."""
     mid = float(thresholds["mid"])
     scored = [(_score_or_mid(scores, f"rel_{index}", mid), hit) for index, hit in enumerate(hits[:12])]
+    scored.sort(key=lambda item: item[0], reverse=True)
     selected, _mid_hits, mid_keys = partition_relevance(scored, yes_threshold=float(thresholds["keep"]), no_threshold=float(thresholds["drop"]))
     return selected, mid_keys
 
@@ -685,15 +686,18 @@ class Orchestrator:
                     catalog = loom or [{"id": "loom.move_ready", "label": "Move task to Ready", "source": "loom"}]
                 if judgment is not None:
                     ground = await self._call_client(judgment, "judge", pack=pack, task=task, catalog=catalog, candidates=candidates)
-                    judgment_provider = ground.provider or judgment_provider
-                    judgment_model = ground.model or judgment_model
-                    judgment_input_tokens = _merge_tokens(judgment_input_tokens, ground.usage.input_tokens)
-                    judgment_latency_ms = ground.latency_ms
-                    if ground.skipped:
-                        judgment_skipped = True
-                        judgment_skip_reason = ground.skip_reason or "error"
+                    if ground.skipped and not judgment_skipped:
+                        logger.warning("judgment grounding pass failed; keeping prior decision")
                     else:
-                        decision, judgments, judgment_skipped, judgment_skip_reason = _apply_judgment(task.status.value, ground, candidates, catalog, judgment_thresholds)
+                        judgment_provider = ground.provider or judgment_provider
+                        judgment_model = ground.model or judgment_model
+                        judgment_input_tokens = _merge_tokens(judgment_input_tokens, ground.usage.input_tokens)
+                        judgment_latency_ms = ground.latency_ms
+                        if ground.skipped:
+                            judgment_skipped = True
+                            judgment_skip_reason = ground.skip_reason or "error"
+                        else:
+                            decision, judgments, judgment_skipped, judgment_skip_reason = _apply_judgment(task.status.value, ground, candidates, catalog, judgment_thresholds)
                 for item in catalog:
                     if item["id"] == decision.action_id:
                         decision.action_label = item["label"]
