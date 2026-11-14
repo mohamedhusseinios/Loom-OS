@@ -228,3 +228,109 @@ def test_settings_requires_auth_when_enabled(client):
         assert ok.json()["api_keys_masked"]["deepseek"] == "••••7777"
     finally:
         configure_auth_token(None)
+
+
+def test_get_settings_includes_decision_providers(client):
+    res = client.get("/api/agent/settings")
+    assert res.status_code == 200
+    body = res.json()
+    assert "filter_provider" in body
+    assert "judgment_provider" in body
+    assert body["filter_provider"] is None
+    assert body["judgment_provider"] is None
+
+
+def test_judgment_provider_gliclass_rejected(client):
+    res = client.put("/api/agent/settings", json={
+        "filter_provider": "gliclass",
+        "judgment_provider": "gliclass",
+    })
+    assert res.status_code == 400
+    assert "gliclass" in res.json()["detail"]
+    got = client.get("/api/agent/settings")
+    assert got.json()["filter_provider"] is None
+    assert got.json()["judgment_provider"] is None
+
+    unknown = client.put("/api/agent/settings", json={"filter_provider": "deepseek"})
+    assert unknown.status_code == 400
+    bad_judgment = client.put("/api/agent/settings", json={"judgment_provider": "custom"})
+    assert bad_judgment.status_code == 400
+
+
+def test_ollama_without_model_rejected(client):
+    res = client.put("/api/agent/settings", json={
+        "filter_provider": "ollama",
+        "judgment_provider": "ollama",
+        "providers": [{
+            "id": "ollama", "name": "Ollama",
+            "base_url": "http://localhost:11434", "model_ids": ["  "],
+        }],
+    })
+    assert res.status_code == 400
+    assert "model" in res.json()["detail"].lower()
+    got = client.get("/api/agent/settings")
+    assert got.json()["filter_provider"] is None
+
+    ok = client.put("/api/agent/settings", json={
+        "filter_provider": "ollama",
+        "judgment_provider": "ollama",
+        "providers": [{
+            "id": "ollama", "name": "Ollama",
+            "base_url": "http://localhost:11434", "model_ids": ["nimble"],
+        }],
+    })
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["filter_provider"] == "ollama"
+    assert body["judgment_provider"] == "ollama"
+    ollama = next(p for p in body["providers"] if p["id"] == "ollama")
+    assert ollama["model_ids"] == ["nimble"]
+    assert ollama["base_url"] == "http://localhost:11434"
+    again = client.get("/api/agent/settings")
+    assert again.json()["filter_provider"] == "ollama"
+    assert again.json()["judgment_provider"] == "ollama"
+
+
+def test_decision_fields_round_trip_keeps_masked_keys(client):
+    secret = "sk-abcdef1234"
+    ts = "ts-secret-key-9999"
+    seeded = client.put("/api/agent/settings", json={
+        "api_keys": {"deepseek": secret, "typesafe": ts},
+        "filter_provider": "gliclass",
+        "judgment_provider": "none",
+    })
+    assert seeded.status_code == 200
+    res = client.put("/api/agent/settings", json={
+        "filter_provider": "gliclass",
+        "judgment_provider": "typesafe",
+        "providers": [{
+            "id": "gliclass", "name": "GLiClass",
+            "base_url": "http://127.0.0.1:5555", "model_ids": ["gliclass-v3"],
+        }],
+        "api_keys": {"deepseek": "••••1234", "typesafe": "••••9999"},
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["filter_provider"] == "gliclass"
+    assert body["judgment_provider"] == "typesafe"
+    assert body["api_keys_masked"]["deepseek"] == "••••1234"
+    assert body["api_keys_masked"]["typesafe"] == "••••9999"
+    assert secret not in res.text
+    assert ts not in res.text
+    gliclass = next(p for p in body["providers"] if p["id"] == "gliclass")
+    assert gliclass["base_url"] == "http://127.0.0.1:5555"
+    assert gliclass["model_ids"] == ["gliclass-v3"]
+    got = client.get("/api/agent/settings")
+    data = got.json()
+    assert data["filter_provider"] == "gliclass"
+    assert data["judgment_provider"] == "typesafe"
+    assert data["api_keys_masked"]["deepseek"] == "••••1234"
+    assert data["has_keys"]["typesafe"] is True
+    assert secret not in got.text
+    assert ts not in got.text
+
+    rejected = client.put("/api/agent/settings", json={"judgment_provider": "gliclass"})
+    assert rejected.status_code == 400
+    kept = client.get("/api/agent/settings")
+    assert kept.json()["filter_provider"] == "gliclass"
+    assert kept.json()["judgment_provider"] == "typesafe"

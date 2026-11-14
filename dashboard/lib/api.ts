@@ -503,6 +503,8 @@ export interface AgentSettings {
   providers: { id: string; name: string; base_url: string; model_ids: string[] }[];
   api_keys_masked: Record<string, string | null>;
   has_keys: Record<string, boolean>;
+  filter_provider?: string | null;
+  judgment_provider?: string | null;
 }
 
 export interface TaskSuggestion {
@@ -550,13 +552,19 @@ export async function updateAgentSettings(payload: {
   default_model?: string;
   providers?: AgentSettings["providers"];
   api_keys?: Record<string, string>;
+  filter_provider?: string;
+  judgment_provider?: string;
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    const message = typeof detail.detail === "string" ? detail.detail : `API error: ${res.status}`;
+    throw new Error(message);
+  }
   return res.json();
 }
 

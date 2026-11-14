@@ -87,3 +87,45 @@ async def test_runtime_reads_updated_keys_without_restart(tmp_path, monkeypatch)
         assert relevance.api_key == "ts-env"
     finally:
         await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_decision_roles_reread_replaces_stale_judgment(tmp_path, monkeypatch):
+    """GLiClass + a judgment backend, then Jev/Ollama, is what the next cycle reads."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    reg = AgentRegistry(str(tmp_path / "state.db"))
+    await reg.initialize()
+    runtime = AgentRuntime(reg, graph_engine=None)
+    try:
+        await reg.update_agent_settings(AgentSettingsUpdate(
+            filter_provider="gliclass",
+            judgment_provider="typesafe",
+            api_keys={"typesafe": "ts-key"},
+            providers=[{
+                "id": "gliclass", "name": "GLiClass",
+                "base_url": "http://127.0.0.1:8000", "model_ids": ["knowledgator"],
+            }],
+        ))
+        settings, keys = await runtime._decision_settings()
+        config = resolve_decision_config(settings, keys)
+        assert config.filter_provider == "gliclass"
+        assert config.judgment_provider == "typesafe"
+        assert config.filter_model == "knowledgator"
+
+        await reg.update_agent_settings(AgentSettingsUpdate(
+            filter_provider="ollama",
+            judgment_provider="ollama",
+            providers=[{
+                "id": "ollama", "name": "Ollama",
+                "base_url": "http://localhost:11434", "model_ids": ["nimble"],
+            }],
+        ))
+        settings, keys = await runtime._decision_settings()
+        config = resolve_decision_config(settings, keys)
+        assert config.filter_provider == "ollama"
+        assert config.judgment_provider == "ollama"
+        assert config.filter_model == "nimble"
+        assert config.judgment_model == "nimble"
+    finally:
+        await reg.close()

@@ -12,6 +12,7 @@ from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from daemon.agent_credentials import merge_providers
 from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
@@ -879,8 +880,52 @@ async def get_agent_settings(_=Depends(require_token)):
     return (await registry.get_agent_settings(mask_keys=True)).model_dump()
 
 
+_FILTER_PROVIDERS = frozenset({"typesafe", "ollama", "gliclass", "none"})
+_JUDGMENT_PROVIDERS = frozenset({"typesafe", "ollama", "none"})
+
+
+def _normalize_decision_provider(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    return text or None
+
+
+def _ollama_model_set(providers: list) -> bool:
+    for provider in providers:
+        if provider.get("id") != "ollama":
+            continue
+        return any(isinstance(model, str) and model.strip() for model in (provider.get("model_ids") or []))
+    return False
+
+
+def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
+    filt_in = payload.filter_provider
+    judg_in = payload.judgment_provider
+    filt = _normalize_decision_provider(filt_in if filt_in is not None else current.filter_provider)
+    judg = _normalize_decision_provider(judg_in if judg_in is not None else current.judgment_provider)
+    if filt_in is not None and filt not in _FILTER_PROVIDERS:
+        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, or none")
+    if judg_in is not None and judg == "gliclass":
+        raise HTTPException(status_code=400, detail="judgment_provider=gliclass is not supported")
+    if judg_in is not None and judg not in _JUDGMENT_PROVIDERS:
+        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, or none")
+    if filt_in is not None:
+        payload.filter_provider = filt
+    if judg_in is not None:
+        payload.judgment_provider = judg
+    touches_ollama = filt == "ollama" or judg == "ollama"
+    sets_ollama_role = _normalize_decision_provider(filt_in) == "ollama" or _normalize_decision_provider(judg_in) == "ollama"
+    updates_ollama = any(provider.id == "ollama" for provider in (payload.providers or []))
+    merged = merge_providers(list(current.providers), list(payload.providers) if payload.providers is not None else None)
+    if touches_ollama and (sets_ollama_role or updates_ollama) and not _ollama_model_set(merged):
+        raise HTTPException(status_code=400, detail="Ollama decision provider requires a model")
+
+
 @app.put("/api/agent/settings")
 async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
+    current = await registry.get_agent_settings(mask_keys=True)
+    _validate_decision_settings(payload, current)
     return (await registry.update_agent_settings(payload)).model_dump()
 
 
