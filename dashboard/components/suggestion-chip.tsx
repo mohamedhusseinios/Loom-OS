@@ -46,6 +46,13 @@ export function SuggestionChip({
             {t("confidence", { pct })}
             {suggestion.jev_skipped ? ` · ${t("jevSkipped")}` : ""}
           </p>
+          <p className="text-[11px] text-zinc-500">
+            {t("usageLine", {
+              jev: suggestion.jev_input_tokens ?? 0,
+              llm: (suggestion.llm_prompt_tokens ?? 0) + (suggestion.llm_completion_tokens ?? 0),
+            })}
+            {suggestion.escalated ? ` · ${t("escalatedTag")}` : ""}
+          </p>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">

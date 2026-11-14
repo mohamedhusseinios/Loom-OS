@@ -14,6 +14,7 @@ import { TaskBoard } from "@/components/task-board";
 import { NewTaskModal } from "@/components/new-task-modal";
 import { TaskDetailDrawer } from "@/components/task-detail-drawer";
 import { LoomAgentChat } from "@/components/loom-agent-chat";
+import { AgentCostSummary } from "@/components/agent-cost-summary";
 
 export default function TasksPage() {
   const t = useTranslations("TaskBoard");
@@ -120,8 +121,11 @@ export default function TasksPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 flex-1 min-h-0">
       <TaskBoard tasks={tasks} onMove={handleMove} onSelect={setSelected} />
-      <div className="min-h-[280px] xl:min-h-0">
-        <LoomAgentChat key={selected?.id ?? "project"} projectId={id} taskId={selected?.id} />
+      <div className="min-h-[280px] xl:min-h-0 flex flex-col gap-3">
+        <AgentCostSummary projectId={id} />
+        <div className="flex-1 min-h-0">
+          <LoomAgentChat key={selected?.id ?? "project"} projectId={id} taskId={selected?.id} />
+        </div>
       </div>
       </div>
 

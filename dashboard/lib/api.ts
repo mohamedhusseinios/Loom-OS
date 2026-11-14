@@ -515,8 +515,30 @@ export interface TaskSuggestion {
   catalog_json: string;
   status: "pending" | "accepted" | "dismissed";
   jev_skipped: boolean;
+  jev_input_tokens?: number;
+  llm_prompt_tokens?: number;
+  llm_completion_tokens?: number;
+  escalated?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentCostSummary {
+  suggestion_count: number;
+  jev_input_tokens: number;
+  llm_prompt_tokens: number;
+  llm_completion_tokens: number;
+  llm_total_tokens: number;
+  jev_cost_usd: number;
+  escalated_count: number;
+  accepted: number;
+  dismissed: number;
+  pending: number;
+  escalation_rate: number;
+  accept_rate: number;
+  dismiss_rate: number;
+  accept_rate_resolved: number;
+  dismiss_rate_resolved: number;
 }
 
 export async function getAgentSettings(): Promise<AgentSettings> {
@@ -597,4 +619,8 @@ export async function implementTask(projectId: string, taskId: string): Promise<
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+export async function getAgentCostSummary(projectId: string): Promise<AgentCostSummary> {
+  return fetchApi(`/api/projects/${projectId}/agent/cost-summary`);
 }

@@ -309,6 +309,17 @@
     "implement": "Implement",
     "refresh": "Refresh",
     "confidence": "{pct}% confidence",
-    "jevSkipped": "Jev skipped"
+    "jevSkipped": "Jev skipped",
+    "usageLine": "Jev {jev} tok · LLM {llm} tok",
+    "escalatedTag": "escalated",
+    "costSummary": "Agent usage",
+    "costSuggestions": "{count} suggestions",
+    "costJev": "Jev {tokens} tok (${usd})",
+    "costLlm": "LLM {tokens} tok",
+    "costEscalation": "Escalation {rate}",
+    "costAccept": "Accept {rate}",
+    "costDismiss": "Dismiss {rate}",
+    "costEmpty": "No suggestion usage yet.",
+    "costLoadError": "Could not load usage summary."
   }
 }

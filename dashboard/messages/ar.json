@@ -309,6 +309,17 @@
     "implement": "تنفيذ",
     "refresh": "تحديث",
     "confidence": "ثقة {pct}%",
-    "jevSkipped": "تم تخطي Jev"
+    "jevSkipped": "تم تخطي Jev",
+    "usageLine": "Jev {jev} رمز · LLM {llm} رمز",
+    "escalatedTag": "تم التصعيد",
+    "costSummary": "استخدام الوكيل",
+    "costSuggestions": "{count} اقتراحات",
+    "costJev": "Jev {tokens} رمز (${usd})",
+    "costLlm": "LLM {tokens} رمز",
+    "costEscalation": "التصعيد {rate}",
+    "costAccept": "قبول {rate}",
+    "costDismiss": "رفض {rate}",
+    "costEmpty": "لا يوجد استخدام للاقتراحات بعد.",
+    "costLoadError": "تعذر تحميل ملخص الاستخدام."
   }
 }
