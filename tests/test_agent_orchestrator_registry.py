@@ -68,3 +68,55 @@ async def test_list_agent_messages_returns_latest(reg):
         await reg.add_agent_message(chat.id, "user", f"m{i}")
     msgs = await reg.list_agent_messages(chat.id, limit=3)
     assert [m.content for m in msgs] == ["m2", "m3", "m4"]
+
+
+@pytest.mark.asyncio
+async def test_suggestion_persists_usage_and_escalated(reg):
+    sug = await reg.create_task_suggestion(
+        "proj", "t1", "loom.move_ready", "Move to Ready", 0.91, "Suggested next step: Move to Ready",
+        [{"id": "loom.move_ready"}],
+        jev_skipped=False,
+        jev_input_tokens=22,
+        llm_prompt_tokens=40,
+        llm_completion_tokens=12,
+        escalated=True,
+    )
+    loaded = await reg.get_task_suggestion(sug.id)
+    assert loaded.jev_input_tokens == 22
+    assert loaded.llm_prompt_tokens == 40
+    assert loaded.llm_completion_tokens == 12
+    assert loaded.escalated is True
+    updated = await reg.set_suggestion_status(sug.id, SuggestionStatus.ACCEPTED)
+    assert updated.status == SuggestionStatus.ACCEPTED
+    assert updated.jev_input_tokens == 22
+    assert updated.escalated is True
+
+
+@pytest.mark.asyncio
+async def test_task_suggestions_columns_migrate_on_initialize(tmp_path):
+    import aiosqlite
+    db_path = str(tmp_path / "legacy.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("""
+            CREATE TABLE task_suggestions (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                action_label TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                prose TEXT NOT NULL DEFAULT '',
+                catalog_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pending',
+                jev_skipped INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await db.commit()
+    registry = AgentRegistry(db_path)
+    await registry.initialize()
+    cursor = await registry.db.execute("PRAGMA table_info(task_suggestions)")
+    cols = {r[1] for r in await cursor.fetchall()}
+    assert {"jev_input_tokens", "llm_prompt_tokens", "llm_completion_tokens", "escalated"} <= cols
+    await registry.close()

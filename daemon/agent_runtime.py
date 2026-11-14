@@ -77,6 +77,10 @@ class AgentRuntime:
             sug = await self.registry.create_task_suggestion(
                 project_id, task.id, result.action_id, result.action_label,
                 result.confidence, result.prose, result.catalog, result.jev_skipped,
+                jev_input_tokens=result.jev_input_tokens,
+                llm_prompt_tokens=result.llm_prompt_tokens,
+                llm_completion_tokens=result.llm_completion_tokens,
+                escalated=result.escalated,
             )
             suggestion_id = sug.id
             if self.emit_event:
@@ -108,6 +112,10 @@ class AgentRuntime:
         sug = await self.registry.create_task_suggestion(
             project_id, task.id, result.action_id, result.action_label,
             result.confidence, result.prose, result.catalog, result.jev_skipped,
+            jev_input_tokens=result.jev_input_tokens,
+            llm_prompt_tokens=result.llm_prompt_tokens,
+            llm_completion_tokens=result.llm_completion_tokens,
+            escalated=result.escalated,
         )
         _suggest_cooldown[task_id] = time.monotonic()
         if self.emit_event:

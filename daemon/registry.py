@@ -1,6 +1,7 @@
 """SQLite-backed agent and project registry."""
 
 import json
+import logging
 import aiosqlite
 from datetime import datetime, timezone
 from typing import Optional
@@ -168,6 +169,10 @@ class AgentRegistry:
                 catalog_json TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL DEFAULT 'pending',
                 jev_skipped INTEGER NOT NULL DEFAULT 0,
+                jev_input_tokens INTEGER NOT NULL DEFAULT 0,
+                llm_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                llm_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                escalated INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -176,6 +181,17 @@ class AgentRegistry:
             "CREATE INDEX IF NOT EXISTS idx_task_suggestions_task_status"
             " ON task_suggestions(task_id, status)"
         )
+        # Migration: usage / escalation columns on existing DBs.
+        cursor = await self.db.execute("PRAGMA table_info(task_suggestions)")
+        sug_cols = [r[1] for r in await cursor.fetchall()]
+        for name, ddl in (
+            ("jev_input_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("llm_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("llm_completion_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("escalated", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in sug_cols:
+                await self.db.execute(f"ALTER TABLE task_suggestions ADD COLUMN {name} {ddl}")
         await self.db.commit()
 
     async def close(self):
@@ -855,6 +871,10 @@ class AgentRegistry:
         prose: str,
         catalog: list[dict],
         jev_skipped: bool = False,
+        jev_input_tokens: int = 0,
+        llm_prompt_tokens: int = 0,
+        llm_completion_tokens: int = 0,
+        escalated: bool = False,
     ) -> TaskSuggestionRecord:
         import uuid
         await self.dismiss_pending_suggestions(task_id)
@@ -863,12 +883,15 @@ class AgentRegistry:
         await self.db.execute(
             "INSERT INTO task_suggestions"
             " (id, project, task_id, action_id, action_label, confidence, prose,"
-            " catalog_json, status, jev_skipped, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " catalog_json, status, jev_skipped, jev_input_tokens,"
+            " llm_prompt_tokens, llm_completion_tokens, escalated, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 sid, project, task_id, action_id, action_label, confidence, prose,
                 json.dumps(catalog), SuggestionStatus.PENDING.value,
-                1 if jev_skipped else 0, now, now,
+                1 if jev_skipped else 0, int(jev_input_tokens or 0),
+                int(llm_prompt_tokens or 0), int(llm_completion_tokens or 0),
+                1 if escalated else 0, now, now,
             ),
         )
         await self.db.commit()
@@ -876,7 +899,10 @@ class AgentRegistry:
             id=sid, project=project, task_id=task_id, action_id=action_id,
             action_label=action_label, confidence=confidence, prose=prose,
             catalog_json=json.dumps(catalog), status=SuggestionStatus.PENDING,
-            jev_skipped=jev_skipped, created_at=now, updated_at=now,
+            jev_skipped=jev_skipped, jev_input_tokens=int(jev_input_tokens or 0),
+            llm_prompt_tokens=int(llm_prompt_tokens or 0),
+            llm_completion_tokens=int(llm_completion_tokens or 0),
+            escalated=escalated, created_at=now, updated_at=now,
         )
 
     async def get_task_suggestion(self, suggestion_id: str) -> TaskSuggestionRecord | None:
@@ -904,10 +930,28 @@ class AgentRegistry:
             (status.value, now, suggestion_id),
         )
         await self.db.commit()
-        return await self.get_task_suggestion(suggestion_id)
+        record = await self.get_task_suggestion(suggestion_id)
+        if record is not None:
+            logging.getLogger("loom.registry").info(
+                "suggestion outcome id=%s task=%s status=%s action=%s "
+                "jev_input_tokens=%s llm_prompt_tokens=%s llm_completion_tokens=%s "
+                "jev_skipped=%s escalated=%s",
+                record.id, record.task_id, record.status.value, record.action_id,
+                record.jev_input_tokens, record.llm_prompt_tokens,
+                record.llm_completion_tokens, record.jev_skipped, record.escalated,
+            )
+        return record
 
     @staticmethod
     def _row_to_suggestion(row) -> TaskSuggestionRecord:
+        keys = row.keys()
+        def _int(name: str) -> int:
+            if name not in keys:
+                return 0
+            try:
+                return int(row[name] or 0)
+            except (TypeError, ValueError):
+                return 0
         return TaskSuggestionRecord(
             id=row["id"], project=row["project"], task_id=row["task_id"],
             action_id=row["action_id"], action_label=row["action_label"],
@@ -915,5 +959,9 @@ class AgentRegistry:
             catalog_json=row["catalog_json"] or "[]",
             status=SuggestionStatus(row["status"]),
             jev_skipped=bool(row["jev_skipped"]),
+            jev_input_tokens=_int("jev_input_tokens"),
+            llm_prompt_tokens=_int("llm_prompt_tokens"),
+            llm_completion_tokens=_int("llm_completion_tokens"),
+            escalated=bool(_int("escalated")),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )

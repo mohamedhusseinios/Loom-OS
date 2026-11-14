@@ -296,5 +296,9 @@ class TaskSuggestionRecord(BaseModel):
     catalog_json: str = "[]"
     status: SuggestionStatus = SuggestionStatus.PENDING
     jev_skipped: bool = False
+    jev_input_tokens: int = 0
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    escalated: bool = False
     created_at: str
     updated_at: str
