@@ -12,7 +12,9 @@ from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, SuggestionStatus,
 )
-from daemon.orchestrator import LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION
+from daemon.orchestrator import (
+    LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, context_hash,
+)
 
 logger = logging.getLogger("loom.agent_runtime")
 
@@ -26,6 +28,16 @@ class AgentRuntime:
         self.registry = registry
         self.graph_engine = graph_engine
         self.emit_event = emit_event  # async callable(event, project, data)
+
+    async def _task_hits(self, project_path: str, project_id: str, task) -> list[dict]:
+        if self.graph_engine is None:
+            return []
+        question = f"{task.title}\n{task.instruction}"
+        try:
+            return await self.graph_engine.hybrid_query(project_path, project_id, question, top_k=12)
+        except Exception:
+            logger.warning("hybrid_query failed while hashing context", exc_info=True)
+            return []
 
     async def _llm_from_settings(self) -> tuple[LlmClient, str]:
         settings = await self.registry.get_agent_settings(mask_keys=False)
@@ -81,6 +93,7 @@ class AgentRuntime:
                 llm_prompt_tokens=result.llm_prompt_tokens,
                 llm_completion_tokens=result.llm_completion_tokens,
                 escalated=result.escalated,
+                context_hash=result.context_hash,
             )
             suggestion_id = sug.id
             if self.emit_event:
@@ -101,14 +114,21 @@ class AgentRuntime:
         task = await self.registry.get_agent_task(task_id)
         if task is None:
             raise ValueError(f"task not found: {task_id}")
+        hits = await self._task_hits(project_path, project_id, task)
+        ctx_hash = context_hash(task, hits)
         if not force:
             pending = await self.registry.get_pending_suggestion(task_id)
             last = _suggest_cooldown.get(task_id, 0)
             if pending and (time.monotonic() - last) < SUGGEST_COOLDOWN_SEC:
                 return pending
+            if pending and pending.context_hash and pending.context_hash == ctx_hash:
+                logger.info("auto-suggest skipped; context hash unchanged for task %s", task_id)
+                return pending
         llm, model = await self._llm_from_settings()
         orch = Orchestrator(self.graph_engine, jev=JevClient(), llm=llm)
-        result = await orch.run_suggest_cycle(project_path, project_id, task, model=model)
+        result = await orch.run_suggest_cycle(
+            project_path, project_id, task, model=model, prefetched_hits=hits,
+        )
         sug = await self.registry.create_task_suggestion(
             project_id, task.id, result.action_id, result.action_label,
             result.confidence, result.prose, result.catalog, result.jev_skipped,
@@ -116,6 +136,7 @@ class AgentRuntime:
             llm_prompt_tokens=result.llm_prompt_tokens,
             llm_completion_tokens=result.llm_completion_tokens,
             escalated=result.escalated,
+            context_hash=result.context_hash,
         )
         _suggest_cooldown[task_id] = time.monotonic()
         if self.emit_event:

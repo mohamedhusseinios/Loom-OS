@@ -173,6 +173,7 @@ class AgentRegistry:
                 llm_prompt_tokens INTEGER NOT NULL DEFAULT 0,
                 llm_completion_tokens INTEGER NOT NULL DEFAULT 0,
                 escalated INTEGER NOT NULL DEFAULT 0,
+                context_hash TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -189,6 +190,7 @@ class AgentRegistry:
             ("llm_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
             ("llm_completion_tokens", "INTEGER NOT NULL DEFAULT 0"),
             ("escalated", "INTEGER NOT NULL DEFAULT 0"),
+            ("context_hash", "TEXT NOT NULL DEFAULT ''"),
         ):
             if name not in sug_cols:
                 await self.db.execute(f"ALTER TABLE task_suggestions ADD COLUMN {name} {ddl}")
@@ -875,6 +877,7 @@ class AgentRegistry:
         llm_prompt_tokens: int = 0,
         llm_completion_tokens: int = 0,
         escalated: bool = False,
+        context_hash: str = "",
     ) -> TaskSuggestionRecord:
         import uuid
         await self.dismiss_pending_suggestions(task_id)
@@ -884,14 +887,15 @@ class AgentRegistry:
             "INSERT INTO task_suggestions"
             " (id, project, task_id, action_id, action_label, confidence, prose,"
             " catalog_json, status, jev_skipped, jev_input_tokens,"
-            " llm_prompt_tokens, llm_completion_tokens, escalated, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " llm_prompt_tokens, llm_completion_tokens, escalated, context_hash,"
+            " created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 sid, project, task_id, action_id, action_label, confidence, prose,
                 json.dumps(catalog), SuggestionStatus.PENDING.value,
                 1 if jev_skipped else 0, int(jev_input_tokens or 0),
                 int(llm_prompt_tokens or 0), int(llm_completion_tokens or 0),
-                1 if escalated else 0, now, now,
+                1 if escalated else 0, context_hash or "", now, now,
             ),
         )
         await self.db.commit()
@@ -902,7 +906,8 @@ class AgentRegistry:
             jev_skipped=jev_skipped, jev_input_tokens=int(jev_input_tokens or 0),
             llm_prompt_tokens=int(llm_prompt_tokens or 0),
             llm_completion_tokens=int(llm_completion_tokens or 0),
-            escalated=escalated, created_at=now, updated_at=now,
+            escalated=escalated, context_hash=context_hash or "",
+            created_at=now, updated_at=now,
         )
 
     async def get_task_suggestion(self, suggestion_id: str) -> TaskSuggestionRecord | None:
@@ -922,6 +927,17 @@ class AgentRegistry:
         )
         row = await cursor.fetchone()
         return self._row_to_suggestion(row) if row else None
+
+    async def suggestion_cost_summary(self, project: str) -> dict:
+        cursor = await self.db.execute(
+            "SELECT * FROM task_suggestions WHERE project = ?",
+            (project,),
+        )
+        rows = await cursor.fetchall()
+        records = [self._row_to_suggestion(r) for r in rows]
+        from daemon.agent_cost import summarize_suggestions
+        return summarize_suggestions(records)
+
 
     async def set_suggestion_status(self, suggestion_id: str, status: SuggestionStatus) -> TaskSuggestionRecord | None:
         now = datetime.now(timezone.utc).isoformat()
@@ -963,5 +979,6 @@ class AgentRegistry:
             llm_prompt_tokens=_int("llm_prompt_tokens"),
             llm_completion_tokens=_int("llm_completion_tokens"),
             escalated=bool(_int("escalated")),
+            context_hash=(row["context_hash"] if "context_hash" in keys and row["context_hash"] else ""),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )

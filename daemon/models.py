@@ -300,5 +300,6 @@ class TaskSuggestionRecord(BaseModel):
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     escalated: bool = False
+    context_hash: str = ""
     created_at: str
     updated_at: str

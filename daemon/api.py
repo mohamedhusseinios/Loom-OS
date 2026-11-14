@@ -934,6 +934,15 @@ async def dismiss_suggestion(project_id: str, suggestion_id: str):
     return sug.model_dump(mode="json") if sug else {}
 
 
+
+@app.get("/api/projects/{project_id}/agent/cost-summary")
+async def agent_cost_summary(project_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await registry.suggestion_cost_summary(project_id)
+
+
 @app.get("/api/projects/{project_id}/tasks/{task_id}/suggestion")
 async def get_pending_suggestion(project_id: str, task_id: str):
     sug = await registry.get_pending_suggestion(task_id)

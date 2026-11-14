@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,13 @@ logger = logging.getLogger("loom.orchestrator")
 # Mid-band thresholds: yes >= 0.7, no < 0.3, otherwise uncertain.
 NOUL_YES = 0.7
 NOUL_NO = 0.3
+PACK_CHAR_CAP = 2000
+INSTRUCTION_CHAR_CAP = 1000
+CHAT_HISTORY_LIMIT = 8
+FILTER_CACHE_TTL_SEC = 30.0
+
+# (key -> (monotonic_ts, selected_hits, mid_keys))
+_filter_cache: dict[str, tuple[float, list[dict], list[str]]] = {}
 
 # Loom actions allowed per current task status.
 LOOM_ACTIONS: dict[str, list[tuple[str, str]]] = {
@@ -71,6 +80,8 @@ class SuggestResult:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     mid_band_keys: list[str] = field(default_factory=list)
+    context_hash: str = ""
+    filter_cache_hit: bool = False
 
 
 @dataclass
@@ -147,10 +158,73 @@ def merge_catalog(loom: list[dict], playbook: list[dict], candidates: list[dict]
     return merged
 
 
-def _node_snippet(hit: dict) -> str:
+def _node_snippet(hit: dict, limit: int = 160) -> str:
     nid = hit.get("id") or hit.get("name") or "?"
     label = hit.get("label") or hit.get("text") or hit.get("type") or ""
-    return f"{nid}: {label}"[:200]
+    return f"{nid}: {label}"[:limit]
+
+
+def _clip(text: str | None, limit: int) -> str:
+    value = text or ""
+    if len(value) <= limit:
+        return value
+    if limit <= 1:
+        return value[:limit]
+    return value[: limit - 1] + "…"
+
+
+def _node_id(hit: dict) -> str:
+    return str(hit.get("id") or hit.get("name") or "")
+
+
+def context_hash(task: AgentTaskRecord, hits: list[dict] | None) -> str:
+    """Stable hash of task text + the graph node id set used for retrieval."""
+    nodes = sorted(_node_id(h) for h in (hits or [])[:12])
+    payload = {
+        "task_id": task.id,
+        "title": task.title,
+        "instruction": task.instruction,
+        "status": getattr(task.status, "value", task.status),
+        "nodes": nodes,
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def build_context_pack(hits: list[dict], max_chars: int = PACK_CHAR_CAP) -> str:
+    """Join kept-node snippets, stopping at ``max_chars``."""
+    parts: list[str] = []
+    used = 0
+    for hit in hits:
+        snippet = _node_snippet(hit)
+        extra = len(snippet) + (1 if parts else 0)
+        if parts and used + extra > max_chars:
+            break
+        if not parts and len(snippet) > max_chars:
+            parts.append(_clip(snippet, max_chars))
+            break
+        parts.append(snippet)
+        used += extra
+    return "\n".join(parts) or "(no graph hits)"
+
+
+def clear_filter_cache() -> None:
+    _filter_cache.clear()
+
+
+def _filter_cache_get(key: str) -> tuple[list[dict], list[str]] | None:
+    entry = _filter_cache.get(key)
+    if entry is None:
+        return None
+    ts, selected, mid_keys = entry
+    if time.monotonic() - ts > FILTER_CACHE_TTL_SEC:
+        _filter_cache.pop(key, None)
+        return None
+    return selected, mid_keys
+
+
+def _filter_cache_put(key: str, selected: list[dict], mid_keys: list[str]) -> None:
+    _filter_cache[key] = (time.monotonic(), selected, mid_keys)
 
 
 def noul_value(ans: Any) -> float:
@@ -374,12 +448,18 @@ class Orchestrator:
         chat_messages: list[dict[str, str]] | None = None,
         user_message: str | None = None,
         model: str | None = None,
+        prefetched_hits: list[dict] | None = None,
+        always_llm: bool = False,
     ) -> SuggestResult:
         question = f"{task.title}\n{task.instruction}"
         if user_message:
             question = f"{question}\n{user_message}"
 
-        hits = await self._retrieve(project_path, project, question)
+        if prefetched_hits is not None:
+            hits = list(prefetched_hits)
+        else:
+            hits = await self._retrieve(project_path, project, question)
+        ctx_hash = context_hash(task, hits)
         graph_path = Path(project_path) / "graphify-out" / "graph.json"
         if not hits and not graph_path.exists():
             return SuggestResult(
@@ -390,26 +470,34 @@ class Orchestrator:
                 catalog=[{"id": "loom.refresh_graph", "label": "Build or refresh the project graph", "source": "loom"}],
                 reply="I don't have graph memory for this project yet. Please build/refresh the graph, then we can plan the next step.",
                 graph_empty=True,
+                context_hash=ctx_hash,
             )
 
         jev_skipped = False
         jev_input_tokens = 0
         mid_from_filter: list[str] = []
+        filter_cache_hit = False
         filtered = hits[:8]
         if hits and self.jev.available:
-            try:
-                filtered, mid_from_filter, used = await asyncio.to_thread(
-                    self._jev_filter, hits, task,
-                )
-                jev_input_tokens += used
-            except JevError:
-                logger.warning("Jev filter failed; using top hybrid hits", exc_info=True)
-                jev_skipped = True
-                filtered = hits[:5]
+            cached = _filter_cache_get(ctx_hash)
+            if cached is not None:
+                filtered, mid_from_filter = cached
+                filter_cache_hit = True
+            else:
+                try:
+                    filtered, mid_from_filter, used = await asyncio.to_thread(
+                        self._jev_filter, hits, task,
+                    )
+                    jev_input_tokens += used
+                    _filter_cache_put(ctx_hash, filtered, mid_from_filter)
+                except JevError:
+                    logger.warning("Jev filter failed; using top hybrid hits", exc_info=True)
+                    jev_skipped = True
+                    filtered = hits[:5]
         elif hits:
             jev_skipped = True
 
-        pack = "\n".join(_node_snippet(h) for h in filtered) or "(no graph hits)"
+        pack = build_context_pack(filtered)
         playbook = load_playbook(project_path)
         loom = loom_catalog_for_status(task.status.value)
         pb = playbook_for_status(playbook, task.status.value)
@@ -436,7 +524,7 @@ class Orchestrator:
 
         # Chat with a user message always calls the main LLM first so Jev can
         # also score whether proposed candidates are grounded in cited nodes.
-        if user_message:
+        if user_message or always_llm:
             await _propose()
 
         catalog = merge_catalog(loom, pb, candidates)
@@ -466,12 +554,28 @@ class Orchestrator:
         )
 
         # Auto-suggest: call DeepSeek only when Jev is uncertain or skipped.
-        if not user_message and escalated:
+        # always_llm (benchmark baseline) already proposed above.
+        if not user_message and not always_llm and escalated:
             await _propose()
             if candidates:
                 catalog = merge_catalog(loom, pb, candidates)
                 if not catalog:
                     catalog = loom or [{"id": "loom.move_ready", "label": "Move task to Ready", "source": "loom"}]
+                if self.jev.available and not jev_skipped:
+                    try:
+                        grounded, used = await asyncio.to_thread(
+                            self._jev_ground_candidates, pack, task, candidates,
+                        )
+                        jev_input_tokens += used
+                        judgments.candidates = grounded
+                        decision = map_judgments_to_action(
+                            task.status.value, judgments, catalog,
+                        )
+                    except JevError:
+                        logger.warning(
+                            "Jev grounding pass failed; keeping prior decision",
+                            exc_info=True,
+                        )
                 for item in catalog:
                     if item["id"] == decision.action_id:
                         decision.action_label = item["label"]
@@ -502,6 +606,8 @@ class Orchestrator:
             llm_prompt_tokens=llm_prompt_tokens,
             llm_completion_tokens=llm_completion_tokens,
             mid_band_keys=mid_band_keys,
+            context_hash=ctx_hash,
+            filter_cache_hit=filter_cache_hit,
         )
 
     async def _retrieve(self, project_path: str, project: str, question: str) -> list[dict]:
@@ -558,10 +664,11 @@ class Orchestrator:
         )
         messages = [{"role": "system", "content": system}]
         if chat_messages:
-            messages.extend(chat_messages[-20:])
+            messages.extend(chat_messages[-CHAT_HISTORY_LIMIT:])
         user = (
-            f"Task status={task.status.value}\nTitle: {task.title}\n"
-            f"Instruction: {task.instruction}\n\nGraph context:\n{pack}"
+            f"Task status={task.status.value}\nTitle: {_clip(task.title, 300)}\n"
+            f"Instruction: {_clip(task.instruction, INSTRUCTION_CHAR_CAP)}\n\n"
+            f"Graph context:\n{pack}"
         )
         if user_message:
             user += f"\n\nUser message: {user_message}"
@@ -646,3 +753,46 @@ class Orchestrator:
         )
         decision = map_judgments_to_action(task.status.value, judgments, catalog)
         return decision, judgments, usage_input_tokens(payload)
+
+    def _jev_ground_candidates(
+        self,
+        pack: str,
+        task: AgentTaskRecord,
+        candidates: list[dict],
+    ) -> tuple[list[dict], int]:
+        """Score cited LLM candidates with noul questions only (no complete/blocked/ready)."""
+        cited = [c for c in candidates if c.get("id") and c.get("graph_ids")]
+        if not cited:
+            return [], 0
+        questions: dict[str, dict] = {}
+        for i, c in enumerate(cited):
+            nid = ", ".join(str(g) for g in (c.get("graph_ids") or [])[:4])
+            questions[f"grounded_{i}"] = {
+                "type": "noul",
+                "instructions": (
+                    f"Is proposed step `{c['id']}` ({c.get('label') or c['id']}) "
+                    f"grounded in the cited graph node(s) `{nid}`?"
+                ),
+                "criteria": {
+                    "true": "The cited graph node actually supports this step.",
+                    "false": "The citation is missing, unrelated, or does not support the step.",
+                },
+            }
+        state = {
+            "task": {
+                "title": task.title,
+                "instruction": task.instruction,
+                "status": task.status.value,
+            },
+            "graph": pack,
+        }
+        payload = self.jev.ask(state, questions)
+        answers = _answers_of(payload)
+        grounded = []
+        for i, c in enumerate(cited):
+            grounded.append({
+                "id": c["id"],
+                "label": c.get("label") or c["id"],
+                "noul": noul_value(answers.get(f"grounded_{i}") or {}),
+            })
+        return grounded, usage_input_tokens(payload)

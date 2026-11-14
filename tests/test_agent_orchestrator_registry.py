@@ -118,5 +118,18 @@ async def test_task_suggestions_columns_migrate_on_initialize(tmp_path):
     await registry.initialize()
     cursor = await registry.db.execute("PRAGMA table_info(task_suggestions)")
     cols = {r[1] for r in await cursor.fetchall()}
-    assert {"jev_input_tokens", "llm_prompt_tokens", "llm_completion_tokens", "escalated"} <= cols
+    assert {"jev_input_tokens", "llm_prompt_tokens", "llm_completion_tokens", "escalated", "context_hash"} <= cols
     await registry.close()
+
+
+@pytest.mark.asyncio
+async def test_suggestion_persists_context_hash(reg):
+    sug = await reg.create_task_suggestion(
+        "proj", "t1", "loom.move_ready", "Move to Ready", 0.9, "go", [],
+        context_hash="abc123",
+    )
+    loaded = await reg.get_task_suggestion(sug.id)
+    assert loaded.context_hash == "abc123"
+    summary = await reg.suggestion_cost_summary("proj")
+    assert summary["suggestion_count"] == 1
+    assert summary["pending"] == 1

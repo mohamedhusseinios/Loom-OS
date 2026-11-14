@@ -5,7 +5,7 @@ from daemon.models import AgentTaskRecord, AgentTaskStatus
 from daemon.orchestrator import (
     Orchestrator, merge_catalog, loom_catalog_for_status, SuggestResult,
     Judgments, map_judgments_to_action, partition_relevance, NOUL_YES,
-    template_reply,
+    template_reply, build_context_pack, context_hash, clear_filter_cache,
 )
 from daemon.jev_client import JevClient
 from daemon.llm_client import LlmClient
@@ -333,3 +333,79 @@ async def test_chat_always_calls_llm_even_when_jev_is_sure(tmp_path):
     # Grounding question is asked because candidates exist before judge.
     judge_calls = [c for c in jev.calls if "complete" in c]
     assert judge_calls and "grounded_0" in judge_calls[0]
+
+
+def _graph(tmp_path):
+    (tmp_path / "graphify-out").mkdir(exist_ok=True)
+    (tmp_path / "graphify-out" / "graph.json").write_text("{}")
+
+
+@pytest.fixture(autouse=True)
+def _clear_jev_filter_cache():
+    clear_filter_cache()
+    yield
+    clear_filter_cache()
+
+
+def test_build_context_pack_caps_chars():
+    hits = [{"id": f"n{i}", "label": "X" * 80} for i in range(40)]
+    pack = build_context_pack(hits, max_chars=500)
+    assert len(pack) <= 500
+    assert "n0:" in pack
+
+
+def test_context_hash_stable_for_same_task_and_nodes():
+    a = _task()
+    b = _task()
+    hits = [{"id": "n2"}, {"id": "n1"}]
+    assert context_hash(a, hits) == context_hash(b, list(reversed(hits)))
+    other = _task(title="Other")
+    assert context_hash(a, hits) != context_hash(other, hits)
+
+
+@pytest.mark.asyncio
+async def test_auto_suggest_escalation_grounds_new_candidates(tmp_path):
+    _graph(tmp_path)
+    llm = FakeLlm(reply="unclear, maybe write tests")
+    jev = FakeJev(ready=0.5, blocked=0.2, complete=0.1, usage=11)
+    orch = Orchestrator(FakeGE(), jev=jev, llm=llm)
+    result = await orch.run_suggest_cycle(str(tmp_path), "p", _task(AgentTaskStatus.TODO))
+    assert llm.called == 1
+    assert result.escalated is True
+    # filter + initial judge + grounding pass
+    kinds = []
+    for call in jev.calls:
+        if any(k.startswith("rel_") for k in call):
+            kinds.append("filter")
+        elif "complete" in call:
+            kinds.append("judge")
+        elif any(k.startswith("grounded_") for k in call) and "complete" not in call:
+            kinds.append("ground")
+        else:
+            kinds.append("other")
+    assert kinds == ["filter", "judge", "ground"]
+    assert "grounded_0" in jev.calls[-1]
+    assert "options" not in jev.calls[-1]["grounded_0"]
+    assert "criteria" in jev.calls[-1]["grounded_0"]
+    assert result.jev_input_tokens == 33
+
+
+@pytest.mark.asyncio
+async def test_filter_cache_skips_second_jev_filter(tmp_path):
+    _graph(tmp_path)
+    jev = FakeJev(ready=0.92, blocked=0.05, complete=0.05, usage=11)
+    llm = FakeLlm()
+    orch = Orchestrator(FakeGE(), jev=jev, llm=llm)
+    task = _task(AgentTaskStatus.TODO)
+    first = await orch.run_suggest_cycle(str(tmp_path), "p", task)
+    assert first.filter_cache_hit is False
+    assert first.jev_input_tokens == 22  # filter + judge
+    second = await orch.run_suggest_cycle(str(tmp_path), "p", task)
+    assert second.filter_cache_hit is True
+    # only the judge is billed on the second cycle
+    assert second.jev_input_tokens == 11
+    filters = [c for c in jev.calls if any(k.startswith("rel_") for k in c)]
+    judges = [c for c in jev.calls if "complete" in c]
+    assert len(filters) == 1
+    assert len(judges) == 2
+    assert llm.called == 0
