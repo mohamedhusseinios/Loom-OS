@@ -502,6 +502,7 @@ export interface AgentSettings {
   default_model: string;
   providers: { id: string; name: string; base_url: string; model_ids: string[] }[];
   api_keys_masked: Record<string, string | null>;
+  has_keys: Record<string, boolean>;
 }
 
 export interface TaskSuggestion {
