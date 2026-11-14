@@ -105,6 +105,11 @@ def _sorted_reasons(counts: Mapping[str, int]) -> dict[str, int]:
     return {name: int(counts[name]) for name in ordered}
 
 
+def _provider_is_priced(provider: str) -> bool:
+    """Only TypeSafe cloud tokens map to ``jev_cost_usd``. Local Ollama/GLiClass are not billed as Jev."""
+    return (provider or "").strip().lower() == "typesafe"
+
+
 def _empty_bucket(role: str, provider: str, model: str) -> dict[str, Any]:
     return {
         "role": role,
@@ -112,7 +117,7 @@ def _empty_bucket(role: str, provider: str, model: str) -> dict[str, Any]:
         "model": model,
         "calls": 0,
         "input_tokens": 0,
-        "priced": provider != "gliclass" and provider != "none",
+        "priced": _provider_is_priced(provider),
         "skipped": 0,
         "reasons": {},
         "latency_sum": 0.0,
@@ -259,6 +264,8 @@ def summarize_suggestions(rows: Iterable[Any]) -> dict[str, Any]:
         elif item["priced"]:
             priced_tokens += tokens
             cost = round(jev_cost_usd(tokens), 8)
+        elif item["provider"] in {"ollama", "none"}:
+            cost = None
         else:
             cost = 0.0
         calls = int(item["calls"])

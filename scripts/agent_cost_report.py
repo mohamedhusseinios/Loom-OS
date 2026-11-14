@@ -386,7 +386,11 @@ def _variant_label(variant: dict) -> str:
 
 def _cost_cell(summary: dict) -> str:
     priced = f"${summary['jev_cost_usd']:.6f}"
-    if summary.get("gliclass_calls"):
+    unpriced = bool(summary.get("gliclass_calls")) or any(
+        item.get("provider") == "ollama" and int(item.get("input_tokens") or 0) > 0
+        for item in (summary.get("providers") or [])
+    )
+    if unpriced:
         if summary.get("jev_input_tokens"):
             return priced + "+n/a"
         return "n/a"
@@ -431,7 +435,10 @@ def format_comparison(items: list[tuple[str, dict]]) -> str:
             f"{summary.get('dismiss_rate', 0):>8.1%} {_latency_cell(summary):>8}"
         )
     lines.append("accept/dismiss stay 0 here: the benchmark does not persist suggestion outcomes.")
-    lines.append(f"priced decision tokens use ${JEV_USD_PER_MTOK}/Mtok. GLiClass decision-token $ is n/a.")
+    lines.append(
+        f"priced decision tokens (typesafe only) use ${JEV_USD_PER_MTOK}/Mtok. "
+        "Ollama and GLiClass decision-token $ is n/a."
+    )
     return "\n".join(lines) + "\n"
 
 

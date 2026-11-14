@@ -99,6 +99,27 @@ def test_summarize_reports_providers_skips_and_gliclass_cost():
     assert gliclass["latency_ms_avg"] == pytest.approx(20)
 
 
+def test_ollama_tokens_not_priced_as_jev():
+    summary = summarize_suggestions([{
+        "filter_provider": "ollama", "filter_model": "nimble",
+        "filter_input_tokens": 500_000, "filter_skipped": 0, "filter_skip_reason": None,
+        "judgment_provider": "ollama", "judgment_model": "nimble",
+        "judgment_input_tokens": 500_000, "judgment_skipped": 0, "judgment_skip_reason": None,
+        "llm_prompt_tokens": 0, "llm_completion_tokens": 0,
+        "escalated": 0, "status": "accepted",
+    }])
+    assert summary["filter_input_tokens"] == 500_000
+    assert summary["judgment_input_tokens"] == 500_000
+    assert summary["jev_input_tokens"] == 0
+    assert summary["jev_cost_usd"] == 0.0
+    ollama_rows = [item for item in summary["providers"] if item["provider"] == "ollama"]
+    assert ollama_rows
+    assert all(item["cost_usd"] is None for item in ollama_rows)
+    text = format_report(summary)
+    assert "jev_input_tokens:      0" in text
+    assert "cost=n/a" in text
+
+
 def test_none_judgment_latency_stays_on_filter_sample():
     from scripts.agent_cost_report import format_comparison
 
