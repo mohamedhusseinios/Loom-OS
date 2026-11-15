@@ -99,7 +99,7 @@ export function TaskDetailDrawer({
       .then((s) => { if (!cancelled) setSuggestion(s); })
       .catch(() => { if (!cancelled) setSuggestion(null); });
     const unsub = subscribe("task:suggestion", (event) => {
-      const d = event.data as TaskSuggestion;
+      const d = event.data as unknown as TaskSuggestion;
       if (d.task_id === task.id) setSuggestion(d.status === "pending" ? d : null);
     });
     return () => { cancelled = true; unsub(); };

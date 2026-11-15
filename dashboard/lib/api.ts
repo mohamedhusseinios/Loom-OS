@@ -502,6 +502,9 @@ export interface AgentSettings {
   default_model: string;
   providers: { id: string; name: string; base_url: string; model_ids: string[] }[];
   api_keys_masked: Record<string, string | null>;
+  has_keys: Record<string, boolean>;
+  filter_provider?: string | null;
+  judgment_provider?: string | null;
 }
 
 export interface TaskSuggestion {
@@ -515,8 +518,30 @@ export interface TaskSuggestion {
   catalog_json: string;
   status: "pending" | "accepted" | "dismissed";
   jev_skipped: boolean;
+  jev_input_tokens?: number;
+  llm_prompt_tokens?: number;
+  llm_completion_tokens?: number;
+  escalated?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentCostSummary {
+  suggestion_count: number;
+  jev_input_tokens: number;
+  llm_prompt_tokens: number;
+  llm_completion_tokens: number;
+  llm_total_tokens: number;
+  jev_cost_usd: number;
+  escalated_count: number;
+  accepted: number;
+  dismissed: number;
+  pending: number;
+  escalation_rate: number;
+  accept_rate: number;
+  dismiss_rate: number;
+  accept_rate_resolved: number;
+  dismiss_rate_resolved: number;
 }
 
 export async function getAgentSettings(): Promise<AgentSettings> {
@@ -527,13 +552,19 @@ export async function updateAgentSettings(payload: {
   default_model?: string;
   providers?: AgentSettings["providers"];
   api_keys?: Record<string, string>;
+  filter_provider?: string;
+  judgment_provider?: string;
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    const message = typeof detail.detail === "string" ? detail.detail : `API error: ${res.status}`;
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -597,4 +628,8 @@ export async function implementTask(projectId: string, taskId: string): Promise<
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+export async function getAgentCostSummary(projectId: string): Promise<AgentCostSummary> {
+  return fetchApi(`/api/projects/${projectId}/agent/cost-summary`);
 }

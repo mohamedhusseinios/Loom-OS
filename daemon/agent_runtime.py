@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
-from daemon.jev_client import JevClient
+from daemon.agent_credentials import resolve_deepseek_key
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, SuggestionStatus,
 )
-from daemon.orchestrator import LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION
+from daemon.orchestrator import (
+    LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult, context_hash,
+)
 
 logger = logging.getLogger("loom.agent_runtime")
 
@@ -27,23 +28,33 @@ class AgentRuntime:
         self.graph_engine = graph_engine
         self.emit_event = emit_event  # async callable(event, project, data)
 
+    async def _task_hits(self, project_path: str, project_id: str, task) -> list[dict]:
+        if self.graph_engine is None:
+            return []
+        question = f"{task.title}\n{task.instruction}"
+        try:
+            return await self.graph_engine.hybrid_query(project_path, project_id, question, top_k=12)
+        except Exception:
+            logger.warning("hybrid_query failed while hashing context", exc_info=True)
+            return []
+
+    async def _stored_credentials(self):
+        cursor = await self.registry.db.execute(
+            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        return self.registry._settings_from_row(row)
+
     async def _llm_from_settings(self) -> tuple[LlmClient, str]:
-        settings = await self.registry.get_agent_settings(mask_keys=False)
-        keys = await self.registry.get_raw_api_keys()
-        model = settings.default_model or "deepseek-chat"
-        base_url = "https://api.deepseek.com"
-        api_key = keys.get("deepseek") or ""
-        for p in settings.providers:
-            if model in (p.model_ids or []) or p.id == "deepseek":
-                if model in (p.model_ids or []) or not api_key:
-                    base_url = p.base_url or base_url
-                    api_key = keys.get(p.id) or api_key
-                if model in (p.model_ids or []):
-                    break
-        if not api_key:
-            import os
-            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        creds = await self._stored_credentials()
+        stored_key, base_url, model = creds.llm_from_stored()
+        api_key = resolve_deepseek_key(stored_key)
         return LlmClient(api_key=api_key, base_url=base_url), model
+
+    async def _decision_settings(self) -> tuple[object, dict[str, str]]:
+        settings = await self.registry.get_agent_settings(mask_keys=True)
+        raw_keys = await self.registry.get_raw_api_keys()
+        return settings, raw_keys
 
     async def chat(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AgentChatResponse:
         llm, model = await self._llm_from_settings()
@@ -66,17 +77,20 @@ class AgentRuntime:
             task = await self.registry.get_agent_task(payload.task_id)
             if task is None:
                 raise ValueError(f"task not found: {payload.task_id}")
-            orch = Orchestrator(self.graph_engine, jev=JevClient(), llm=llm)
+            settings, raw_keys = await self._decision_settings()
+            orch = Orchestrator(self.graph_engine, llm=llm)
             result = await orch.run_suggest_cycle(
                 project_path, project_id, task,
                 chat_messages=chat_msgs[:-1],
                 user_message=payload.message,
                 model=model,
+                settings=settings,
+                raw_keys=raw_keys,
             )
             reply = result.reply
             sug = await self.registry.create_task_suggestion(
                 project_id, task.id, result.action_id, result.action_label,
-                result.confidence, result.prose, result.catalog, result.jev_skipped,
+                result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
             )
             suggestion_id = sug.id
             if self.emit_event:
@@ -97,17 +111,26 @@ class AgentRuntime:
         task = await self.registry.get_agent_task(task_id)
         if task is None:
             raise ValueError(f"task not found: {task_id}")
+        hits = await self._task_hits(project_path, project_id, task)
+        ctx_hash = context_hash(task, hits)
         if not force:
             pending = await self.registry.get_pending_suggestion(task_id)
             last = _suggest_cooldown.get(task_id, 0)
             if pending and (time.monotonic() - last) < SUGGEST_COOLDOWN_SEC:
                 return pending
+            if pending and pending.context_hash and pending.context_hash == ctx_hash:
+                logger.info("auto-suggest skipped; context hash unchanged for task %s", task_id)
+                return pending
         llm, model = await self._llm_from_settings()
-        orch = Orchestrator(self.graph_engine, jev=JevClient(), llm=llm)
-        result = await orch.run_suggest_cycle(project_path, project_id, task, model=model)
+        settings, raw_keys = await self._decision_settings()
+        orch = Orchestrator(self.graph_engine, llm=llm)
+        result = await orch.run_suggest_cycle(
+            project_path, project_id, task, model=model, prefetched_hits=hits,
+            settings=settings, raw_keys=raw_keys,
+        )
         sug = await self.registry.create_task_suggestion(
             project_id, task.id, result.action_id, result.action_label,
-            result.confidence, result.prose, result.catalog, result.jev_skipped,
+            result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
         )
         _suggest_cooldown[task_id] = time.monotonic()
         if self.emit_event:
@@ -166,6 +189,30 @@ class AgentRuntime:
         if self.emit_event and updated:
             await self.emit_event("task:updated", project_id, updated.model_dump(mode="json"))
         return updated
+
+
+def _suggestion_fields(result: SuggestResult) -> dict:
+    return {
+        "jev_skipped": result.jev_skipped,
+        "jev_input_tokens": result.jev_input_tokens,
+        "llm_prompt_tokens": result.llm_prompt_tokens,
+        "llm_completion_tokens": result.llm_completion_tokens,
+        "escalated": result.escalated,
+        "context_hash": result.context_hash,
+        "filter_provider": result.filter_provider or None,
+        "filter_model": result.filter_model or None,
+        "judgment_provider": result.judgment_provider or None,
+        "judgment_model": result.judgment_model or None,
+        "filter_skipped": result.filter_skipped,
+        "judgment_skipped": result.judgment_skipped,
+        "filter_skip_reason": result.filter_skip_reason,
+        "judgment_skip_reason": result.judgment_skip_reason,
+        "filter_input_tokens": result.filter_input_tokens,
+        "judgment_input_tokens": result.judgment_input_tokens,
+        "filter_latency_ms": result.filter_latency_ms,
+        "judgment_latency_ms": result.judgment_latency_ms,
+        "effective_thresholds_json": result.effective_thresholds_json or None,
+    }
 
 
 class ConflictError(Exception):

@@ -64,6 +64,25 @@ def test_agent_run_loads_key_from_settings_db(tmp_path, monkeypatch):
     assert key2 == "sk-from-dashboard"
 
 
+def test_llm_from_stored_uses_custom_deepseek_base_url_for_unlisted_model():
+    """Settings UI keeps model_ids=deepseek-chat while default_model can be custom."""
+    from daemon.agent_credentials import StoredAgentCredentials
+
+    creds = StoredAgentCredentials(
+        default_model="gpt-4o-mini",
+        providers=[{
+            "id": "deepseek", "name": "DeepSeek",
+            "base_url": "https://proxy.example.com/v1",
+            "model_ids": ["deepseek-chat"],
+        }],
+        keys={"deepseek": "sk-custom-endpoint"},
+    )
+    key, base, model = creds.llm_from_stored()
+    assert key == "sk-custom-endpoint"
+    assert base == "https://proxy.example.com/v1"
+    assert model == "gpt-4o-mini"
+
+
 def test_supervisor_loom_agent_env_injects_settings_key(tmp_path, monkeypatch):
     import json
     import sqlite3

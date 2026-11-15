@@ -7,6 +7,7 @@ from daemon.runners import (
 def test_runnable_agents_is_registry_keys():
     assert runnable_agents() == {
         "claude-code", "hermes", "codex", "gemini-cli", "copilot-cli", "aider",
+        "loom-agent",
     }
     assert "opencode" not in runnable_agents()
 

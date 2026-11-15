@@ -26,6 +26,7 @@ class LlmClient:
         self.api_key = api_key if api_key is not None else os.environ.get("DEEPSEEK_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.last_usage: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -58,6 +59,8 @@ class LlmClient:
             raise LlmError(f"LLM HTTP {e.code}: {detail}") from e
         except Exception as e:
             raise LlmError(str(e)) from e
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        self.last_usage = usage if isinstance(usage, dict) else None
         choices = payload.get("choices") or []
         if not choices:
             raise LlmError("LLM returned no choices")
