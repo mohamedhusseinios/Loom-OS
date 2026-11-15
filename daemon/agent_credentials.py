@@ -167,7 +167,12 @@ class StoredAgentCredentials:
         return provider_base_url(self.providers, TYPESAFE_PROVIDER_ID, "")
 
     def llm_from_stored(self) -> tuple[str, str, str]:
-        """Return ``(api_key, base_url, model)`` from stored settings only (no env)."""
+        """Return ``(api_key, base_url, model)`` from stored settings only (no env).
+
+        The DeepSeek provider row is the BYOK chat endpoint: its ``base_url``
+        always applies even when ``default_model`` is a custom id not listed in
+        ``model_ids`` (the settings UI keeps ``model_ids`` as ``deepseek-chat``).
+        """
         model = self.default_model or DEFAULT_DEEPSEEK_MODEL
         base_url = DEFAULT_DEEPSEEK_BASE_URL
         api_key = self.deepseek_key
@@ -175,9 +180,8 @@ class StoredAgentCredentials:
             pid = provider.get("id") or ""
             models = provider.get("model_ids") or []
             if model in models or pid == DEEPSEEK_PROVIDER_ID:
-                if model in models or not api_key:
-                    base_url = (provider.get("base_url") or "").strip() or base_url
-                    api_key = self.keys.get(pid) or api_key
+                base_url = (provider.get("base_url") or "").strip() or base_url
+                api_key = self.keys.get(pid) or api_key
                 if model in models:
                     break
         return api_key or "", base_url, model
