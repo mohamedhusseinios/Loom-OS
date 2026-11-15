@@ -183,14 +183,16 @@ def test_gliclass_filter_builds_http_client():
                 "model_ids": ["gliclass-edge"],
             }],
         ),
-        {},
+        {"gliclass": "gli-from-settings"},
     )
     relevance, judgment = build_decision_clients(config)
     assert isinstance(relevance, GLiClassClient)
     assert relevance.__class__.__module__ == "daemon.gliclass_client"
     assert relevance.base_url == "http://127.0.0.1:8090"
     assert relevance.model == "gliclass-edge"
+    assert relevance.api_key == "gli-from-settings"
     assert relevance.timeout == 5.0
+    assert config.filter_api_key == "gli-from-settings"
     assert isinstance(judgment, NullDecisionClient)
     assert relevance is not judgment
 

@@ -231,11 +231,26 @@ def test_gliclass_filter_posts_knowledgator_shape():
     req, timeout = captured[0]
     assert timeout == 5.0
     assert req.full_url == "http://127.0.0.1:8090/gliclass"
+    assert "Authorization" not in req.headers
     body = json.loads(req.data.decode())
     assert set(body) == {"texts", "labels", "threshold"}
     assert body["labels"] == ["relevant", "not_relevant"]
     assert body["threshold"] == 0.0
     assert isinstance(body["texts"], list) and len(body["texts"]) == 1
+
+
+def test_gliclass_sends_bearer_when_api_key_set():
+    captured: list = []
+
+    def fake_urlopen(req, timeout=None):
+        captured.append(req)
+        return _ok_response([{"label": "relevant", "score": 0.9}])
+
+    with patch("daemon.gliclass_client.urllib.request.urlopen", side_effect=fake_urlopen):
+        client = GLiClassClient(base_url="http://127.0.0.1:8090", model="gliclass-edge", api_key="gli-secret")
+        result = client.filter_relevance(pack="context", task=_task(), catalog=[], hits=[_hits()[0]])
+    assert result.skipped is False
+    assert captured[0].headers.get("Authorization") == "Bearer gli-secret"
 
 
 def test_gliclass_filter_runs_hits_concurrently():

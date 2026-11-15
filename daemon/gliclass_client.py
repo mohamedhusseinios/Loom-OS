@@ -119,9 +119,10 @@ def _relevant_score(payload: Any) -> float | None:
 class GLiClassClient:
     """Filter-only client for Knowledgator ``POST /gliclass``."""
 
-    def __init__(self, base_url: str = "", model: str = "", timeout: float = DEFAULT_TIMEOUT_SEC, threshold: float = DEFAULT_THRESHOLD):
+    def __init__(self, base_url: str = "", model: str = "", api_key: str = "", timeout: float = DEFAULT_TIMEOUT_SEC, threshold: float = DEFAULT_THRESHOLD):
         self.base_url = (base_url or "").strip().rstrip("/")
         self.model = model or ""
+        self.api_key = (api_key or "").strip()
         self.timeout = timeout
         self.threshold = threshold
 
@@ -172,7 +173,10 @@ class GLiClassClient:
     def _post(self, text: str) -> Any:
         url = resolve_gliclass_url(self.base_url)
         body = json.dumps({"texts": [text], "labels": [RELEVANT_LABEL, OTHER_LABEL], "threshold": self.threshold}).encode()
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read().decode()

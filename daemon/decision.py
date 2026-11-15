@@ -359,7 +359,7 @@ def _same_endpoint(config: DecisionConfig) -> bool:
 
 def _build_one(provider: str, model: str, base_url: str, api_key: str) -> DecisionClient:
     if provider == "gliclass":
-        return GLiClassClient(base_url=base_url, model=model, timeout=5.0)
+        return GLiClassClient(base_url=base_url, model=model, api_key=api_key, timeout=5.0)
     if provider in ("typesafe", "ollama"):
         timeout = 10.0 if provider == "typesafe" else 5.0
         return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout, provider=provider, model=model or DEFAULT_TYPESAFE_MODEL)
