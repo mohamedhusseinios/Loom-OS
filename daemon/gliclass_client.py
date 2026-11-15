@@ -16,6 +16,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 logger = logging.getLogger("loom.gliclass")
@@ -25,6 +26,7 @@ RELEVANT_LABEL = "relevant"
 OTHER_LABEL = "not_relevant"
 DEFAULT_THRESHOLD = 0.0
 DEFAULT_TIMEOUT_SEC = 5.0
+MAX_FILTER_WORKERS = 8
 _SKIP_REASONS = frozenset({"error", "timeout", "bad_payload", "unsupported"})
 
 
@@ -134,18 +136,30 @@ class GLiClassClient:
         started = time.perf_counter()
         if not self.base_url:
             return self._skipped("error", started)
+        jobs = [(index, hit) for index, hit in enumerate((hits or [])[:12]) if isinstance(hit, dict)]
+        if not jobs:
+            return DecisionResult(scores={}, provider="gliclass", model=self.model, skipped=False, skip_reason=None, latency_ms=_elapsed_ms(started))
         scores: dict[str, float] = {}
+        workers = min(MAX_FILTER_WORKERS, len(jobs))
         try:
-            for index, hit in enumerate((hits or [])[:12]):
-                if not isinstance(hit, dict):
-                    continue
-                payload = self._post(_hit_text(task, hit, index))
-                score = _relevant_score(payload)
-                if score is not None:
-                    scores[f"rel_{index}"] = score
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(self._score_hit, task, hit, index): index for index, hit in jobs}
+                try:
+                    for fut in as_completed(futures):
+                        index, score = fut.result()
+                        if score is not None:
+                            scores[f"rel_{index}"] = score
+                except _WireError:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
         except _WireError as exc:
             return self._skipped(exc.reason, started)
         return DecisionResult(scores=scores, provider="gliclass", model=self.model, skipped=False, skip_reason=None, latency_ms=_elapsed_ms(started))
+
+    def _score_hit(self, task: Any, hit: dict, index: int) -> tuple[int, float | None]:
+        payload = self._post(_hit_text(task, hit, index))
+        return index, _relevant_score(payload)
 
     def judge(self, *, pack: str, task: Any, catalog: list[dict], candidates: list[dict], **kwargs: Any) -> DecisionResult:
         del pack, task, catalog, candidates, kwargs

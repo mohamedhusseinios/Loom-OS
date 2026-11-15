@@ -587,5 +587,6 @@ async def test_grounding_failure_keeps_successful_judgment(tmp_path, caplog):
     assert result.judgment_skipped is False
     assert result.judgment_skip_reason is None
     assert result.judgment_latency_ms == 12.0
+    assert result.judgment_input_tokens == 61  # first judge 11 + failed grounding 50
     assert result.judgment_model == "jev-latest"
     assert "keeping prior decision" in caplog.text

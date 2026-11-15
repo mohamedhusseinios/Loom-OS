@@ -686,12 +686,12 @@ class Orchestrator:
                     catalog = loom or [{"id": "loom.move_ready", "label": "Move task to Ready", "source": "loom"}]
                 if judgment is not None:
                     ground = await self._call_client(judgment, "judge", pack=pack, task=task, catalog=catalog, candidates=candidates)
+                    judgment_input_tokens = _merge_tokens(judgment_input_tokens, ground.usage.input_tokens)
                     if ground.skipped and not judgment_skipped:
                         logger.warning("judgment grounding pass failed; keeping prior decision")
                     else:
                         judgment_provider = ground.provider or judgment_provider
                         judgment_model = ground.model or judgment_model
-                        judgment_input_tokens = _merge_tokens(judgment_input_tokens, ground.usage.input_tokens)
                         judgment_latency_ms = ground.latency_ms
                         if ground.skipped:
                             judgment_skipped = True

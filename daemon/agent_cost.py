@@ -212,16 +212,15 @@ def summarize_suggestions(rows: Iterable[Any]) -> dict[str, Any]:
             item["calls"] += 1
             if tokens is not None:
                 item["input_tokens"] += tokens
-            if latency is not None:
+            if latency is not None and _include_role_latency(provider_name, reason, tokens):
                 item["latency_sum"] += latency
                 item["latency_n"] += 1
-                if _include_role_latency(provider_name, reason, tokens):
-                    if role == "filter":
-                        filter_latency_sum += latency
-                        filter_latency_n += 1
-                    else:
-                        judgment_latency_sum += latency
-                        judgment_latency_n += 1
+                if role == "filter":
+                    filter_latency_sum += latency
+                    filter_latency_n += 1
+                else:
+                    judgment_latency_sum += latency
+                    judgment_latency_n += 1
             if skipped:
                 item["skipped"] += 1
                 reason_key = _reason_key(reason)

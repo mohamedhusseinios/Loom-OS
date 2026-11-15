@@ -238,6 +238,35 @@ def test_gliclass_filter_posts_knowledgator_shape():
     assert isinstance(body["texts"], list) and len(body["texts"]) == 1
 
 
+def test_gliclass_filter_runs_hits_concurrently():
+    import threading
+    import time as time_mod
+
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def fake_urlopen(req, timeout=None):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time_mod.sleep(0.05)
+        with lock:
+            active -= 1
+        text = json.loads(req.data.decode())["texts"][0]
+        score = 0.9 if "node-a" in text else 0.1
+        return _ok_response([{"label": "relevant", "score": score}])
+
+    hits = [{"id": "node-a", "label": "A"}, {"id": "node-b", "label": "B"}, {"id": "node-c", "label": "C"}]
+    with patch("daemon.gliclass_client.urllib.request.urlopen", side_effect=fake_urlopen):
+        client = GLiClassClient(base_url="http://127.0.0.1:8090", model="gliclass-edge")
+        result = client.filter_relevance(pack="context", task=_task(), catalog=[], hits=hits)
+    assert result.skipped is False
+    assert result.scores == {"rel_0": 0.9, "rel_1": 0.1, "rel_2": 0.1}
+    assert peak >= 2
+
+
 def test_gliclass_missing_relevant_label_omits_score():
     with patch("daemon.gliclass_client.urllib.request.urlopen", return_value=_ok_response([{"label": "not_relevant", "score": 0.4}])):
         client = GLiClassClient(base_url="http://127.0.0.1:8090", model="gliclass-edge")

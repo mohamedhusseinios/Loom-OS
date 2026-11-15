@@ -135,6 +135,8 @@ def test_none_judgment_latency_stays_on_filter_sample():
     }])
     assert summary["filter_latency_ms_avg"] == pytest.approx(40.0)
     assert summary["judgment_latency_ms_avg"] is None
+    none_row = next(item for item in summary["providers"] if item["provider"] == "none")
+    assert none_row["latency_ms_avg"] is None
     table = format_comparison([("gliclass/gli judgment none/-", summary)])
     assert table.splitlines()[1].split()[-1] == "40.0"
 
