@@ -77,3 +77,19 @@ def test_anthropic_chat_maps_system_and_usage(monkeypatch):
 def test_list_remote_models_requires_key():
     with pytest.raises(LlmError):
         list_remote_models("", "https://api.openai.com")
+
+
+def test_sync_providers_drops_omitted_custom():
+    from daemon.agent_credentials import sync_providers_on_update
+
+    current = [
+        {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"]},
+        {"id": "custom-x", "name": "X", "base_url": "http://x", "model_ids": ["m"], "api_style": "openai"},
+    ]
+    incoming = [
+        {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"]},
+    ]
+    providers, removed = sync_providers_on_update(current, incoming)
+    assert "custom-x" in removed
+    assert all(p["id"] != "custom-x" for p in providers)
+    assert any(p["id"] == "deepseek" for p in providers)

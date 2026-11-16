@@ -517,3 +517,51 @@ def test_list_models_uses_draft_key_and_anthropic_style(client, monkeypatch):
     assert res.status_code == 200, res.text
     assert res.json()["models"] == ["claude-sonnet-4-5"]
     assert "sk-draft-ant" not in res.text
+
+
+def test_removing_custom_chat_provider_persists(client):
+    created = client.put("/api/agent/settings", json={
+        "chat_provider": "custom-gone",
+        "default_model": "llama-3",
+        "providers": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+                "api_style": "openai",
+            },
+            {
+                "id": "custom-gone",
+                "name": "Temp",
+                "base_url": "http://127.0.0.1:9",
+                "model_ids": ["llama-3"],
+                "api_style": "openai",
+            },
+        ],
+        "api_keys": {"custom-gone": "sk-temp-9999"},
+    })
+    assert created.status_code == 200, created.text
+    assert any(p["id"] == "custom-gone" for p in created.json()["providers"])
+    assert created.json()["has_keys"]["custom-gone"] is True
+
+    removed = client.put("/api/agent/settings", json={
+        "chat_provider": "deepseek",
+        "default_model": "deepseek-chat",
+        "providers": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+                "api_style": "openai",
+            },
+        ],
+    })
+    assert removed.status_code == 200, removed.text
+    ids = {p["id"] for p in removed.json()["providers"]}
+    assert "custom-gone" not in ids
+    assert removed.json()["has_keys"].get("custom-gone") is not True
+    assert removed.json()["chat_provider"] == "deepseek"
+    again = client.get("/api/agent/settings")
+    assert "custom-gone" not in {p["id"] for p in again.json()["providers"]}

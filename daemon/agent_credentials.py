@@ -198,6 +198,47 @@ def merge_providers(current: list[Any] | None, incoming: list[Any] | None) -> li
     return [by_id[pid] for pid in order]
 
 
+_DEFAULT_PROVIDER_IDS = frozenset(p["id"] for p in DEFAULT_AGENT_PROVIDERS)
+
+
+def is_custom_chat_provider_id(provider_id: str) -> bool:
+    """True for user-added chat providers (not built-in defaults / decision rows)."""
+    return is_chat_provider_id(provider_id) and provider_id not in _DEFAULT_PROVIDER_IDS
+
+
+def sync_providers_on_update(current: list[Any] | None, incoming: list[Any] | None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Merge ``incoming`` onto ``current``, dropping custom chat providers omitted from ``incoming``.
+
+    Built-in defaults and decision providers still follow ``merge_providers`` (kept when
+    omitted). Custom chat rows must be listed to survive a settings save, matching the
+    dashboard's full chat-provider list. Returns ``(providers, removed_custom_ids)``.
+    """
+    before_ids = {p["id"] for p in ensure_default_providers(current)}
+    merged = merge_providers(current, incoming)
+    if not incoming:
+        return merged, []
+    incoming_ids: set[str] = set()
+    for item in incoming:
+        parsed = _as_provider_dict(item)
+        pid = parsed.get("id") or ""
+        if pid:
+            incoming_ids.add(pid)
+    kept: list[dict[str, Any]] = []
+    removed: list[str] = []
+    for provider in merged:
+        pid = provider.get("id") or ""
+        if is_custom_chat_provider_id(pid) and pid not in incoming_ids:
+            removed.append(pid)
+            continue
+        kept.append(provider)
+    # Also treat customs present before update but absent after as removed (keys cleanup).
+    after_ids = {p["id"] for p in kept}
+    for pid in before_ids - after_ids:
+        if is_custom_chat_provider_id(pid) and pid not in removed:
+            removed.append(pid)
+    return kept, removed
+
+
 def provider_base_url(providers: list[dict[str, Any]], provider_id: str, default: str = "") -> str:
     for provider in providers:
         if provider.get("id") == provider_id:

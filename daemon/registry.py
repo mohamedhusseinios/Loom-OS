@@ -21,6 +21,7 @@ from daemon.agent_credentials import (
     mask_key,
     merge_providers,
     parse_settings_row,
+    sync_providers_on_update,
 )
 
 # Nullable decision telemetry. No DEFAULT so migrated rows stay NULL.
@@ -915,11 +916,14 @@ class AgentRegistry:
         chat_provider = creds.chat_provider or "deepseek"
         if payload.chat_provider is not None and str(payload.chat_provider).strip():
             chat_provider = str(payload.chat_provider).strip()
+        removed_custom: list[str] = []
         if payload.providers is not None:
-            providers = merge_providers(creds.providers, payload.providers)
+            providers, removed_custom = sync_providers_on_update(creds.providers, payload.providers)
         else:
             providers = creds.providers
         raw_keys = dict(creds.keys)
+        for pid in removed_custom:
+            raw_keys.pop(pid, None)
         if payload.api_keys is not None:
             for pid, key in payload.api_keys.items():
                 if key is None or is_masked_key(key):
@@ -928,6 +932,9 @@ class AgentRegistry:
                     raw_keys.pop(pid, None)
                 else:
                     raw_keys[pid] = key
+        provider_ids = {p.get("id") for p in providers}
+        if chat_provider not in provider_ids:
+            chat_provider = "deepseek"
         filt, judg, _overrides = self._decision_settings_from_row(row)
         raw_overrides = None
         if row is not None and "threshold_overrides_json" in row.keys():
