@@ -19,6 +19,7 @@ from daemon.agent_credentials import (
     normalize_api_style,
     resolve_chat_key,
 )
+from daemon.provider_url import ProviderUrlError, resolve_list_models_target
 from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
@@ -957,33 +958,58 @@ async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_tok
     return (await registry.update_agent_settings(payload)).model_dump()
 
 
+_PUBLIC_LIST_MODELS_ERRORS = frozenset({
+    "API key not configured — add it in Agent settings",
+    "Provider returned no models",
+})
+
+
+def _public_list_models_error(message: str) -> str:
+    if message in _PUBLIC_LIST_MODELS_ERRORS:
+        return message
+    return "Could not list models from the provider"
+
+
 @app.post("/api/agent/providers/list-models")
 async def list_provider_models(payload: ListModelsRequest, _=Depends(require_token)):
-    """List models for a chat provider using saved or draft credentials."""
+    """List models for a chat provider using saved or draft credentials.
+
+    Stored and environment keys are sent only to the saved provider URL.
+    """
     settings = await registry.get_agent_settings(mask_keys=True)
-    raw_keys = await registry.get_raw_api_keys()
     provider_id = (payload.provider_id or settings.chat_provider or "deepseek").strip()
     if not is_chat_provider_id(provider_id):
         raise HTTPException(status_code=400, detail="provider_id must be a chat provider")
     provider = next((p for p in settings.providers if p.id == provider_id), None)
-    base_url = (payload.base_url or "").strip() or (provider.base_url if provider else "")
     api_style = normalize_api_style(
         payload.api_style or (provider.api_style if provider else None),
         provider_id,
     )
     draft = (payload.api_key or "").strip()
-    if draft and not is_masked_key(draft):
+    has_draft_key = bool(draft) and not is_masked_key(draft)
+    try:
+        base_url, allow_stored_key = resolve_list_models_target(
+            provider_id,
+            provider.base_url if provider else "",
+            payload.base_url or "",
+            has_draft_key,
+        )
+    except ProviderUrlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if has_draft_key:
         api_key = draft
-    else:
+    elif allow_stored_key:
+        raw_keys = await registry.get_raw_api_keys()
         api_key = resolve_chat_key(provider_id, raw_keys.get(provider_id, ""))
+    else:
+        raise HTTPException(status_code=400, detail="API key is required for a base URL that is not the saved provider URL")
     if not api_key:
         raise HTTPException(status_code=400, detail="API key not configured — add it in Agent settings")
-    if not base_url:
-        raise HTTPException(status_code=400, detail="base_url is required")
     try:
         models = list_remote_models(api_key=api_key, base_url=base_url, api_style=api_style)
-    except LlmError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except LlmError as exc:
+        logger.warning("list-models failed for provider %s", provider_id)
+        raise HTTPException(status_code=400, detail=_public_list_models_error(str(exc))) from exc
     return ListModelsResponse(models=models).model_dump()
 
 

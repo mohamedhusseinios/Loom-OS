@@ -20,6 +20,20 @@ from daemon.agent_credentials import (
 
 logger = logging.getLogger("loom.llm")
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # urllib forwards Authorization across hosts. Never follow that.
+        raise urllib.error.HTTPError(req.full_url, code, "redirect blocked", headers, fp)
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _open_http(req: urllib.request.Request, timeout: float):
+    return _NO_REDIRECT_OPENER.open(req, timeout=timeout)
+
+
 DEFAULT_BASE_URL = DEFAULT_DEEPSEEK_BASE_URL
 DEFAULT_MODEL = DEFAULT_DEEPSEEK_MODEL
 ANTHROPIC_VERSION = "2023-06-01"
@@ -45,11 +59,13 @@ class LlmClientProtocol(Protocol):
 def _http_json(url: str, *, method: str = "GET", body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 120.0) -> Any:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_http(req, timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        detail = e.read().decode() if e.fp else str(e)
-        raise LlmError(f"LLM HTTP {e.code}: {detail}") from e
+        # Response bodies can echo the Authorization header back to the caller.
+        raise LlmError(f"LLM HTTP {e.code}") from e
+    except json.JSONDecodeError as e:
+        raise LlmError("LLM returned invalid JSON") from e
     except LlmError:
         raise
     except Exception as e:

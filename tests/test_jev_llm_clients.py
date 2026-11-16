@@ -129,7 +129,7 @@ def test_retry_after_is_capped():
 
 def test_llm_chat_parses_content():
     payload = {"choices": [{"message": {"content": "  hello  "}}], "usage": {"prompt_tokens": 4, "completion_tokens": 1}}
-    with patch("daemon.llm_client.urllib.request.urlopen", return_value=_ok_response(payload)):
+    with patch("daemon.llm_client._open_http", return_value=_ok_response(payload)):
         client = LlmClient(api_key="sk")
         text = client.chat([{"role": "user", "content": "hi"}])
     assert text == "hello"
