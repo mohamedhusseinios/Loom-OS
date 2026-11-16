@@ -357,7 +357,7 @@
     "costLoadError": "تعذر تحميل ملخص الاستخدام.",
     "chatProvidersTitle": "مزودو الدردشة",
     "chatProvider": "مزود الدردشة النشط",
-    "addCustomProvider": "إضافة API مخصص",
+    "addCustomProvider": "+ إضافة API مخصص",
     "removeProvider": "إزالة المزود",
     "providerName": "اسم المزود",
     "providerBaseUrl": "العنوان الأساسي",

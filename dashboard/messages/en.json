@@ -357,7 +357,7 @@
     "costLoadError": "Could not load usage summary.",
     "chatProvidersTitle": "Chat providers",
     "chatProvider": "Active chat provider",
-    "addCustomProvider": "Add custom API",
+    "addCustomProvider": "+ Add custom API",
     "removeProvider": "Remove provider",
     "providerName": "Provider name",
     "providerBaseUrl": "Base URL",

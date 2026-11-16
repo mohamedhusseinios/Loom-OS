@@ -15,6 +15,7 @@ const FIELD_CLASS = "mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2
 const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
 const DECISION_IDS = new Set(["typesafe", "ollama", "gliclass"]);
 const PRESET_CHAT_IDS = new Set(["deepseek", "openai", "anthropic"]);
+const ADD_CUSTOM_SENTINEL = "__add_custom__";
 
 type DecisionModel = "" | "typesafe" | "ollama" | "gliclass";
 type JudgmentBackend = "typesafe" | "ollama" | "none";
@@ -174,6 +175,10 @@ export function AgentSettingsPanel() {
   }
 
   function onChatProviderChange(id: string) {
+    if (id === ADD_CUSTOM_SENTINEL) {
+      addCustomProvider();
+      return;
+    }
     setChatProvider(id);
     const row = chatDrafts.find((d) => d.id === id);
     if (row?.model_ids?.length) {
@@ -367,18 +372,16 @@ export function AgentSettingsPanel() {
             {chatDrafts.map((d) => (
               <option key={d.id} value={d.id}>{d.name || d.id}</option>
             ))}
+            <option value={ADD_CUSTOM_SENTINEL}>{t("addCustomProvider")}</option>
           </select>
         </label>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" onClick={addCustomProvider} disabled={saving}>
-            {t("addCustomProvider")}
-          </Button>
-          {activeDraft && !PRESET_CHAT_IDS.has(activeDraft.id) && (
+        {activeDraft && !PRESET_CHAT_IDS.has(activeDraft.id) && (
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" onClick={removeCustomProvider} disabled={saving}>
               {t("removeProvider")}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
         {activeDraft && !PRESET_CHAT_IDS.has(activeDraft.id) && (
           <label className="block text-xs text-zinc-400">
             {t("providerName")}
