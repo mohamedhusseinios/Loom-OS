@@ -44,17 +44,24 @@ class WorkerSupervisor:
         env = os.environ.copy()
         try:
             from daemon.agent_run import load_llm_config_from_settings
-            api_key, base_url, model = load_llm_config_from_settings()
+            api_key, base_url, model, api_style, provider_id = load_llm_config_from_settings()
         except Exception:
             return env
-        # Dashboard BYOK wins over a daemon-process DEEPSEEK_API_KEY, matching chat.
+        # Dashboard BYOK wins over process-level provider env, matching chat.
         if api_key:
             env["LOOM_AGENT_API_KEY"] = api_key
-            env["DEEPSEEK_API_KEY"] = api_key
+            if provider_id == "deepseek":
+                env["DEEPSEEK_API_KEY"] = api_key
+            elif provider_id == "openai":
+                env["OPENAI_API_KEY"] = api_key
+            elif provider_id == "anthropic":
+                env["ANTHROPIC_API_KEY"] = api_key
         if base_url:
             env["LOOM_AGENT_BASE_URL"] = base_url
         if model:
             env["LOOM_AGENT_MODEL"] = model
+        if api_style:
+            env["LOOM_AGENT_API_STYLE"] = api_style
         return env
 
     def is_running(self, task_id: str) -> bool:

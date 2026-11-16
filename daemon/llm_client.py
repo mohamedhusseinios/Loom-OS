@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat client (DeepSeek default, BYOK providers)."""
+"""OpenAI-compatible and Anthropic chat clients for Loom Agent BYOK providers."""
 
 from __future__ import annotations
 
@@ -7,16 +7,132 @@ import logging
 import os
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Protocol
+
+from daemon.agent_credentials import (
+    API_STYLE_ANTHROPIC,
+    API_STYLE_OPENAI,
+    DEFAULT_ANTHROPIC_BASE_URL,
+    DEFAULT_DEEPSEEK_BASE_URL,
+    DEFAULT_DEEPSEEK_MODEL,
+    normalize_api_style,
+)
 
 logger = logging.getLogger("loom.llm")
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_BASE_URL = DEFAULT_DEEPSEEK_BASE_URL
+DEFAULT_MODEL = DEFAULT_DEEPSEEK_MODEL
+ANTHROPIC_VERSION = "2023-06-01"
 
 
 class LlmError(Exception):
     """Raised when the chat completion call fails."""
+
+
+class LlmClientProtocol(Protocol):
+    api_key: str
+    base_url: str
+    last_usage: dict[str, Any] | None
+
+    @property
+    def available(self) -> bool: ...
+
+    def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str: ...
+
+    def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]: ...
+
+
+def _http_json(url: str, *, method: str = "GET", body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 120.0) -> Any:
+    req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode() if e.fp else str(e)
+        raise LlmError(f"LLM HTTP {e.code}: {detail}") from e
+    except LlmError:
+        raise
+    except Exception as e:
+        raise LlmError(str(e)) from e
+
+
+def _parse_chat_json(text: str) -> dict[str, Any]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {"reply": text, "candidates": []}
+
+
+def _split_system_messages(messages: list[dict[str, str]]) -> tuple[str | None, list[dict[str, str]]]:
+    system_parts: list[str] = []
+    converted: list[dict[str, str]] = []
+    for msg in messages:
+        role = msg.get("role") or "user"
+        content = msg.get("content") or ""
+        if role == "system":
+            if content:
+                system_parts.append(content)
+            continue
+        if role not in ("user", "assistant"):
+            role = "user"
+        converted.append({"role": role, "content": content})
+    system = "\n\n".join(system_parts) if system_parts else None
+    return system, converted
+
+
+def _extract_model_ids(payload: Any) -> list[str]:
+    models: list[str] = []
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    mid = item.get("id")
+                    if isinstance(mid, str) and mid.strip():
+                        models.append(mid.strip())
+                elif isinstance(item, str) and item.strip():
+                    models.append(item.strip())
+        elif isinstance(payload.get("models"), list):
+            for item in payload["models"]:
+                if isinstance(item, dict):
+                    mid = item.get("id") or item.get("name")
+                    if isinstance(mid, str) and mid.strip():
+                        models.append(mid.strip())
+                elif isinstance(item, str) and item.strip():
+                    models.append(item.strip())
+    return sorted(set(models))
+
+
+def list_remote_models(api_key: str, base_url: str, api_style: str = API_STYLE_OPENAI, timeout: float = 30.0) -> list[str]:
+    """Fetch model ids from an OpenAI-compatible or Anthropic ``/v1/models`` endpoint."""
+    if not api_key:
+        raise LlmError("API key not configured — add it in Agent settings")
+    style = normalize_api_style(api_style)
+    root = (base_url or DEFAULT_BASE_URL).rstrip("/")
+    url = f"{root}/v1/models"
+    if style == API_STYLE_ANTHROPIC:
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+    else:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+    payload = _http_json(url, method="GET", headers=headers, timeout=timeout)
+    models = _extract_model_ids(payload)
+    if not models:
+        raise LlmError("Provider returned no models")
+    return models
 
 
 class LlmClient:
@@ -27,6 +143,7 @@ class LlmClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.last_usage: dict[str, Any] | None = None
+        self.api_style = API_STYLE_OPENAI
 
     @property
     def available(self) -> bool:
@@ -42,23 +159,16 @@ class LlmClient:
             "messages": messages,
             "temperature": 0.2,
         }).encode()
-        req = urllib.request.Request(
+        payload = _http_json(
             url,
-            data=body,
+            method="POST",
+            body=body,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            method="POST",
+            timeout=self.timeout,
         )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                payload = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode() if e.fp else str(e)
-            raise LlmError(f"LLM HTTP {e.code}: {detail}") from e
-        except Exception as e:
-            raise LlmError(str(e)) from e
         usage = payload.get("usage") if isinstance(payload, dict) else None
         self.last_usage = usage if isinstance(usage, dict) else None
         choices = payload.get("choices") or []
@@ -69,15 +179,77 @@ class LlmClient:
 
     def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
         """Chat and parse the assistant reply as JSON (fenced blocks stripped)."""
-        text = self.chat(messages, model=model)
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            cleaned = "\n".join(lines)
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            return {"reply": text, "candidates": []}
+        return _parse_chat_json(self.chat(messages, model=model))
+
+
+class AnthropicLlmClient:
+    """Anthropic Messages API client with the same surface as ``LlmClient``."""
+
+    def __init__(self, api_key: str | None = None, base_url: str = DEFAULT_ANTHROPIC_BASE_URL, timeout: float = 120.0):
+        self.api_key = api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY", "")
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.last_usage: dict[str, Any] | None = None
+        self.api_style = API_STYLE_ANTHROPIC
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str:
+        if not self.api_key:
+            raise LlmError("API key not configured — add it in Agent settings")
+        system, converted = _split_system_messages(messages)
+        if not converted:
+            converted = [{"role": "user", "content": ""}]
+        body_obj: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 4096,
+            "temperature": 0.2,
+            "messages": converted,
+        }
+        if system:
+            body_obj["system"] = system
+        url = f"{self.base_url}/v1/messages"
+        payload = _http_json(
+            url,
+            method="POST",
+            body=json.dumps(body_obj).encode(),
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "Content-Type": "application/json",
+            },
+            timeout=self.timeout,
+        )
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if isinstance(usage, dict):
+            # Normalize to OpenAI-ish keys used by cost reporting when present.
+            self.last_usage = {
+                "prompt_tokens": usage.get("input_tokens"),
+                "completion_tokens": usage.get("output_tokens"),
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+            }
+        else:
+            self.last_usage = None
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, list) or not content:
+            raise LlmError("LLM returned no content")
+        texts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        return "\n".join(t for t in texts if t).strip()
+
+    def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
+        return _parse_chat_json(self.chat(messages, model=model))
+
+
+def build_llm_client(api_key: str, base_url: str, api_style: str = API_STYLE_OPENAI, timeout: float = 120.0) -> LlmClient | AnthropicLlmClient:
+    style = normalize_api_style(api_style)
+    if style == API_STYLE_ANTHROPIC:
+        return AnthropicLlmClient(api_key=api_key, base_url=base_url or DEFAULT_ANTHROPIC_BASE_URL, timeout=timeout)
+    return LlmClient(api_key=api_key, base_url=base_url or DEFAULT_BASE_URL, timeout=timeout)

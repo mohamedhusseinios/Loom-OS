@@ -443,3 +443,77 @@ async def test_implement_emits_dismissed_suggestion_event(client):
     assert suggestion_events[0][2]["id"] == sug.id
     assert suggestion_events[0][2]["status"] == SuggestionStatus.DISMISSED.value
     assert any(e[0] == "task:updated" for e in events)
+
+
+def test_chat_provider_round_trip(client):
+    res = client.put("/api/agent/settings", json={
+        "chat_provider": "openai",
+        "default_model": "gpt-4o-mini",
+        "providers": [{
+            "id": "openai",
+            "name": "OpenAI",
+            "base_url": "https://api.openai.com",
+            "model_ids": ["gpt-4o-mini"],
+            "api_style": "openai",
+        }],
+        "api_keys": {"openai": "sk-openai-1234"},
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["chat_provider"] == "openai"
+    assert body["default_model"] == "gpt-4o-mini"
+    openai = next(p for p in body["providers"] if p["id"] == "openai")
+    assert openai["api_style"] == "openai"
+    assert body["has_keys"]["openai"] is True
+    got = client.get("/api/agent/settings")
+    assert got.json()["chat_provider"] == "openai"
+
+
+def test_chat_provider_rejects_decision_id(client):
+    res = client.put("/api/agent/settings", json={"chat_provider": "typesafe"})
+    assert res.status_code == 400
+
+
+def test_list_models_openai_compatible(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "chat_provider": "deepseek",
+        "api_keys": {"deepseek": "sk-list-test"},
+        "providers": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "model_ids": ["deepseek-chat"],
+            "api_style": "openai",
+        }],
+    })
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        assert api_key == "sk-list-test"
+        assert "deepseek" in base_url
+        assert api_style == "openai"
+        return ["deepseek-chat", "deepseek-reasoner"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={"provider_id": "deepseek"})
+    assert res.status_code == 200, res.text
+    assert res.json()["models"] == ["deepseek-chat", "deepseek-reasoner"]
+    assert "sk-list-test" not in res.text
+
+
+def test_list_models_uses_draft_key_and_anthropic_style(client, monkeypatch):
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        assert api_key == "sk-draft-ant"
+        assert api_style == "anthropic"
+        assert "anthropic" in base_url
+        return ["claude-sonnet-4-5"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "api_style": "anthropic",
+        "api_key": "sk-draft-ant",
+    })
+    assert res.status_code == 200, res.text
+    assert res.json()["models"] == ["claude-sonnet-4-5"]
+    assert "sk-draft-ant" not in res.text

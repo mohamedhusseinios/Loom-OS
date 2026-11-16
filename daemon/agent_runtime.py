@@ -6,8 +6,8 @@ import asyncio
 import logging
 import time
 
-from daemon.agent_credentials import resolve_deepseek_key
-from daemon.llm_client import LlmClient, LlmError
+from daemon.agent_credentials import resolve_chat_key
+from daemon.llm_client import LlmError, build_llm_client
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, SuggestionStatus,
 )
@@ -40,16 +40,17 @@ class AgentRuntime:
 
     async def _stored_credentials(self):
         cursor = await self.registry.db.execute(
-            "SELECT default_model, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
+            "SELECT default_model, chat_provider, providers_json, api_keys_json FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
         return self.registry._settings_from_row(row)
 
-    async def _llm_from_settings(self) -> tuple[LlmClient, str]:
+    async def _llm_from_settings(self):
         creds = await self._stored_credentials()
-        stored_key, base_url, model = creds.llm_from_stored()
-        api_key = resolve_deepseek_key(stored_key)
-        return LlmClient(api_key=api_key, base_url=base_url), model
+        stored_key, base_url, model, api_style = creds.llm_from_stored()
+        provider_id = creds.active_chat_provider_id()
+        api_key = resolve_chat_key(provider_id, stored_key)
+        return build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style), model
 
     async def _decision_settings(self) -> tuple[object, dict[str, str]]:
         settings = await self.registry.get_agent_settings(mask_keys=True)
