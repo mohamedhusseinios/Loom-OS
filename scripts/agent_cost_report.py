@@ -99,26 +99,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def resolve_benchmark_credentials(db_path: str | None = None):
-    """Settings first, then env. Returns (typesafe_key, typesafe_base, deepseek_key, deepseek_base, model)."""
+    """Settings first, then env.
+
+    Returns ``(typesafe_key, typesafe_base, llm_key, llm_base, model, api_style)``.
+    """
     from daemon.agent_credentials import (
         load_stored_credentials,
-        resolve_deepseek_key,
+        resolve_chat_key,
         resolve_typesafe_base_url,
         resolve_typesafe_key,
     )
     creds = load_stored_credentials(db_path)
-    stored_llm_key, deepseek_base, model = creds.llm_from_stored()
-    deepseek_key = resolve_deepseek_key(stored_llm_key)
-    if not deepseek_key:
-        deepseek_key = os.environ.get("LOOM_AGENT_API_KEY", "")
+    stored_llm_key, llm_base, model, api_style = creds.llm_from_stored()
+    llm_key = resolve_chat_key(creds.active_chat_provider_id(), stored_llm_key)
     typesafe_key = resolve_typesafe_key(creds.typesafe_key)
     typesafe_base = resolve_typesafe_base_url(creds.typesafe_base_url)
-    return typesafe_key, typesafe_base, deepseek_key, deepseek_base, model
+    return typesafe_key, typesafe_base, llm_key, llm_base, model, api_style
 
 
 def _keys_present(db_path: str | None = None) -> bool:
-    typesafe_key, _, deepseek_key, _, _ = resolve_benchmark_credentials(db_path)
-    return bool(typesafe_key) and bool(deepseek_key)
+    typesafe_key, _, llm_key, _, _, _ = resolve_benchmark_credentials(db_path)
+    return bool(typesafe_key) and bool(llm_key)
 
 
 def _db_path(db_path: str | None) -> str:
@@ -321,11 +322,10 @@ def _failed_row(variant: dict, reason: str) -> dict:
 
 async def _run_benchmark_cycle(variant: dict, db_path: str | None = None) -> list[dict]:
     from daemon.decision import clear_decision_client_cache
-    from daemon.llm_client import LlmClient
     from daemon.models import AgentTaskRecord, AgentTaskStatus
     from daemon.orchestrator import Orchestrator, clear_filter_cache
 
-    _, _, deepseek_key, deepseek_base, model = resolve_benchmark_credentials(db_path)
+    _, _, llm_key, llm_base, model, api_style = resolve_benchmark_credentials(db_path)
     clear_filter_cache()
     clear_decision_client_cache()
 
@@ -340,7 +340,8 @@ async def _run_benchmark_cycle(variant: dict, db_path: str | None = None) -> lis
     tmp = Path("/tmp/loom-agent-benchmark")
     (tmp / "graphify-out").mkdir(parents=True, exist_ok=True)
     (tmp / "graphify-out" / "graph.json").write_text("{}")
-    llm = LlmClient(api_key=deepseek_key, base_url=deepseek_base)
+    from daemon.llm_client import build_llm_client
+    llm = build_llm_client(api_key=llm_key, base_url=llm_base, api_style=api_style)
     for i, spec in enumerate(FIXED_BENCHMARK_TASKS):
         status = AgentTaskStatus(spec["status"])
         task = AgentTaskRecord(
@@ -443,11 +444,11 @@ def format_comparison(items: list[tuple[str, dict]]) -> str:
 
 
 def run_benchmark(db_path: str | None = None) -> int:
-    _, _, deepseek_key, _, _ = resolve_benchmark_credentials(db_path)
+    _, _, llm_key, _, _, _ = resolve_benchmark_credentials(db_path)
     targets = configured_decision_targets(db_path)
-    if not deepseek_key or not targets:
+    if not llm_key or not targets:
         print(
-            "Skipping benchmark: DEEPSEEK_API_KEY and a configured decision provider "
+            "Skipping benchmark: a chat LLM API key and a configured decision provider "
             "(TYPESAFE_API_KEY, an Ollama model, or a GLiClass URL) are required "
             "(dashboard Agent settings and env).",
             file=sys.stderr,
