@@ -314,11 +314,13 @@ loom --auth-token <secret>                     # Enable team auth mode
 
 # Projects
 loom init --project <name> --project-path <path>   # Track new project
-loom list-projects                             # List tracked projects
+# List projects via API or MCP (no CLI subcommand):
+#   curl http://127.0.0.1:8472/api/projects
+#   loom-mcp tool: list_projects
 
 # Agents & Wiring
 loom detect-agents                             # Discover agents on machine
-loom wire --project <name>                     # Auto-wire MCP configurations
+loom wire --project <name>                     # Auto-wire MCP / CLAUDE.md / AGENTS.md / .cursorrules
 loom register --agent <name> --project <name> --project-path <path>  # Register agent
 loom unregister --agent <name> --project <name>                      # Remove agent
 
