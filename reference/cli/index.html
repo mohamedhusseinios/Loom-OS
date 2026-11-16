@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -654,6 +654,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#loom-wire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom wire
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#loom-register" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -774,6 +785,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/mohamedhusseinios/Loom-OS/blob/main/docs/USAGE.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full user guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -816,6 +854,17 @@
     <span class="md-ellipsis">
       
         loom init
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loom-wire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom wire
       
     </span>
   </a>
@@ -960,7 +1009,7 @@ loom start --port 8472    # explicit form
 </tbody>
 </table>
 <h2 id="loom-init"><code>loom init</code></h2>
-<p>Bootstrap a project: creates the inbox directory and a starter <code>register.json</code> in one step.</p>
+<p>Bootstrap a project: creates the inbox directory and a starter <code>register.json</code> in one step. By default also runs agent wiring (same as <code>loom wire</code>); pass <code>--no-wire</code> to skip.</p>
 <pre><code class="language-bash">loom init --project my-app --project-path .
 </code></pre>
 <table>
@@ -986,6 +1035,37 @@ loom start --port 8472    # explicit form
 <td><code>--agent</code></td>
 <td><code>claude-code</code></td>
 <td>Initial agent name</td>
+</tr>
+<tr>
+<td><code>--no-wire</code></td>
+<td>off</td>
+<td>Skip writing <code>CLAUDE.md</code> / <code>AGENTS.md</code> / <code>.mcp.json</code> / <code>.cursorrules</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="loom-wire"><code>loom wire</code></h2>
+<p>Zero-config agent wiring for a project. Detects installed coding assistants and writes or updates instruction / MCP config files (<code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>.cursorrules</code>, <code>.mcp.json</code>) so agents can talk to Loom without hand-editing configs.</p>
+<pre><code class="language-bash">loom wire --project my-app
+loom wire --project my-app --project-path /abs/path/to/repo
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--project</code></td>
+<td>required</td>
+<td>Project identifier</td>
+</tr>
+<tr>
+<td><code>--project-path</code></td>
+<td><code>.</code></td>
+<td>Path to the project</td>
 </tr>
 </tbody>
 </table>
@@ -1162,10 +1242,10 @@ bash scripts/smoke-test.sh              # end-to-end: daemon + agent + API, need
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

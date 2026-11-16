@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -27,10 +27,10 @@
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -704,6 +704,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/mohamedhusseinios/Loom-OS/blob/main/docs/USAGE.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full user guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -782,18 +809,24 @@
 
 <h1 id="loom-os">Loom OS</h1>
 <p><strong>Loom OS</strong> is a unified agent memory fabric that weaves multiple AI coding agents into one shared, Graphify-powered knowledge graph per project.</p>
-<p>Agents talk to Loom OS <strong>only through the filesystem</strong> — there's no SDK, API client, or auth to configure. An agent drops a file into an inbox directory, and Loom OS picks it up, indexes it, and makes it available to every other agent working on the same project.</p>
+<p>Agents talk to Loom OS <strong>only through the filesystem</strong> — there's no required SDK, API client, or auth for local use. An agent drops a file into an inbox directory, and Loom OS picks it up, indexes it, and makes it available to every other agent working on the same project.</p>
 <h2 id="why-loom-os">Why Loom OS</h2>
 <p>When multiple AI coding agents work on the same codebase, they don't share context by default. One agent's findings, decisions, and architectural notes are invisible to the next. Loom OS closes that gap: every agent reads and writes into the same knowledge graph, so insights compound instead of evaporating between sessions.</p>
 <h2 id="how-its-built">How it's built</h2>
 <p>Loom OS runs as two independent processes:</p>
 <ul>
 <li><strong>The daemon</strong> — a Python service (FastAPI + uvicorn) that watches an inbox directory on the filesystem. When an agent drops in a registration, heartbeat, finding, decision, or task file, the daemon processes it, updates the project's knowledge graph, and persists state.</li>
-<li><strong>The dashboard</strong> — a Next.js web application that acts as the control plane. It visualizes the knowledge graph, shows connected agents and their status, and lets you dispatch tasks — all by talking to the daemon over REST and WebSocket.</li>
+<li><strong>The dashboard</strong> — a Next.js web application that acts as the control plane. It visualizes the knowledge graph, shows connected agents and their status, dispatches tasks, and explores cross-project federation — all by talking to the daemon over REST and WebSocket.</li>
 </ul>
-<p>Because the only contract between an agent and Loom OS is "write a file to this folder," any agent that can write to the filesystem can participate — no integration library required.</p>
+<p>Because the only contract between an agent and Loom OS is "write a file to this folder," any agent that can write to the filesystem can participate — no integration library required. Optional helpers (<code>loom wire</code>, <code>loom-client</code>, <code>loom-mcp</code>, LangChain memory) make that path faster.</p>
 <h2 id="whats-next">What's next</h2>
-<p>A step-by-step Quickstart guide is on the way and will walk through registering your first agent, dropping findings into the inbox, and viewing the resulting graph in the dashboard.</p>
+<ol>
+<li><strong><a href="quickstart/">Quickstart</a></strong> — daemon + first agent in about five minutes.</li>
+<li><strong><a href="guides/connect-claude-code/">Connect Claude Code</a></strong> — register, heartbeat, and SDK options.</li>
+<li><strong><a href="guides/hybrid-search/">Hybrid search</a></strong> — text vs graph+vector modes.</li>
+<li><strong><a href="reference/cli/">CLI reference</a></strong> — every <code>loom</code> subcommand, including <code>loom wire</code>.</li>
+<li><strong><a href="https://github.com/mohamedhusseinios/Loom-OS/blob/main/docs/USAGE.md">Full user guide</a></strong> — federation, team mode, workers, troubleshooting.</li>
+</ol>
 
 
 
@@ -843,10 +876,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "content.code.copy"], "search": "assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

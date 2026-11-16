@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -27,10 +27,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -713,6 +713,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#federation-cross-project-read-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Federation (cross-project, read-only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tasks-dispatch-the-task-board" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -779,6 +790,33 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/mohamedhusseinios/Loom-OS/blob/main/docs/USAGE.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full user guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -858,6 +896,17 @@
     <span class="md-ellipsis">
       
         Agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#federation-cross-project-read-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Federation (cross-project, read-only)
       
     </span>
   </a>
@@ -1098,6 +1147,48 @@
 <td><code>/api/agents/runnable</code></td>
 <td>Agents the daemon can spawn as workers</td>
 </tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/projects/:id/agents/match?capability=</code></td>
+<td>Match agents by capability</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/team/status</code></td>
+<td>Team mode status (auth enabled + active users)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/plugins</code></td>
+<td>Discovered extractor plugins</td>
+</tr>
+</tbody>
+</table>
+<h2 id="federation-cross-project-read-only">Federation (cross-project, read-only)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/federated/stats</code></td>
+<td>Org-wide index summary + shared symbols</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/federated/query?q=</code></td>
+<td>Search symbols/nodes across all projects</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/federated/references?q=</code></td>
+<td>Cross-project references for a symbol</td>
+</tr>
 </tbody>
 </table>
 <h2 id="tasks-dispatch-the-task-board">Tasks, dispatch &amp; the task board</h2>
@@ -1269,10 +1360,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

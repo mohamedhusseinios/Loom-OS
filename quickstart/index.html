@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -304,10 +304,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-register-an-agent" class="md-nav__link">
+  <a href="#2-bootstrap-a-project-or-register-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Register an agent
+        2. Bootstrap a project (or register an agent)
       
     </span>
   </a>
@@ -717,6 +717,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/mohamedhusseinios/Loom-OS/blob/main/docs/USAGE.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full user guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -755,10 +782,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-register-an-agent" class="md-nav__link">
+  <a href="#2-bootstrap-a-project-or-register-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Register an agent
+        2. Bootstrap a project (or register an agent)
       
     </span>
   </a>
@@ -809,13 +836,17 @@
 <h2 id="1-install-and-start-the-daemon">1. Install and start the daemon</h2>
 <pre><code class="language-bash">python3 -m venv .venv &amp;&amp; source .venv/bin/activate
 pip install loom-os
-loom --port 8472
+loom start --port 8472
 </code></pre>
-<p>This starts the Loom daemon (FastAPI + uvicorn) on <code>http://127.0.0.1:8472</code>. It watches <code>~/.loom/inbox/</code> for files and persists state to <code>~/.loom/state.db</code> (SQLite).</p>
+<p>This starts the Loom daemon (FastAPI + uvicorn) on <code>http://127.0.0.1:8472</code>. It watches <code>~/.loom/inbox/</code> for files and persists state to <code>~/.loom/state.db</code> (SQLite). (<code>loom --port 8472</code> is shorthand for <code>loom start</code>.)</p>
 <p>!!! note "No LLM keys required"
     The base install works without any LLM. If you want optional LLM-powered extraction (Ollama / OpenAI / Claude), install with <code>pip install loom-os[llm]</code> instead — see <a href="../concepts/knowledge-graph/">Knowledge graph</a>.</p>
-<h2 id="2-register-an-agent">2. Register an agent</h2>
-<p>Drop a <code>register.json</code> into the inbox for your project. Create the directory and file directly:</p>
+<h2 id="2-bootstrap-a-project-or-register-an-agent">2. Bootstrap a project (or register an agent)</h2>
+<p>Fastest path — create the inbox, drop a starter <code>register.json</code>, and wire agent configs:</p>
+<pre><code class="language-bash">loom init --project my-project --project-path /abs/path/to/my-project
+loom wire --project my-project --project-path /abs/path/to/my-project   # optional if init already wired
+</code></pre>
+<p>Or drop a <code>register.json</code> by hand:</p>
 <pre><code class="language-bash">mkdir -p ~/.loom/inbox/my-project
 cat &gt; ~/.loom/inbox/my-project/register.json &lt;&lt;'EOF'
 {
@@ -891,10 +922,10 @@ npm run dev
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
