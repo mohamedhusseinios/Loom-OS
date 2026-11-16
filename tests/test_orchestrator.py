@@ -500,6 +500,47 @@ async def test_filter_cache_key_includes_provider_and_model(tmp_path):
     assert len(first_client.filter_calls) == 2
 
 
+def test_filter_cache_key_includes_thresholds():
+    from daemon.orchestrator import filter_cache_key
+
+    a = filter_cache_key("typesafe", "m", "ctx", {"keep": 0.7, "drop": 0.3})
+    b = filter_cache_key("typesafe", "m", "ctx", {"keep": 0.9, "drop": 0.1})
+    c = filter_cache_key("typesafe", "m", "ctx", {"drop": 0.3, "keep": 0.7})
+    assert a != b
+    assert a == c
+
+
+@pytest.mark.asyncio
+async def test_filter_cache_misses_when_thresholds_change(tmp_path):
+    from daemon.orchestrator import clear_filter_cache
+
+    clear_filter_cache()
+    _graph(tmp_path)
+    sure = dict(ready=0.95, blocked=0.05, complete=0.05)
+    client = FakeDecision(provider="typesafe", model="model-a", **sure)
+    task = _task()
+    orch = Orchestrator(FakeGE(), relevance_client=client, judgment_client=client, llm=FakeLlm())
+    settings_a = {
+        "filter_provider": "typesafe",
+        "judgment_provider": "typesafe",
+        "threshold_overrides": {"typesafe": {"keep": 0.6, "drop": 0.2}},
+    }
+    settings_b = {
+        "filter_provider": "typesafe",
+        "judgment_provider": "typesafe",
+        "threshold_overrides": {"typesafe": {"keep": 0.9, "drop": 0.1}},
+    }
+    first = await orch.run_suggest_cycle(str(tmp_path), "p", task, settings=settings_a, raw_keys={"typesafe": "k"})
+    assert first.filter_cache_hit is False
+    assert len(client.filter_calls) == 1
+    second = await orch.run_suggest_cycle(str(tmp_path), "p", task, settings=settings_b, raw_keys={"typesafe": "k"})
+    assert second.filter_cache_hit is False
+    assert len(client.filter_calls) == 2
+    third = await orch.run_suggest_cycle(str(tmp_path), "p", task, settings=settings_b, raw_keys={"typesafe": "k"})
+    assert third.filter_cache_hit is True
+    assert len(client.filter_calls) == 2
+
+
 @pytest.mark.asyncio
 async def test_invalid_ollama_config_skips_without_crashing(tmp_path):
     _graph(tmp_path)

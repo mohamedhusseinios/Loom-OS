@@ -96,6 +96,31 @@ async def test_implement_sets_running_loom_agent(client):
 
 
 @pytest.mark.asyncio
+async def test_implement_dismisses_pending_suggestion(client):
+    """Implement must clear pending suggestions so Accept cannot 409 later."""
+    from daemon.models import SuggestionStatus
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Impl", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    sug = await reg.create_task_suggestion(
+        "noor", tid, "loom.move_running", "Move to Running", 0.9, "go", [],
+    )
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    pending = await reg.get_pending_suggestion(tid)
+    assert pending is None
+    updated = await reg.get_task_suggestion(sug.id)
+    assert updated is not None
+    assert updated.status == SuggestionStatus.DISMISSED
+    accept = client.post(f"/api/projects/noor/suggestions/{sug.id}/accept")
+    assert accept.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_dismiss_suggestion(client):
     reg = api_module.registry
     tid = await reg.create_agent_task(AgentTaskCreatePayload(
@@ -107,6 +132,22 @@ async def test_dismiss_suggestion(client):
     res = client.post(f"/api/projects/noor/suggestions/{sug.id}/dismiss")
     assert res.status_code == 200
     assert res.json()["status"] == "dismissed"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_rejects_non_pending_suggestion(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="X", instruction="y",
+    ))
+    sug = await reg.create_task_suggestion(
+        "noor", tid, "loom.move_ready", "Ready", 0.8, "go", [],
+    )
+    accept = client.post(f"/api/projects/noor/suggestions/{sug.id}/accept")
+    assert accept.status_code == 200
+    dismiss = client.post(f"/api/projects/noor/suggestions/{sug.id}/dismiss")
+    assert dismiss.status_code == 400
+    assert "not pending" in dismiss.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -352,3 +393,53 @@ def test_decision_fields_round_trip_keeps_masked_keys(client):
     kept = client.get("/api/agent/settings")
     assert kept.json()["filter_provider"] == "gliclass"
     assert kept.json()["judgment_provider"] == "typesafe"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_emits_suggestion_event(client):
+    from daemon.agent_runtime import AgentRuntime
+    from daemon.models import SuggestionStatus
+
+    events = []
+
+    async def capture(event, project, data):
+        events.append((event, project, data))
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Emit", instruction="y",
+    ))
+    sug = await reg.create_task_suggestion(
+        "noor", tid, "loom.move_blocked", "Block", 0.5, "no", [],
+    )
+    runtime = AgentRuntime(reg, api_module.graph_engine, emit_event=capture)
+    updated = await runtime.dismiss_suggestion("noor", sug.id)
+    assert updated.status == SuggestionStatus.DISMISSED
+    assert any(e[0] == "task:suggestion" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_implement_emits_dismissed_suggestion_event(client):
+    from daemon.agent_runtime import AgentRuntime
+    from daemon.models import SuggestionStatus
+
+    events = []
+
+    async def capture(event, project, data):
+        events.append((event, project, data))
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Impl emit", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    sug = await reg.create_task_suggestion(
+        "noor", tid, "loom.move_running", "Move to Running", 0.9, "go", [],
+    )
+    runtime = AgentRuntime(reg, api_module.graph_engine, emit_event=capture)
+    await runtime.implement("noor", tid, spawn_worker=None)
+    suggestion_events = [e for e in events if e[0] == "task:suggestion"]
+    assert suggestion_events
+    assert suggestion_events[0][2]["id"] == sug.id
+    assert suggestion_events[0][2]["status"] == SuggestionStatus.DISMISSED.value
+    assert any(e[0] == "task:updated" for e in events)

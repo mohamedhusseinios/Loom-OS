@@ -164,12 +164,24 @@ class AgentRuntime:
         sug = await self.registry.get_task_suggestion(suggestion_id)
         if sug is None or sug.project != project_id:
             raise LookupError("suggestion not found")
-        return await self.registry.set_suggestion_status(suggestion_id, SuggestionStatus.DISMISSED)
+        if sug.status != SuggestionStatus.PENDING:
+            raise ValueError("suggestion is not pending")
+        updated = await self.registry.set_suggestion_status(suggestion_id, SuggestionStatus.DISMISSED)
+        if self.emit_event:
+            await self.emit_event("task:suggestion", project_id, updated.model_dump(mode="json") if updated else {})
+        return updated
 
     async def implement(self, project_id: str, task_id: str, spawn_worker=None):
         task = await self.registry.get_agent_task(task_id)
         if task is None:
             raise LookupError("task not found")
+        pending = await self.registry.get_pending_suggestion(task_id)
+        if pending is not None:
+            await self.registry.dismiss_pending_suggestions(task_id)
+            if self.emit_event:
+                dismissed = await self.registry.get_task_suggestion(pending.id)
+                if dismissed is not None:
+                    await self.emit_event("task:suggestion", project_id, dismissed.model_dump(mode="json"))
         assignee = f"loom-agent-{project_id}"
         await self.registry.update_agent_task(
             task_id, status=AgentTaskStatus.RUNNING, assignee=assignee,

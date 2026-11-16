@@ -47,12 +47,13 @@ class WorkerSupervisor:
             api_key, base_url, model = load_llm_config_from_settings()
         except Exception:
             return env
-        if api_key and not env.get("LOOM_AGENT_API_KEY") and not env.get("DEEPSEEK_API_KEY"):
+        # Dashboard BYOK wins over a daemon-process DEEPSEEK_API_KEY, matching chat.
+        if api_key:
             env["LOOM_AGENT_API_KEY"] = api_key
             env["DEEPSEEK_API_KEY"] = api_key
-        if base_url and not env.get("LOOM_AGENT_BASE_URL"):
+        if base_url:
             env["LOOM_AGENT_BASE_URL"] = base_url
-        if model and not env.get("LOOM_AGENT_MODEL"):
+        if model:
             env["LOOM_AGENT_MODEL"] = model
         return env
 
