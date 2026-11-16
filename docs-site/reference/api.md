@@ -50,6 +50,17 @@ Full mechanics in [Hybrid search](../guides/hybrid-search.md).
 | `DELETE` | `/api/projects/:id/agents/:agentId` | Remove an agent from a project |
 | `GET` | `/api/agents/known` | Known agent types + which are installed on this machine |
 | `GET` | `/api/agents/runnable` | Agents the daemon can spawn as workers |
+| `GET` | `/api/projects/:id/agents/match?capability=` | Match agents by capability |
+| `GET` | `/api/team/status` | Team mode status (auth enabled + active users) |
+| `GET` | `/api/plugins` | Discovered extractor plugins |
+
+## Federation (cross-project, read-only)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/federated/stats` | Org-wide index summary + shared symbols |
+| `GET` | `/api/federated/query?q=` | Search symbols/nodes across all projects |
+| `GET` | `/api/federated/references?q=` | Cross-project references for a symbol |
 
 ## Tasks, dispatch & the task board
 

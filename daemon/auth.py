@@ -89,7 +89,7 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
     """
 
     _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-    _PROTECTED_GET_PATHS = frozenset({"/api/discover"})
+    _PROTECTED_GET_PATHS = frozenset({"/api/discover", "/api/agent/settings"})
 
     async def dispatch(self, request: Request, call_next):
         if not is_auth_enabled():

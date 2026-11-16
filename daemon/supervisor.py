@@ -32,7 +32,30 @@ class WorkerSupervisor:
             "--max-budget-usd", str(max_budget_usd),
         ]
         logger.info("spawning one-shot worker for task %s", task_id)
-        self._procs[task_id] = subprocess.Popen(cmd)
+        env = None
+        if agent == "loom-agent":
+            env = self._loom_agent_env()
+        self._procs[task_id] = subprocess.Popen(cmd, env=env)
+
+    @staticmethod
+    def _loom_agent_env() -> dict[str, str]:
+        """Pass dashboard BYOK keys into the loom-agent worker process."""
+        import os
+        env = os.environ.copy()
+        try:
+            from daemon.agent_run import load_llm_config_from_settings
+            api_key, base_url, model = load_llm_config_from_settings()
+        except Exception:
+            return env
+        # Dashboard BYOK wins over a daemon-process DEEPSEEK_API_KEY, matching chat.
+        if api_key:
+            env["LOOM_AGENT_API_KEY"] = api_key
+            env["DEEPSEEK_API_KEY"] = api_key
+        if base_url:
+            env["LOOM_AGENT_BASE_URL"] = base_url
+        if model:
+            env["LOOM_AGENT_MODEL"] = model
+        return env
 
     def is_running(self, task_id: str) -> bool:
         proc = self._procs.get(task_id)

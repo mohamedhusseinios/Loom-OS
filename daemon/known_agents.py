@@ -90,6 +90,14 @@ KNOWN_AGENTS = [
         "default_version": "1.0",
         "default_capabilities": ["code-analysis", "generation", "long-context", "review"],
     },
+    {
+        "name": "loom-agent",
+        "display": "Loom Agent",
+        "detect_cmd": None,
+        "description": "First-party Loom dashboard agent (DeepSeek + Jev orchestration)",
+        "default_version": "1.0",
+        "default_capabilities": ["chat", "implement", "orchestration"],
+    },
 ]
 
 
@@ -142,6 +150,8 @@ def detect_installed() -> dict[str, str]:
                 path = _detect_zcode()
                 if path:
                     installed[agent["name"]] = path
+            elif agent["name"] == "loom-agent":
+                installed[agent["name"]] = "builtin"
     return installed
 
 

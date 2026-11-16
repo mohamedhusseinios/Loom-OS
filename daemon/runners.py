@@ -15,6 +15,7 @@ Output modes:
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -66,6 +67,10 @@ RUNNERS: dict[str, RunnerSpec] = {
     "aider": RunnerSpec(
         binary="aider", mode="stdout",
         build_argv=lambda prompt: ["--message", prompt, "--yes-always"],
+    ),
+    "loom-agent": RunnerSpec(
+        binary=sys.executable, mode="stdout",
+        build_argv=lambda prompt: ["-m", "daemon.agent_run", "--prompt", prompt],
     ),
 }
 
