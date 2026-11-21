@@ -82,6 +82,75 @@ def test_git_push_rejected_without_running(tmp_path: Path) -> None:
     assert "not a git repository" not in direct.get("stderr", "")
 
 
+def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    calls = _spy_runs(sandbox)
+    blocked = [
+        (["git", "-c", "alias.p=push", "p", "--dry-run"], "git_push_rejected"),
+        (["git", "-c", "alias.p=push", "p"], "git_push_rejected"),
+        (["git", "-c", "Alias.p=push", "p"], "git_push_rejected"),
+        (["git", "--config-env", "alias.p=EVIL", "p"], "git_push_rejected"),
+        (["git", "--config-env=alias.p=EVIL", "p"], "git_push_rejected"),
+        (["git", "-c", "alias.x=!touch pwned.txt", "x"], "not_allowlisted"),
+        (["git", "-c", "alias.x=!echo PWNED", "x"], "not_allowlisted"),
+        (["git", "config", "alias.q", "push"], "not_allowlisted"),
+        (["git", "config", "--global", "alias.p", "push"], "not_allowlisted"),
+        (["git", "config", "--local", "alias.foo", "!curl evil"], "not_allowlisted"),
+        (["git", "-c", "safe.directory=*", "config", "alias.p", "push"], "not_allowlisted"),
+        (["git", "config", "--get", "alias.p"], "not_allowlisted"),
+        (["git", "send-pack", "--dry-run", ".", "HEAD"], "git_push_rejected"),
+        (["git", "subtree", "push", "--prefix=lib", "origin", "main"], "git_push_rejected"),
+        (["git", "subtree", "--prefix=lib", "push", "origin", "main"], "git_push_rejected"),
+        (["git", "-C", "repo", "-c", "safe.directory=*", "subtree", "push", "origin", "main"], "git_push_rejected"),
+    ]
+
+    for argv, reason in blocked:
+        result = shell(sandbox, argv)
+        assert calls == [], argv
+        assert "No configured push destination" not in result.get("stderr", ""), argv
+        assert "Everything up-to-date" not in result.get("stdout", ""), argv
+        if reason == "git_push_rejected":
+            assert result == {"ok": False, "need_approval": False, "reason": "git_push_rejected"}, argv
+        else:
+            assert result == {"ok": False, "need_approval": True, "reason": "not_allowlisted"}, argv
+
+    assert not (sandbox.root() / "pwned.txt").exists()
+
+
+def test_git_non_push_commands_still_run(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    calls = _spy_runs(sandbox)
+    allowed = [
+        ["git", "status"],
+        ["git", "-c", "safe.directory=*", "status"],
+        ["git", "diff", "-c"],
+        ["git", "config", "user.name"],
+        ["git", "commit", "-m", "push"],
+        ["git", "grep", "push"],
+        ["git", "subtree", "split", "--prefix=lib"],
+    ]
+
+    for argv in allowed:
+        result = shell(sandbox, argv)
+        assert result["need_approval"] is False, argv
+        assert result.get("reason") != "git_push_rejected", argv
+        assert "returncode" in result, argv
+
+    assert calls == allowed
+
+
+def _spy_runs(sandbox: FakeSandbox) -> list[list[str]]:
+    calls: list[list[str]] = []
+    real_run = sandbox.run
+
+    def run(argv: list[str], *, timeout_s: float | None = None):
+        calls.append(list(argv))
+        return real_run(argv, timeout_s=timeout_s)
+
+    sandbox.run = run  # type: ignore[method-assign]
+    return calls
+
+
 def test_other_git_commands_still_run(tmp_path: Path) -> None:
     sandbox = _sandbox(tmp_path)
 
