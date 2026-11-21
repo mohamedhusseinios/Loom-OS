@@ -8,6 +8,9 @@ from typing import Any
 from coding_agent.ports import ContextSource, EventSink, LlmPort, Sandbox, UsageMeter
 from coding_agent.tools.edit import edit
 from coding_agent.tools.fs import read_file, search
+from coding_agent.tools.git_tools import git_tool
+from coding_agent.tools.shell import shell
+from coding_agent.tools.test_lint import run_lint, run_tests
 
 DEFAULT_STEP_LIMIT = 40
 DEFAULT_TOKEN_LIMIT = 100_000
@@ -77,4 +80,13 @@ class RunSession:
             return edit(self.sandbox, args.get("path", ""), args.get("search", ""), args.get("replace", ""))
         if name == "search":
             return search(self.sandbox, args.get("query", ""), args.get("path", "."))
+        if name == "shell":
+            argv = args.get("argv")
+            return shell(self.sandbox, list(argv) if isinstance(argv, list) else [])
+        if name == "git":
+            return git_tool(self.sandbox, args)
+        if name == "run_tests":
+            return run_tests(self.sandbox, self.manifest)
+        if name == "run_lint":
+            return run_lint(self.sandbox, self.manifest)
         return {"ok": False, "reason": "not_implemented"}
