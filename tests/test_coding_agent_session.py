@@ -105,9 +105,9 @@ def test_request_cancel_stops(tmp_path: Path) -> None:
         session.check_can_continue()
 
 
-def test_dispatch_tool_is_stub(tmp_path: Path) -> None:
+def test_dispatch_tool_unknown_is_not_implemented(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    assert session.dispatch_tool("read_file", {"path": "a.py"}) == {
+    assert session.dispatch_tool("not_a_tool", {}) == {
         "ok": False,
         "reason": "not_implemented",
     }

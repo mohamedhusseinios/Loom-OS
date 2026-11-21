@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from coding_agent.ports import ContextSource, EventSink, LlmPort, Sandbox, UsageMeter
+from coding_agent.tools.edit import edit
+from coding_agent.tools.fs import read_file, search
 
 DEFAULT_STEP_LIMIT = 40
 DEFAULT_TOKEN_LIMIT = 100_000
@@ -69,4 +71,10 @@ class RunSession:
             raise BudgetExceeded("cost")
 
     def dispatch_tool(self, name: str, args: dict) -> dict:
+        if name == "read_file":
+            return read_file(self.sandbox, args.get("path", ""))
+        if name == "edit":
+            return edit(self.sandbox, args.get("path", ""), args.get("search", ""), args.get("replace", ""))
+        if name == "search":
+            return search(self.sandbox, args.get("query", ""), args.get("path", "."))
         return {"ok": False, "reason": "not_implemented"}
