@@ -94,6 +94,33 @@ def test_search_returns_capped_lines(tmp_path: Path) -> None:
     assert result["matches"][49] == {"path": "notes.txt", "line": 50, "text": "hit 49"}
 
 
+def test_search_skips_git_pycache_and_venv(tmp_path: Path) -> None:
+    root = tmp_path / "sandbox"
+    root.mkdir()
+    sandbox = FakeSandbox(root)
+    git_objects = root / ".git" / "objects"
+    git_objects.mkdir(parents=True)
+    (git_objects / "pack").write_text("".join(f"needle {i}\n" for i in range(60)), encoding="utf-8")
+    nested_git = root / "pkg" / ".git"
+    nested_git.mkdir(parents=True)
+    (nested_git / "HEAD").write_text("needle ref\n", encoding="utf-8")
+    cache = root / "__pycache__"
+    cache.mkdir()
+    (cache / "mod.pyc").write_text("needle cached\n", encoding="utf-8")
+    venv = root / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    (venv / "site.py").write_text("needle venv\n", encoding="utf-8")
+    sandbox.write_text("src/a.py", "needle here\n")
+
+    result = search(sandbox, "needle")
+
+    assert result == {
+        "ok": True,
+        "truncated": False,
+        "matches": [{"path": "src/a.py", "line": 1, "text": "needle here"}],
+    }
+
+
 def test_search_skips_undecodable_files(tmp_path: Path) -> None:
     root = tmp_path / "sandbox"
     root.mkdir()

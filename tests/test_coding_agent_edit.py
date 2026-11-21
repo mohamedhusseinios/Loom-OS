@@ -99,6 +99,16 @@ def test_fuzzy_unique_apply(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "alpha\nhello there\nomega\n"
 
 
+def test_fuzzy_unique_apply_does_not_merge_next_line(tmp_path: Path) -> None:
+    path = tmp_path / "a.txt"
+    path.write_text("alpha\nhello world extra\nomega\n", encoding="utf-8")
+
+    result = apply_search_replace(path, "hello worlb extra", "hello there extra")
+
+    assert result == ApplyResult(ok=True, reason=None)
+    assert path.read_text(encoding="utf-8") == "alpha\nhello there extra\nomega\n"
+
+
 def test_fuzzy_unique_multiline_apply(tmp_path: Path) -> None:
     path = tmp_path / "a.txt"
     path.write_text("line one\nline two\nline three\n", encoding="utf-8")

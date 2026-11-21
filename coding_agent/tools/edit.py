@@ -68,6 +68,14 @@ def _replace_text(text: str, search: str, replace: str) -> tuple[str | None, App
     return text[:start] + replace + text[end:], ApplyResult(ok=True, reason=None)
 
 
+def _strip_one_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return line[:-2]
+    if line.endswith(("\n", "\r")):
+        return line[:-1]
+    return line
+
+
 def _line_spans(text: str) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     start = 0
@@ -86,10 +94,15 @@ def _fuzzy_spans(text: str, search: str) -> list[tuple[int, int]]:
     lines = _line_spans(text)
     if len(lines) < window:
         return []
+    # Search without a final newline must not take the file line's ending,
+    # or the splice eats that newline and merges the following line.
+    search_keeps_end = search.endswith(("\n", "\r"))
     candidates: list[tuple[float, int, int]] = []
     for index in range(len(lines) - window + 1):
         start = lines[index][0]
-        end = lines[index + window - 1][1]
+        last_start, end = lines[index + window - 1]
+        if not search_keeps_end:
+            end = last_start + len(_strip_one_ending(text[last_start:end]))
         ratio = SequenceMatcher(a=text[start:end], b=search).ratio()
         if ratio >= FUZZY_RATIO_MIN:
             candidates.append((ratio, start, end))

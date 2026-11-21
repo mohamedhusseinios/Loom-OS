@@ -2,16 +2,19 @@
 
 `search` walks files under the sandbox root and filters lines in Python.
 It does not require an `rg` binary, so FakeSandbox tests stay hermetic.
+The walk skips `.git`, `__pycache__`, and `.venv` directories.
 Results are capped at MAX_SEARCH_MATCHES lines.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from coding_agent.ports import Sandbox
 
 MAX_SEARCH_MATCHES = 50
+_SKIP_WALK_DIRS = frozenset({".git", "__pycache__", ".venv"})
 
 
 def read_file(sandbox: Sandbox, path: str) -> dict:
@@ -35,7 +38,7 @@ def search(sandbox: Sandbox, query: str, path: str = ".") -> dict:
     if base.is_file():
         files = [base]
     elif base.is_dir():
-        files = sorted(item for item in base.rglob("*") if item.is_file())
+        files = _walk_files(base)
     else:
         return {"ok": True, "matches": [], "truncated": False}
 
@@ -57,6 +60,16 @@ def search(sandbox: Sandbox, query: str, path: str = ".") -> dict:
         if truncated:
             break
     return {"ok": True, "matches": matches, "truncated": truncated}
+
+
+def _walk_files(base: Path) -> list[Path]:
+    files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [name for name in dirnames if name not in _SKIP_WALK_DIRS]
+        for name in filenames:
+            files.append(Path(dirpath) / name)
+    files.sort()
+    return files
 
 
 def _contained(root: Path, rel: str) -> Path:
