@@ -324,3 +324,23 @@ class TaskSuggestionRecord(BaseModel):
     legacy_decision_input_tokens: Optional[int] = None
     created_at: str
     updated_at: str
+
+
+class AgentRunRecord(BaseModel):
+    id: str
+    task_id: str
+    project: str
+    family_id: str = "react"
+    modifier_ids_json: str = "[]"
+    status: str
+    worktree_path: Optional[str] = None
+    run_dir: str
+    step_limit: int = 40
+    token_limit: int = 100000
+    cost_limit: float = 1.0
+    steps_used: int = 0
+    tokens_used: int = 0
+    cost_used: float = 0.0
+    stop_reason: Optional[str] = None
+    created_at: str
+    updated_at: str

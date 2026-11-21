@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import time
+import uuid
+from pathlib import Path
 
+from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
 from daemon.agent_credentials import resolve_deepseek_key
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
@@ -20,6 +25,63 @@ logger = logging.getLogger("loom.agent_runtime")
 # task_id -> last auto-suggest monotonic time
 _suggest_cooldown: dict[str, float] = {}
 SUGGEST_COOLDOWN_SEC = 30.0
+
+
+def loom_run_dir(run_id: str) -> Path:
+    return Path.home() / ".loom" / "runs" / run_id
+
+
+def read_new_jsonl_lines(path: Path, offset: int = 0) -> tuple[list[dict], int]:
+    """Return complete JSON objects appended after ``offset`` and the new byte offset."""
+    if offset < 0:
+        offset = 0
+    if not path.is_file():
+        return [], offset
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        raw = handle.read()
+    if not raw:
+        return [], offset
+    if not raw.endswith(b"\n"):
+        cut = raw.rfind(b"\n")
+        if cut == -1:
+            return [], offset
+        raw = raw[: cut + 1]
+    events: list[dict] = []
+    for line in raw.decode("utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            events.append(parsed)
+    return events, offset + len(raw)
+
+
+class JsonlEventTail:
+    """Byte-offset tail of one or more JSONL sinks. Safe to feed a growing file."""
+
+    def __init__(self) -> None:
+        self._offsets: dict[str, int] = {}
+
+    def poll(self, path: Path) -> list[dict]:
+        key = str(path)
+        events, offset = read_new_jsonl_lines(Path(path), self._offsets.get(key, 0))
+        self._offsets[key] = offset
+        return events
+
+
+async def emit_new_run_events(path: Path, tail: JsonlEventTail, emit_event, project: str, run_id: str, task_id: str) -> int:
+    events = tail.poll(path)
+    for payload in events:
+        if emit_event:
+            await emit_event("agent:run_event", project, {
+                "run_id": run_id, "task_id": task_id, "payload": payload,
+            })
+    return len(events)
 
 
 class AgentRuntime:
@@ -184,11 +246,53 @@ class AgentRuntime:
             capabilities=["chat", "implement", "orchestration"],
         ))
         updated = await self.registry.get_agent_task(task_id)
+        if updated:
+            await self._open_coding_run(project_id, updated)
         if spawn_worker and updated:
             spawn_worker(updated)
         if self.emit_event and updated:
             await self.emit_event("task:updated", project_id, updated.model_dump(mode="json"))
         return updated
+
+    async def _open_coding_run(self, project_id: str, task):
+        run_id = str(uuid.uuid4())
+        run_dir = loom_run_dir(run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        cancel_path = run_dir / "cancel"
+        events_path = run_dir / "events.jsonl"
+        manifest = {
+            "family_id": "react",
+            "modifier_ids": [],
+            "step_limit": DEFAULT_STEP_LIMIT,
+            "token_limit": DEFAULT_TOKEN_LIMIT,
+            "cost_limit": DEFAULT_COST_LIMIT_USD,
+            "cost_limit_usd": DEFAULT_COST_LIMIT_USD,
+            "prompt": task.instruction,
+            "cancel_path": str(cancel_path),
+            "run_dir": str(run_dir),
+            "events_path": str(events_path),
+            "worktree_path": task.workspace_path or "",
+            "task_id": task.id,
+            "project": project_id,
+        }
+        manifest_path = run_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        os.environ["LOOM_AGENT_MANIFEST"] = str(manifest_path)
+        await self.registry.create_agent_run(
+            task_id=task.id, project=project_id, run_dir=str(run_dir),
+            worktree_path=task.workspace_path, family_id="react", modifier_ids_json="[]",
+            status="running", step_limit=DEFAULT_STEP_LIMIT, token_limit=DEFAULT_TOKEN_LIMIT,
+            cost_limit=DEFAULT_COST_LIMIT_USD, run_id=run_id,
+        )
+
+    async def cancel_run(self, project_id: str, run_id: str):
+        run = await self.registry.get_agent_run(run_id)
+        if run is None or run.project != project_id:
+            raise LookupError("run not found")
+        flag = Path(run.run_dir) / "cancel"
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.write_text("cancelled\n", encoding="utf-8")
+        return await self.registry.update_agent_run(run_id, status="cancelled", stop_reason="cancelled")
 
 
 def _suggestion_fields(result: SuggestResult) -> dict:

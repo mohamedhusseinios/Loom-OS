@@ -8,6 +8,7 @@ from typing import Optional
 
 import asyncio
 import logging
+from pathlib import Path
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
@@ -28,7 +29,7 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, emit_new_run_events
 from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ async def lifespan(app: FastAPI):
         watcher.start(router.handle_file, loop)
         # Background task: broadcast events to WebSocket clients
         asyncio.create_task(_broadcast_events())
+        asyncio.create_task(_tail_agent_run_events())
 
     logger.info("Loom daemon started")
     yield
@@ -1016,6 +1018,18 @@ async def implement_task(project_id: str, task_id: str):
     return updated.model_dump() if updated else {}
 
 
+@app.post("/api/projects/{project_id}/runs/{run_id}/cancel")
+async def cancel_agent_run(project_id: str, run_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        run = await _get_agent_runtime().cancel_run(project_id, run_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return run.model_dump(mode="json") if run else {}
+
+
 
 def _task_base_branch(record: AgentTaskRecord) -> str:
     try:
@@ -1428,6 +1442,32 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
+
+
+_run_event_tail = JsonlEventTail()
+
+
+async def _tail_agent_run_events() -> None:
+    """Poll running-run JSONL sinks and emit ``agent:run_event`` on the bus."""
+    while True:
+        try:
+            if registry is not None and getattr(registry, "db", None):
+                runs = await registry.list_agent_runs(status="running")
+                emit = _get_agent_runtime().emit_event
+                for run in runs:
+                    if not run.run_dir:
+                        continue
+                    await emit_new_run_events(
+                        Path(run.run_dir) / "events.jsonl",
+                        _run_event_tail,
+                        emit,
+                        run.project,
+                        run.id,
+                        run.task_id,
+                    )
+        except Exception:
+            logger.exception("agent run JSONL tail failed")
+        await asyncio.sleep(0.5)
 
 
 async def _broadcast_events():

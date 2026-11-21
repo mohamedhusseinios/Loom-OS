@@ -12,6 +12,7 @@ from daemon.models import (
     AgentSettings, AgentSettingsUpdate, AgentProviderConfig,
     AgentChatRecord, AgentMessageRecord,
     TaskSuggestionRecord, SuggestionStatus,
+    AgentRunRecord,
 )
 from daemon.agent_credentials import (
     DEFAULT_AGENT_PROVIDERS,
@@ -261,6 +262,34 @@ class AgentRegistry:
                 "UPDATE task_suggestions SET legacy_decision_input_tokens = jev_input_tokens"
                 " WHERE legacy_decision_input_tokens IS NULL"
             )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                project TEXT NOT NULL,
+                family_id TEXT NOT NULL DEFAULT 'react',
+                modifier_ids_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL,
+                worktree_path TEXT,
+                run_dir TEXT,
+                step_limit INTEGER NOT NULL DEFAULT 40,
+                token_limit INTEGER NOT NULL DEFAULT 100000,
+                cost_limit REAL NOT NULL DEFAULT 1.0,
+                steps_used INTEGER NOT NULL DEFAULT 0,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                cost_used REAL NOT NULL DEFAULT 0,
+                stop_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id)"
+        )
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_project_status"
+            " ON agent_runs(project, status)"
+        )
         await self.db.commit()
 
     async def close(self):
@@ -1166,5 +1195,97 @@ class AgentRegistry:
             judgment_latency_ms=_opt_float("judgment_latency_ms"),
             effective_thresholds_json=_opt_text("effective_thresholds_json"),
             legacy_decision_input_tokens=_opt_int("legacy_decision_input_tokens"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    async def create_agent_run(self, *, task_id: str, project: str, run_dir: str, worktree_path: str | None = None, family_id: str = "react", modifier_ids_json: str = "[]", status: str = "running", step_limit: int = 40, token_limit: int = 100000, cost_limit: float = 1.0, run_id: str | None = None) -> AgentRunRecord:
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        run_id = run_id or str(uuid.uuid4())
+        await self.db.execute(
+            "INSERT INTO agent_runs (id, task_id, project, family_id, modifier_ids_json, status,"
+            " worktree_path, run_dir, step_limit, token_limit, cost_limit, steps_used, tokens_used,"
+            " cost_used, stop_reason, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, ?)",
+            (
+                run_id, task_id, project, family_id, modifier_ids_json, status,
+                worktree_path, run_dir, step_limit, token_limit, cost_limit, now, now,
+            ),
+        )
+        await self.db.commit()
+        return AgentRunRecord(
+            id=run_id, task_id=task_id, project=project, family_id=family_id,
+            modifier_ids_json=modifier_ids_json, status=status, worktree_path=worktree_path,
+            run_dir=run_dir, step_limit=step_limit, token_limit=token_limit, cost_limit=cost_limit,
+            steps_used=0, tokens_used=0, cost_used=0.0, stop_reason=None,
+            created_at=now, updated_at=now,
+        )
+
+    async def get_agent_run(self, run_id: str) -> AgentRunRecord | None:
+        cursor = await self.db.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_agent_run(row)
+
+    async def list_agent_runs(self, project: str | None = None, task_id: str | None = None, status: str | None = None) -> list[AgentRunRecord]:
+        clauses: list[str] = []
+        params: list = []
+        if project is not None:
+            clauses.append("project = ?")
+            params.append(project)
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        cursor = await self.db.execute(
+            f"SELECT * FROM agent_runs{where} ORDER BY created_at ASC", params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_agent_run(row) for row in rows]
+
+    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None) -> AgentRunRecord | None:
+        current = await self.get_agent_run(run_id)
+        if current is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ["updated_at = ?"]
+        params: list = [now]
+        for name, value in (
+            ("status", status),
+            ("stop_reason", stop_reason),
+            ("steps_used", steps_used),
+            ("tokens_used", tokens_used),
+            ("cost_used", cost_used),
+            ("worktree_path", worktree_path),
+        ):
+            if value is not None:
+                sets.append(f"{name} = ?")
+                params.append(value)
+        params.append(run_id)
+        await self.db.execute(
+            f"UPDATE agent_runs SET {', '.join(sets)} WHERE id = ?", params,
+        )
+        await self.db.commit()
+        return await self.get_agent_run(run_id)
+
+    def _row_to_agent_run(self, row) -> AgentRunRecord:
+        return AgentRunRecord(
+            id=row["id"], task_id=row["task_id"], project=row["project"],
+            family_id=row["family_id"] or "react",
+            modifier_ids_json=row["modifier_ids_json"] or "[]",
+            status=row["status"],
+            worktree_path=row["worktree_path"],
+            run_dir=row["run_dir"] or "",
+            step_limit=int(row["step_limit"] or 0),
+            token_limit=int(row["token_limit"] or 0),
+            cost_limit=float(row["cost_limit"] or 0),
+            steps_used=int(row["steps_used"] or 0),
+            tokens_used=int(row["tokens_used"] or 0),
+            cost_used=float(row["cost_used"] or 0),
+            stop_reason=row["stop_reason"],
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
