@@ -25,7 +25,7 @@ class _FakeSupervisor:
         self._running = set()
         self.stop_calls = []
 
-    def spawn(self, project, agent, project_path, task_id, max_budget_usd=5.0):
+    def spawn(self, project, agent, project_path, task_id, max_budget_usd=5.0, manifest_path=None):
         self.spawned.append((project, agent, project_path, task_id))
         self._running.add(task_id)
 
