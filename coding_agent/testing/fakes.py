@@ -8,6 +8,26 @@ from pathlib import Path
 from coding_agent.ports import CompletedProc
 
 
+class FakeUsageMeter:
+    def __init__(self) -> None:
+        self._input = 0
+        self._output = 0
+        self._cost = 0.0
+
+    def add_tokens(self, input_n: int, output_n: int) -> None:
+        self._input += input_n
+        self._output += output_n
+
+    def tokens_used(self) -> int:
+        return self._input + self._output
+
+    def set_cost_usd(self, amount: float) -> None:
+        self._cost = amount
+
+    def cost_usd(self) -> float:
+        return self._cost
+
+
 class FakeSandbox:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
