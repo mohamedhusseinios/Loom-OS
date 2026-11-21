@@ -15,7 +15,8 @@ def test_loom_agent_always_detected():
     assert installed.get("loom-agent") == "builtin"
 
 
-def test_loom_agent_in_runners():
+def test_loom_agent_in_runners(monkeypatch):
+    monkeypatch.delenv("LOOM_AGENT_MANIFEST", raising=False)
     assert "loom-agent" in runnable_agents()
     spec = RUNNERS["loom-agent"]
     assert spec.mode == "stdout"
@@ -23,6 +24,13 @@ def test_loom_agent_in_runners():
     argv = spec.build_argv("do the thing")
     assert "-m" in argv and "daemon.agent_run" in argv
     assert "--prompt" in argv
+    assert argv[argv.index("--prompt") + 1] == "do the thing"
+
+
+def test_loom_agent_argv_uses_manifest_env(monkeypatch):
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", "/tmp/run/manifest.json")
+    argv = RUNNERS["loom-agent"].build_argv("do the thing")
+    assert argv == ["-m", "daemon.agent_run", "--manifest", "/tmp/run/manifest.json"]
 
 
 def test_agent_run_loads_key_from_settings_db(tmp_path, monkeypatch):

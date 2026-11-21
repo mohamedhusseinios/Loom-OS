@@ -14,6 +14,7 @@ Output modes:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -70,7 +71,11 @@ RUNNERS: dict[str, RunnerSpec] = {
     ),
     "loom-agent": RunnerSpec(
         binary=sys.executable, mode="stdout",
-        build_argv=lambda prompt: ["-m", "daemon.agent_run", "--prompt", prompt],
+        build_argv=lambda prompt: (
+            ["-m", "daemon.agent_run", "--manifest", os.environ["LOOM_AGENT_MANIFEST"]]
+            if os.environ.get("LOOM_AGENT_MANIFEST")
+            else ["-m", "daemon.agent_run", "--prompt", prompt]
+        ),
     ),
 }
 
