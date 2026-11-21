@@ -1,0 +1,1 @@
+"""Extractable coding-agent loop (no daemon imports)."""
