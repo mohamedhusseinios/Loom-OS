@@ -1247,7 +1247,7 @@ class AgentRegistry:
         rows = await cursor.fetchall()
         return [self._row_to_agent_run(row) for row in rows]
 
-    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None) -> AgentRunRecord | None:
+    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None, if_status: str | None = None) -> AgentRunRecord | None:
         current = await self.get_agent_run(run_id)
         if current is None:
             return None
@@ -1266,9 +1266,11 @@ class AgentRegistry:
                 sets.append(f"{name} = ?")
                 params.append(value)
         params.append(run_id)
-        await self.db.execute(
-            f"UPDATE agent_runs SET {', '.join(sets)} WHERE id = ?", params,
-        )
+        sql = f"UPDATE agent_runs SET {', '.join(sets)} WHERE id = ?"
+        if if_status is not None:
+            sql += " AND status = ?"
+            params.append(if_status)
+        await self.db.execute(sql, params)
         await self.db.commit()
         return await self.get_agent_run(run_id)
 

@@ -1,4 +1,5 @@
 """API tests for Loom agent chat, suggest, accept, implement, settings."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import daemon.api as api_module
 import daemon.agent_runtime as agent_runtime_module
-from daemon.agent_runtime import JsonlEventTail, emit_new_run_events
+from daemon.agent_runtime import JsonlEventTail, drain_run_jsonl, emit_new_run_events
 from daemon.graph_engine import GraphEngine
 from daemon.models import AgentInfo, AgentTaskCreatePayload, AgentTaskStatus
 from daemon.orchestrator import SuggestResult
@@ -140,7 +141,7 @@ async def test_implement_creates_run_row_and_manifest(client, tmp_path):
     assert manifest["run_dir"] == str(run_dir)
     assert manifest["cancel_path"] == str(run_dir / "cancel")
     assert manifest["events_path"] == str(run_dir / "events.jsonl")
-    assert os.environ["LOOM_AGENT_MANIFEST"] == str(manifest_path)
+    assert "LOOM_AGENT_MANIFEST" not in os.environ
 
 
 @pytest.mark.asyncio
@@ -157,9 +158,109 @@ async def test_cancel_run_writes_cancel_file(client):
     assert res.status_code == 200
     assert (Path(run.run_dir) / "cancel").is_file()
     updated = await reg.get_agent_run(run.id)
-    assert updated.status == "cancelled"
+    assert updated.status == "cancelling"
     missing = client.post("/api/projects/noor/runs/missing-run/cancel")
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_concurrent_implements_pass_distinct_manifest_env(client, monkeypatch):
+    import daemon.supervisor as sup_mod
+
+    captured = []
+
+    def _factory(cmd, *args, **kwargs):
+        captured.append(kwargs.get("env"))
+        proc = MagicMock()
+        proc.poll.return_value = None
+        return proc
+
+    monkeypatch.setattr(sup_mod.subprocess, "Popen", _factory)
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", "/tmp/stale-manifest.json")
+    api_module.supervisor = sup_mod.WorkerSupervisor()
+    try:
+        reg = api_module.registry
+        task_ids = []
+        for title in ("one", "two"):
+            task_ids.append(await reg.create_agent_task(AgentTaskCreatePayload(
+                project="noor", title=title, instruction=f"do {title}",
+            )))
+        runtime = api_module._get_agent_runtime()
+
+        async def go(task_id):
+            updated, manifest_path = await runtime.implement("noor", task_id)
+            await api_module._route_task_execution("noor", updated, manifest_path=manifest_path)
+            return manifest_path
+
+        paths = await asyncio.gather(go(task_ids[0]), go(task_ids[1]))
+    finally:
+        api_module.supervisor = None
+    assert "LOOM_AGENT_MANIFEST" not in os.environ
+    assert paths[0] != paths[1]
+    spawned = [env["LOOM_AGENT_MANIFEST"] for env in captured]
+    assert sorted(spawned) == sorted(paths)
+    assert "/tmp/stale-manifest.json" not in spawned
+    assert all(Path(path).is_file() for path in spawned)
+
+
+@pytest.mark.asyncio
+async def test_cancel_emits_pending_jsonl_and_later_terminal_event(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Stop late", instruction="loop until cancelled",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    events_path = Path(run.run_dir) / "events.jsonl"
+    events_path.write_text('{"type": "step", "n": 1}\n', encoding="utf-8")
+    seen = []
+
+    async def emit(event, project, data):
+        seen.append((event, project, data))
+
+    api_module._get_agent_runtime().emit_event = emit
+    res = client.post(f"/api/projects/noor/runs/{run.id}/cancel")
+    assert res.status_code == 200
+    assert res.json()["status"] == "cancelling"
+    assert seen == [(
+        "agent:run_event", "noor",
+        {"run_id": run.id, "task_id": tid, "payload": {"type": "step", "n": 1}},
+    )]
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"type": "run.cancelled", "stop_reason": "cancelled"}\n')
+    fresh = await reg.get_agent_run(run.id)
+    await drain_run_jsonl(fresh, api_module._run_event_tail, emit, reg)
+    assert seen[-1][2]["payload"]["type"] == "run.cancelled"
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "cancelled"
+    assert updated.stop_reason == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_drain_terminal_event_marks_run_succeeded(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Finish", instruction="finish the run",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    (Path(run.run_dir) / "events.jsonl").write_text(
+        '{"type": "run.succeeded", "stop_reason": "done"}\n', encoding="utf-8",
+    )
+    seen = []
+
+    async def emit(event, project, data):
+        seen.append(data["payload"]["type"])
+
+    await drain_run_jsonl(run, JsonlEventTail(), emit, reg)
+    assert seen == ["run.succeeded"]
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "succeeded"
+    assert updated.stop_reason == "done"
 
 
 def test_jsonl_tail_reads_only_new_complete_lines(tmp_path):

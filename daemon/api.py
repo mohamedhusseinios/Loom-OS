@@ -29,7 +29,7 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, emit_new_run_events
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, drain_run_jsonl
 from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -710,7 +710,7 @@ def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
         f.write(payload.model_dump_json())
 
 
-async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+async def _route_task_execution(project_id: str, task: AgentTaskRecord, manifest_path: str | None = None) -> bool:
     """Route a Running task by assignee. Returns True if execution was started."""
     if not task.assignee:
         return False
@@ -721,8 +721,10 @@ async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
         project = await registry.get_project(project_id)
         if project is None:
             return False
-        supervisor.spawn(project_id, agent, project.project_path, task.id,
-                         WORKER_MAX_BUDGET_USD)
+        supervisor.spawn(
+            project_id, agent, project.project_path, task.id,
+            WORKER_MAX_BUDGET_USD, manifest_path=manifest_path,
+        )
         if router:
             await router._emit_event("worker:started", project_id, {"id": task.id})
         return True
@@ -1008,13 +1010,13 @@ async def implement_task(project_id: str, task_id: str):
         pass
 
     try:
-        updated = await _get_agent_runtime().implement(
+        updated, manifest_path = await _get_agent_runtime().implement(
             project_id, task_id, spawn_worker=_spawn,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     if updated:
-        await _route_task_execution(project_id, updated)
+        await _route_task_execution(project_id, updated, manifest_path=manifest_path)
     return updated.model_dump() if updated else {}
 
 
@@ -1024,7 +1026,7 @@ async def cancel_agent_run(project_id: str, run_id: str):
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     try:
-        run = await _get_agent_runtime().cancel_run(project_id, run_id)
+        run = await _get_agent_runtime().cancel_run(project_id, run_id, tail=_run_event_tail)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return run.model_dump(mode="json") if run else {}
@@ -1448,23 +1450,18 @@ _run_event_tail = JsonlEventTail()
 
 
 async def _tail_agent_run_events() -> None:
-    """Poll running-run JSONL sinks and emit ``agent:run_event`` on the bus."""
+    """Poll open-run JSONL sinks and emit ``agent:run_event`` on the bus."""
     while True:
         try:
             if registry is not None and getattr(registry, "db", None):
-                runs = await registry.list_agent_runs(status="running")
-                emit = _get_agent_runtime().emit_event
+                runtime = _get_agent_runtime()
+                runs = []
+                for status in ("running", "cancelling"):
+                    runs.extend(await registry.list_agent_runs(status=status))
                 for run in runs:
                     if not run.run_dir:
                         continue
-                    await emit_new_run_events(
-                        Path(run.run_dir) / "events.jsonl",
-                        _run_event_tail,
-                        emit,
-                        run.project,
-                        run.id,
-                        run.task_id,
-                    )
+                    await drain_run_jsonl(run, _run_event_tail, runtime.emit_event, registry)
         except Exception:
             logger.exception("agent run JSONL tail failed")
         await asyncio.sleep(0.5)

@@ -19,8 +19,7 @@ class WorkerSupervisor:
     def __init__(self) -> None:
         self._procs: dict[str, subprocess.Popen] = {}
 
-    def spawn(self, project: str, agent: str, project_path: str,
-              task_id: str, max_budget_usd: float = 5.0) -> None:
+    def spawn(self, project: str, agent: str, project_path: str, task_id: str, max_budget_usd: float = 5.0, manifest_path: str | None = None) -> None:
         """Launch a one-shot worker for a single task. No-op if already live."""
         if self.is_running(task_id):
             return
@@ -34,14 +33,17 @@ class WorkerSupervisor:
         logger.info("spawning one-shot worker for task %s", task_id)
         env = None
         if agent == "loom-agent":
-            env = self._loom_agent_env()
+            env = self._loom_agent_env(manifest_path)
         self._procs[task_id] = subprocess.Popen(cmd, env=env)
 
     @staticmethod
-    def _loom_agent_env() -> dict[str, str]:
-        """Pass dashboard BYOK keys into the loom-agent worker process."""
+    def _loom_agent_env(manifest_path: str | None = None) -> dict[str, str]:
+        """Pass BYOK keys and this run's manifest into one worker process."""
         import os
         env = os.environ.copy()
+        env.pop("LOOM_AGENT_MANIFEST", None)
+        if manifest_path:
+            env["LOOM_AGENT_MANIFEST"] = manifest_path
         try:
             from daemon.agent_run import load_llm_config_from_settings
             api_key, base_url, model = load_llm_config_from_settings()

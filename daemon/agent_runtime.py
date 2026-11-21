@@ -84,6 +84,38 @@ async def emit_new_run_events(path: Path, tail: JsonlEventTail, emit_event, proj
     return len(events)
 
 
+_TERMINAL_STATUS = {
+    "run.succeeded": "succeeded",
+    "run.failed": "failed",
+    "run.cancelled": "cancelled",
+}
+_OPEN_RUN_STATUSES = ("running", "cancelling")
+
+
+def _terminal_status(events: list[dict]) -> tuple[str, str] | None:
+    found = None
+    for payload in events:
+        status = _TERMINAL_STATUS.get(payload.get("type"))
+        if status:
+            found = (status, str(payload.get("stop_reason") or status))
+    return found
+
+
+async def drain_run_jsonl(run, tail: JsonlEventTail, emit_event, registry) -> list[dict]:
+    """Emit new JSONL lines. A terminal event closes a running or cancelling row."""
+    events = tail.poll(Path(run.run_dir) / "events.jsonl")
+    for payload in events:
+        if emit_event:
+            await emit_event("agent:run_event", run.project, {
+                "run_id": run.id, "task_id": run.task_id, "payload": payload,
+            })
+    terminal = _terminal_status(events)
+    if terminal is not None and run.status in _OPEN_RUN_STATUSES:
+        status, reason = terminal
+        await registry.update_agent_run(run.id, status=status, stop_reason=reason)
+    return events
+
+
 class AgentRuntime:
     def __init__(self, registry, graph_engine, emit_event=None):
         self.registry = registry
@@ -245,16 +277,17 @@ class AgentRuntime:
             project=project_id,
             capabilities=["chat", "implement", "orchestration"],
         ))
+        manifest_path = None
         updated = await self.registry.get_agent_task(task_id)
         if updated:
-            await self._open_coding_run(project_id, updated)
+            manifest_path = await self._open_coding_run(project_id, updated)
         if spawn_worker and updated:
             spawn_worker(updated)
         if self.emit_event and updated:
             await self.emit_event("task:updated", project_id, updated.model_dump(mode="json"))
-        return updated
+        return updated, manifest_path
 
-    async def _open_coding_run(self, project_id: str, task):
+    async def _open_coding_run(self, project_id: str, task) -> str:
         run_id = str(uuid.uuid4())
         run_dir = loom_run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -277,22 +310,29 @@ class AgentRuntime:
         }
         manifest_path = run_dir / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        os.environ["LOOM_AGENT_MANIFEST"] = str(manifest_path)
+        # Manifest belongs to the worker spawn env, never the daemon process.
+        os.environ.pop("LOOM_AGENT_MANIFEST", None)
         await self.registry.create_agent_run(
             task_id=task.id, project=project_id, run_dir=str(run_dir),
             worktree_path=task.workspace_path, family_id="react", modifier_ids_json="[]",
             status="running", step_limit=DEFAULT_STEP_LIMIT, token_limit=DEFAULT_TOKEN_LIMIT,
             cost_limit=DEFAULT_COST_LIMIT_USD, run_id=run_id,
         )
+        return str(manifest_path)
 
-    async def cancel_run(self, project_id: str, run_id: str):
+    async def cancel_run(self, project_id: str, run_id: str, tail: JsonlEventTail | None = None):
         run = await self.registry.get_agent_run(run_id)
         if run is None or run.project != project_id:
             raise LookupError("run not found")
         flag = Path(run.run_dir) / "cancel"
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text("cancelled\n", encoding="utf-8")
-        return await self.registry.update_agent_run(run_id, status="cancelled", stop_reason="cancelled")
+        await drain_run_jsonl(run, tail or JsonlEventTail(), self.emit_event, self.registry)
+        fresh = await self.registry.get_agent_run(run_id)
+        if fresh and fresh.status in _TERMINAL_STATUS.values():
+            return fresh
+        # Stay visible to the JSONL tail until the worker writes run.cancelled.
+        return await self.registry.update_agent_run(run_id, status="cancelling", if_status="running")
 
 
 def _suggestion_fields(result: SuggestResult) -> dict:
