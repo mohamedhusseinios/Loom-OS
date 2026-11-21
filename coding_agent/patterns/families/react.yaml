@@ -1,0 +1,41 @@
+id: react
+name: ReAct
+kind: family
+schema_version: 1
+version: 1
+status: active
+description: >
+  Reason-and-act loop. The model reads the task and the latest observation,
+  chooses one allowed tool or stops, then repeats until the task is done or
+  a stop condition fires.
+when_to_use:
+  - Short, well-scoped code changes with interleaved reads and edits
+  - Default coding loop when no stronger family fits
+  - Bugs that can be chased one observation at a time
+anti_criteria:
+  - The task must be split across multiple worker agents
+  - A written plan has to be approved before any edit
+  - The task is research or explanation with no code change
+steps:
+  - id: observe
+    description: Read the task, context pack, and the latest tool result.
+  - id: think
+    description: Decide the next single tool call, or that the task is finished.
+  - id: act
+    description: Run one allowed tool and record the observation.
+allowed_tools:
+  - read_file
+  - edit
+  - search
+  - shell
+  - git_status
+  - git_diff
+  - git_log
+  - git_add
+  - git_commit
+  - test
+  - lint
+required_capabilities: []
+expected_cost_class: Med
+expected_steps: "1-40"
+runner: react
