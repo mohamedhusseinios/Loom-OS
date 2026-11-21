@@ -22,6 +22,7 @@ class TurnResult:
 class RunOutcome:
     status: RunStatus
     stop_reason: str
+    error: str = ""
 
 
 @runtime_checkable

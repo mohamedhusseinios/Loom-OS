@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from coding_agent.ports import Sandbox
+from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S
 
 SHELL_ALLOWLIST = frozenset({"pytest", "python", "python3", "npm", "npx", "ruff", "mypy", "git"})
 
@@ -54,7 +55,7 @@ def shell(sandbox: Sandbox, argv: list[str]) -> dict:
     if blocked is not None:
         return blocked
     try:
-        proc = sandbox.run(list(argv))
+        proc = sandbox.run(list(argv), timeout_s=DEFAULT_COMMAND_TIMEOUT_S)
     except OSError as exc:
         return {"ok": False, "need_approval": False, "reason": "spawn_failed", "stderr": str(exc)}
     return {

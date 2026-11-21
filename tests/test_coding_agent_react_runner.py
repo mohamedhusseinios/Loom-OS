@@ -8,7 +8,7 @@ from pathlib import Path
 from coding_agent.events import JsonlEventSink
 from coding_agent.ports import LlmPort, LlmReply
 from coding_agent.runners.base import PatternRunner
-from coding_agent.runners.react import ReactRunner
+from coding_agent.runners.react import TOOL_NAMES, ReactRunner, _SYSTEM
 from coding_agent.session import RunSession
 from coding_agent.testing.fakes import FakeSandbox, FakeUsageMeter
 
@@ -180,3 +180,70 @@ def test_invalid_action_json_fails_without_another_llm_call(tmp_path: Path) -> N
     assert outcome.stop_reason == "invalid_action"
     assert llm.calls == 1
     assert _events(tmp_path)[-1] == {"type": "run.failed", "stop_reason": "invalid_action"}
+
+
+def test_system_prompt_names_dispatch_tools() -> None:
+    assert TOOL_NAMES == ("read_file", "edit", "search", "shell", "git", "run_tests", "run_lint")
+    for name in TOOL_NAMES:
+        assert name in _SYSTEM
+    assert "git_status" not in _SYSTEM
+    assert "git_diff" not in _SYSTEM
+    assert '"tool": string or null' in _SYSTEM
+
+
+def test_llm_exception_emits_run_failed(tmp_path: Path) -> None:
+    class _Boom:
+        def chat(self, messages: list[dict], *, model: str) -> LlmReply:
+            raise RuntimeError("llm down")
+
+    outcome = ReactRunner().run(_session(tmp_path, _Boom()))
+
+    assert outcome.status == "failed"
+    assert outcome.stop_reason == "llm_error"
+    event = _events(tmp_path)[-1]
+    assert event["type"] == "run.failed"
+    assert event["stop_reason"] == "llm_error"
+    assert "llm down" in event["error"]
+
+
+def test_tool_exception_emits_run_failed(tmp_path: Path) -> None:
+    llm = ScriptedLlm([_action("read", "read_file", {"path": "missing.txt"})])
+    session = _session(tmp_path, llm)
+
+    def _boom(name: str, args: dict) -> dict:
+        raise RuntimeError("tool blew up")
+
+    session.dispatch_tool = _boom  # type: ignore[method-assign]
+    outcome = ReactRunner().run(session)
+
+    assert outcome.status == "failed"
+    assert outcome.stop_reason == "tool_error"
+    assert llm.calls == 1
+    event = _events(tmp_path)[-1]
+    assert event["type"] == "run.failed"
+    assert event["stop_reason"] == "tool_error"
+
+
+def test_cancel_during_shell_emits_cancelled_without_another_llm(tmp_path: Path) -> None:
+    import time
+
+    llm = ScriptedLlm([
+        _action("sleep", "shell", {"argv": ["python3", "-c", "import time; time.sleep(30)"]}),
+        _action("should not run", None, done=True),
+    ])
+    session = _session(tmp_path, llm)
+    real_run = session.sandbox.run
+
+    def run(argv: list[str], *, timeout_s: float | None = None):
+        session.request_cancel()
+        return real_run(argv, timeout_s=timeout_s)
+
+    session.sandbox.run = run  # type: ignore[method-assign]
+    started = time.monotonic()
+    outcome = ReactRunner().run(session)
+
+    assert outcome.status == "cancelled"
+    assert outcome.stop_reason == "cancelled"
+    assert llm.calls == 1
+    assert time.monotonic() - started < 5
+    assert _events(tmp_path)[-1] == {"type": "run.cancelled", "stop_reason": "cancelled"}

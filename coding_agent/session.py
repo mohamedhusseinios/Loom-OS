@@ -42,6 +42,9 @@ class RunSession:
         self.cost_limit_usd = float(manifest.get("cost_limit_usd", DEFAULT_COST_LIMIT_USD))
         self.steps_used = 0
         self._cancel_requested = False
+        bind_cancel = getattr(sandbox, "bind_cancel", None)
+        if callable(bind_cancel):
+            bind_cancel(self.cancel_pending)
 
     def record_step(self) -> None:
         self.steps_used += 1
@@ -63,8 +66,11 @@ class RunSession:
             return False
         return path.is_file()
 
+    def cancel_pending(self) -> bool:
+        return self._cancel_requested or self.poll_cancel_file()
+
     def check_can_continue(self) -> None:
-        if self._cancel_requested or self.poll_cancel_file():
+        if self.cancel_pending():
             raise RunCancelled("cancelled")
         if self.steps_used >= self.step_limit:
             raise BudgetExceeded("step")

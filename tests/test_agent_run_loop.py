@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from daemon.agent_run import main
+from daemon.coding_adapters import WorktreeSandbox
+from daemon.llm_client import LlmError
 
 
 def _done_action() -> str:
@@ -103,3 +105,53 @@ def test_manifest_and_prompt_runs_loop(tmp_path: Path, monkeypatch) -> None:
     assert seen == ["from cli"]
     lines = (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[-1])["type"] == "run.succeeded"
+
+
+def test_llm_error_emits_run_failed(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(tmp_path)
+
+    def fake_chat(self, messages, model="deepseek-chat"):
+        raise LlmError("no key")
+
+    monkeypatch.setattr("daemon.llm_client.LlmClient.chat", fake_chat)
+    code = main(["--manifest", str(manifest_path)])
+
+    assert code == 1
+    last = json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.failed"
+    assert last["stop_reason"] == "llm_error"
+
+
+def test_unexpected_runner_error_emits_worker_exit(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(tmp_path)
+
+    def boom(self, session):
+        raise RuntimeError("runner crashed")
+
+    monkeypatch.setattr("daemon.agent_run.ReactRunner.run", boom)
+    code = main(["--manifest", str(manifest_path)])
+
+    assert code == 1
+    last = json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last == {"type": "run.failed", "stop_reason": "worker_exit"}
+
+
+def test_worktree_sandbox_kills_child_on_cancel(tmp_path: Path) -> None:
+    import sys
+    import threading
+    import time
+
+    state = {"cancel": False}
+    sandbox = WorktreeSandbox(tmp_path, cancel=lambda: state["cancel"], command_timeout_s=10)
+
+    def _flip() -> None:
+        time.sleep(0.15)
+        state["cancel"] = True
+
+    threading.Thread(target=_flip, daemon=True).start()
+    started = time.monotonic()
+    proc = sandbox.run([sys.executable, "-c", "import time; time.sleep(30)"])
+
+    assert time.monotonic() - started < 5
+    assert proc.returncode != 0
+    assert "cancelled" in proc.stderr

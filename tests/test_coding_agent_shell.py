@@ -9,6 +9,7 @@ from coding_agent.events import JsonlEventSink
 from coding_agent.session import RunSession
 from coding_agent.testing.fakes import FakeSandbox, FakeUsageMeter
 from coding_agent.tools.git_tools import git_add, git_commit, git_diff, git_log, git_status
+from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S
 from coding_agent.tools.shell import SHELL_ALLOWLIST, shell
 from coding_agent.tools.test_lint import run_lint, run_tests
 
@@ -208,6 +209,23 @@ def test_git_tool_push_rejected(tmp_path: Path) -> None:
     result = session.dispatch_tool("git", {"subcommand": "push"})
 
     assert result == {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
+
+
+def test_shell_tests_and_lint_pass_default_timeout(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    seen: list[float | None] = []
+    real_run = sandbox.run
+
+    def run(argv: list[str], *, timeout_s: float | None = None):
+        seen.append(timeout_s)
+        return real_run(argv, timeout_s=0.01 if argv[:2] == ["python3", "-c"] else timeout_s)
+
+    sandbox.run = run  # type: ignore[method-assign]
+    shell(sandbox, ["python3", "-c", "print(1)"])
+    run_tests(sandbox, {"test_command": ["python3", "-c", "print(1)"]})
+    run_lint(sandbox, {"lint_command": ["python3", "-c", "print(1)"]})
+
+    assert seen == [DEFAULT_COMMAND_TIMEOUT_S, DEFAULT_COMMAND_TIMEOUT_S, DEFAULT_COMMAND_TIMEOUT_S]
 
 
 def test_run_tests_and_run_lint_use_manifest_commands(tmp_path: Path) -> None:

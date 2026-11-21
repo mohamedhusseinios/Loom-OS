@@ -18,6 +18,19 @@ logger = logging.getLogger("loom.supervisor")
 class WorkerSupervisor:
     def __init__(self) -> None:
         self._procs: dict[str, subprocess.Popen] = {}
+        self._exited: set[str] = set()
+
+    def _note_exit(self, task_id: str) -> None:
+        self._procs.pop(task_id, None)
+        self._exited.add(task_id)
+
+    def exited_task_ids(self) -> set[str]:
+        for task_id in list(self._procs):
+            self.is_running(task_id)
+        return set(self._exited)
+
+    def forget_exited(self, task_ids: set[str]) -> None:
+        self._exited.difference_update(task_ids)
 
     def spawn(self, project: str, agent: str, project_path: str, task_id: str, max_budget_usd: float = 5.0, manifest_path: str | None = None) -> None:
         """Launch a one-shot worker for a single task. No-op if already live."""
@@ -64,7 +77,7 @@ class WorkerSupervisor:
             return False
         if proc.poll() is None:
             return True
-        self._procs.pop(task_id, None)  # exited — reap
+        self._note_exit(task_id)
         return False
 
     def running_ids(self) -> list[str]:
@@ -73,8 +86,10 @@ class WorkerSupervisor:
     def stop(self, task_id: str) -> bool:
         """Terminate a live worker. Returns True if one was running."""
         proc = self._procs.get(task_id)
-        if proc is None or proc.poll() is not None:
-            self._procs.pop(task_id, None)
+        if proc is None:
+            return False
+        if proc.poll() is not None:
+            self._note_exit(task_id)
             return False
         proc.terminate()
         try:
@@ -82,5 +97,5 @@ class WorkerSupervisor:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        self._procs.pop(task_id, None)
+        self._note_exit(task_id)
         return True

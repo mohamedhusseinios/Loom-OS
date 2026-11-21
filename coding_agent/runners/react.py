@@ -8,9 +8,21 @@ from typing import Any
 from coding_agent.runners.base import RunOutcome, RunStatus, TurnResult
 from coding_agent.session import BudgetExceeded, RunCancelled, RunSession
 
+TOOL_NAMES = ("read_file", "edit", "search", "shell", "git", "run_tests", "run_lint")
+
 _SYSTEM = (
-    "Reply with one JSON object and nothing else: "
-    '{"thought": string, "tool": string or null, "args": object, "done": boolean}.'
+    "You are a coding agent. Available tools: "
+    + ", ".join(TOOL_NAMES)
+    + ". Reply with one JSON object and nothing else: "
+    '{"thought": string, "tool": string or null, "args": object, "done": boolean}. '
+    "tool must be one of read_file, edit, search, shell, git, run_tests, run_lint, or null. "
+    "args by tool: "
+    'read_file {"path": string}; '
+    'edit {"path": string, "search": string, "replace": string}; '
+    'search {"query": string, "path": string}; '
+    'shell {"argv": list of strings}; '
+    'git {"subcommand": "status"|"diff"|"log"|"add"|"commit", "paths": list of strings, "message": string}; '
+    "run_tests {}; run_lint {}."
 )
 
 _EVENT_TYPE = {
@@ -31,7 +43,12 @@ class ReactRunner:
             except RunCancelled as exc:
                 return _finish(session, "cancelled", exc.reason)
 
-            reply = session.llm.chat(messages, model=_model(session))
+            try:
+                reply = session.llm.chat(messages, model=_model(session))
+            except AssertionError:
+                raise
+            except Exception as exc:
+                return _finish(session, "failed", "llm_error", error=str(exc))
             session.meter.add_tokens(reply.input_tokens, reply.output_tokens)
             session.record_step()
             try:
@@ -49,7 +66,12 @@ class ReactRunner:
             )
             result: dict[str, Any] | None = None
             if action.tool:
-                result = session.dispatch_tool(action.tool, action.args)
+                try:
+                    result = session.dispatch_tool(action.tool, action.args)
+                except AssertionError:
+                    raise
+                except Exception as exc:
+                    return _finish(session, "failed", "tool_error", error=str(exc))
                 session.events.emit({"type": "tool.result", "tool": action.tool, "result": result})
             if action.done:
                 return _finish(session, "succeeded", "done")
@@ -104,6 +126,9 @@ def _observation(tool: str | None, result: dict[str, Any] | None) -> str:
     return json.dumps({"tool": tool, "result": result}, ensure_ascii=False)
 
 
-def _finish(session: RunSession, status: RunStatus, stop_reason: str) -> RunOutcome:
-    session.events.emit({"type": _EVENT_TYPE[status], "stop_reason": stop_reason})
-    return RunOutcome(status=status, stop_reason=stop_reason)
+def _finish(session: RunSession, status: RunStatus, stop_reason: str, error: str = "") -> RunOutcome:
+    event: dict[str, Any] = {"type": _EVENT_TYPE[status], "stop_reason": stop_reason}
+    if error:
+        event["error"] = error
+    session.events.emit(event)
+    return RunOutcome(status=status, stop_reason=stop_reason, error=error)

@@ -50,7 +50,10 @@ requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["daemon*"]
+include = ["daemon*", "coding_agent*"]
+
+[tool.setuptools.package-data]
+coding_agent = ["patterns/families/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

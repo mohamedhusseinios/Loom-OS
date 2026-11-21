@@ -53,7 +53,9 @@ def test_builtin_react_loads_as_active_family() -> None:
     assert doc.when_to_use
     assert doc.anti_criteria
     assert doc.steps
-    assert "read_file" in doc.allowed_tools
+    assert doc.allowed_tools == [
+        "read_file", "edit", "search", "shell", "git", "run_tests", "run_lint",
+    ]
     assert doc.expected_cost_class == "Med"
     assert doc.runner == "react"
 

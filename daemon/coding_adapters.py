@@ -7,18 +7,25 @@ and a context stub.
 
 from __future__ import annotations
 
-import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from coding_agent.ports import CompletedProc, LlmReply
+from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S, TrackedProcess
 from daemon.llm_client import LlmClient
 
 
 class WorktreeSandbox:
     """Sandbox whose root is the worker worktree (typically the process cwd)."""
 
-    def __init__(self, root: Path | str | None = None) -> None:
+    def __init__(self, root: Path | str | None = None, *, cancel: Callable[[], bool] | None = None, command_timeout_s: float | None = DEFAULT_COMMAND_TIMEOUT_S) -> None:
         self._root = Path(root if root is not None else Path.cwd()).resolve()
+        self._tracked = TrackedProcess()
+        self._cancel = cancel
+        self._command_timeout_s = command_timeout_s
+
+    def bind_cancel(self, cancel: Callable[[], bool] | None) -> None:
+        self._cancel = cancel
 
     def root(self) -> Path:
         return self._root
@@ -38,18 +45,11 @@ class WorktreeSandbox:
         path.write_text(content, encoding="utf-8")
 
     def run(self, argv: list[str], *, timeout_s: float | None = None) -> CompletedProc:
-        completed = subprocess.run(
-            argv,
-            cwd=self._root,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-        return CompletedProc(
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-        )
+        limit = self._command_timeout_s if timeout_s is None else timeout_s
+        return self._tracked.run(list(argv), self._root, timeout_s=limit, cancel=self._cancel)
+
+    def terminate(self) -> None:
+        self._tracked.terminate()
 
 
 class LlmClientAdapter:

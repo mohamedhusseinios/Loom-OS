@@ -145,6 +145,50 @@ async def test_implement_creates_run_row_and_manifest(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_implement_manifest_includes_acceptance_criteria(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Ship loop", instruction="add the cancel flag",
+        acceptance_criteria="flag file exists",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["prompt"] == "add the cancel flag\n\nAcceptance criteria:\nflag file exists"
+
+
+@pytest.mark.asyncio
+async def test_exited_worker_seals_run_failed(client):
+    from daemon.supervisor import WorkerSupervisor
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Die early", instruction="never finishes",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    supervisor = WorkerSupervisor()
+    supervisor._exited.add(tid)
+    api_module.supervisor = supervisor
+    try:
+        sealed = await agent_runtime_module.seal_exited_worker_runs(
+            reg, supervisor, None, JsonlEventTail(),
+        )
+    finally:
+        api_module.supervisor = None
+    assert sealed == 1
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "failed"
+    assert updated.stop_reason == "worker_exit"
+    last = json.loads((Path(run.run_dir) / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last == {"type": "run.failed", "stop_reason": "worker_exit"}
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_writes_cancel_file(client):
     reg = api_module.registry
     tid = await reg.create_agent_task(AgentTaskCreatePayload(

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from coding_agent.ports import CompletedProc
+from coding_agent.proc_run import TrackedProcess
 
 
 class FakeUsageMeter:
@@ -29,8 +30,13 @@ class FakeUsageMeter:
 
 
 class FakeSandbox:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, cancel: Callable[[], bool] | None = None) -> None:
         self._root = root.resolve()
+        self._tracked = TrackedProcess()
+        self._cancel = cancel
+
+    def bind_cancel(self, cancel: Callable[[], bool] | None) -> None:
+        self._cancel = cancel
 
     def root(self) -> Path:
         return self._root
@@ -50,15 +56,7 @@ class FakeSandbox:
         path.write_text(content, encoding="utf-8")
 
     def run(self, argv: list[str], *, timeout_s: float | None = None) -> CompletedProc:
-        completed = subprocess.run(
-            argv,
-            cwd=self._root,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-        return CompletedProc(
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-        )
+        return self._tracked.run(list(argv), self._root, timeout_s=timeout_s, cancel=self._cancel)
+
+    def terminate(self) -> None:
+        self._tracked.terminate()

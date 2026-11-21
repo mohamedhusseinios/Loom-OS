@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from coding_agent.ports import CompletedProc, Sandbox
+from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S
 
 
 def run_tests(sandbox: Sandbox, manifest: dict) -> dict:
@@ -18,7 +19,7 @@ def _run_manifest_command(sandbox: Sandbox, manifest: dict, key: str, missing_re
     if not isinstance(argv, list) or not argv or not all(isinstance(part, str) for part in argv):
         return {"ok": False, "need_approval": False, "reason": missing_reason}
     try:
-        proc = sandbox.run(list(argv))
+        proc = sandbox.run(list(argv), timeout_s=DEFAULT_COMMAND_TIMEOUT_S)
     except OSError as exc:
         return {"ok": False, "need_approval": False, "reason": "spawn_failed", "stderr": str(exc)}
     return _from_proc(proc)

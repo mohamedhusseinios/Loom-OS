@@ -101,6 +101,44 @@ def _terminal_status(events: list[dict]) -> tuple[str, str] | None:
     return found
 
 
+def _manifest_prompt(instruction: str, criteria: str) -> str:
+    text = instruction or ""
+    if criteria:
+        return f"{text}\n\nAcceptance criteria:\n{criteria}"
+    return text
+
+
+async def seal_exited_worker_runs(registry, supervisor, emit_event, tail: JsonlEventTail) -> int:
+    """Write a terminal JSONL event for open runs whose worker has already exited."""
+    if supervisor is None or not hasattr(supervisor, "exited_task_ids"):
+        return 0
+    exited = set(supervisor.exited_task_ids())
+    if not exited:
+        return 0
+    from daemon.agent_run import ensure_terminal_event, seal_manifest_run
+
+    sealed = 0
+    for status in _OPEN_RUN_STATUSES:
+        for run in await registry.list_agent_runs(status=status):
+            if run.task_id not in exited or not run.run_dir:
+                continue
+            manifest = Path(run.run_dir) / "manifest.json"
+            if manifest.is_file():
+                seal_manifest_run(str(manifest))
+            else:
+                ensure_terminal_event(Path(run.run_dir) / "events.jsonl", "run.failed", "worker_exit")
+            await drain_run_jsonl(run, tail, emit_event, registry)
+            sealed += 1
+    if hasattr(supervisor, "forget_exited"):
+        still: set[str] = set()
+        for status in _OPEN_RUN_STATUSES:
+            for run in await registry.list_agent_runs(status=status):
+                if run.task_id in exited:
+                    still.add(run.task_id)
+        supervisor.forget_exited(exited - still)
+    return sealed
+
+
 async def drain_run_jsonl(run, tail: JsonlEventTail, emit_event, registry) -> list[dict]:
     """Emit new JSONL lines. A terminal event closes a running or cancelling row."""
     events = tail.poll(Path(run.run_dir) / "events.jsonl")
@@ -300,7 +338,7 @@ class AgentRuntime:
             "token_limit": DEFAULT_TOKEN_LIMIT,
             "cost_limit": DEFAULT_COST_LIMIT_USD,
             "cost_limit_usd": DEFAULT_COST_LIMIT_USD,
-            "prompt": task.instruction,
+            "prompt": _manifest_prompt(task.instruction, getattr(task, "acceptance_criteria", "") or ""),
             "cancel_path": str(cancel_path),
             "run_dir": str(run_dir),
             "events_path": str(events_path),

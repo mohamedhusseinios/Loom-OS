@@ -29,7 +29,7 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, drain_run_jsonl
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, drain_run_jsonl, seal_exited_worker_runs
 from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -1462,6 +1462,7 @@ async def _tail_agent_run_events() -> None:
                     if not run.run_dir:
                         continue
                     await drain_run_jsonl(run, _run_event_tail, runtime.emit_event, registry)
+                await seal_exited_worker_runs(registry, supervisor, runtime.emit_event, _run_event_tail)
         except Exception:
             logger.exception("agent run JSONL tail failed")
         await asyncio.sleep(0.5)

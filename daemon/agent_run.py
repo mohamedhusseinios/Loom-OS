@@ -66,6 +66,50 @@ def _events_path(manifest: dict, manifest_file: Path) -> Path:
     return manifest_file.parent / "events.jsonl"
 
 
+_TERMINAL_TYPES = frozenset({"run.succeeded", "run.failed", "run.cancelled"})
+
+
+def events_have_terminal(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("type") in _TERMINAL_TYPES:
+            return True
+    return False
+
+
+def ensure_terminal_event(path: Path, event_type: str, stop_reason: str) -> bool:
+    """Append a terminal event when the JSONL sink does not already have one."""
+    if event_type not in _TERMINAL_TYPES or events_have_terminal(path):
+        return False
+    JsonlEventSink(path).emit({"type": event_type, "stop_reason": stop_reason})
+    return True
+
+
+def seal_manifest_run(manifest_path: str, *, stop_reason: str = "worker_exit") -> None:
+    """Close a manifest run that exited without a terminal JSONL event."""
+    manifest_file = Path(manifest_path)
+    try:
+        loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(loaded, dict):
+        return
+    events_path = _events_path(loaded, manifest_file)
+    cancel_path = loaded.get("cancel_path")
+    if isinstance(cancel_path, str) and cancel_path and Path(cancel_path).is_file():
+        ensure_terminal_event(events_path, "run.cancelled", "cancelled")
+        return
+    ensure_terminal_event(events_path, "run.failed", stop_reason)
+
+
 def _worktree_root(manifest: dict) -> Path:
     for key in ("worktree", "worktree_path"):
         value = manifest.get(key)
@@ -95,20 +139,25 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
     if not manifest.get("model"):
         manifest["model"] = resolved_model
 
-    client = LlmClient(api_key=api_key, base_url=base_url)
-    session = RunSession(
-        manifest,
-        WorktreeSandbox(_worktree_root(manifest)),
-        JsonlEventSink(_events_path(manifest, manifest_file)),
-        LlmClientAdapter(client),
-        SimpleUsageMeter(),
-        StubContextSource(),
-    )
+    events_path = _events_path(manifest, manifest_file)
     try:
+        client = LlmClient(api_key=api_key, base_url=base_url)
+        session = RunSession(
+            manifest,
+            WorktreeSandbox(_worktree_root(manifest)),
+            JsonlEventSink(events_path),
+            LlmClientAdapter(client),
+            SimpleUsageMeter(),
+            StubContextSource(),
+        )
         outcome = ReactRunner().run(session)
-    except LlmError as exc:
+    except Exception as exc:
+        reason = "llm_error" if isinstance(exc, LlmError) else "worker_exit"
+        ensure_terminal_event(events_path, "run.failed", reason)
         print(str(exc), file=sys.stderr)
         return 1
+    if outcome.error:
+        print(outcome.error, file=sys.stderr)
     print(f"{outcome.status}: {outcome.stop_reason}")
     return 0 if outcome.status == "succeeded" else 1
 

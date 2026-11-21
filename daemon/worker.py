@@ -16,6 +16,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 
+from daemon.agent_run import seal_manifest_run
 from daemon.worktree import create_worktree, commit_all, current_branch
 from daemon.runners import AgentResult, RUNNERS, run_stdout
 
@@ -175,6 +176,15 @@ class Worker:
             )
 
     def process_task(self, task: dict) -> None:
+        try:
+            self._run_process_task(task)
+        finally:
+            if self.agent == "loom-agent":
+                manifest = os.environ.get("LOOM_AGENT_MANIFEST")
+                if manifest:
+                    seal_manifest_run(manifest)
+
+    def _run_process_task(self, task: dict) -> None:
         task_id = task["id"]
         title = task.get("title", "")
         instruction = task.get("instruction", "")

@@ -28,13 +28,9 @@ allowed_tools:
   - edit
   - search
   - shell
-  - git_status
-  - git_diff
-  - git_log
-  - git_add
-  - git_commit
-  - test
-  - lint
+  - git
+  - run_tests
+  - run_lint
 required_capabilities: []
 expected_cost_class: Med
 expected_steps: "1-40"
