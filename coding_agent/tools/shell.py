@@ -1,4 +1,4 @@
-"""Allowlisted shell commands. Anything else needs approval and is not run."""
+"""Allowlisted shell commands. Git runs only an allowlisted subcommand."""
 
 from __future__ import annotations
 
@@ -6,7 +6,45 @@ from coding_agent.ports import Sandbox
 
 SHELL_ALLOWLIST = frozenset({"pytest", "python", "python3", "npm", "npx", "ruff", "mypy", "git"})
 
-_GIT_OPTIONS_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"})
+_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "add", "commit", "rev-parse"})
+
+_GIT_VALUE_OPTIONS = frozenset({
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--config-env",
+    "--shallow-file",
+    "--attr-source",
+})
+
+_GIT_FLAG_OPTIONS = frozenset({
+    "-h",
+    "-p",
+    "-P",
+    "-v",
+    "--help",
+    "--version",
+    "--paginate",
+    "--no-pager",
+    "--bare",
+    "--no-replace-objects",
+    "--no-lazy-fetch",
+    "--no-optional-locks",
+    "--no-advice",
+    "--html-path",
+    "--man-path",
+    "--info-path",
+    "--literal-pathspecs",
+    "--glob-pathspecs",
+    "--noglob-pathspecs",
+    "--icase-pathspecs",
+    "--exec-path",
+})
+
+_SAFE_CONFIG_KEY = "safe.directory"
 
 
 def shell(sandbox: Sandbox, argv: list[str]) -> dict:
@@ -31,54 +69,85 @@ def shell(sandbox: Sandbox, argv: list[str]) -> dict:
 def _blocked_git(argv: list[str]) -> dict | None:
     if not argv or argv[0] != "git":
         return None
-    alias_kind, subcommand, rest = _split_git_command(argv)
-    if _is_git_push(subcommand, rest) or any(token == "send-pack" for token in argv):
-        if not _config_mentions_alias(subcommand, rest):
+    if any(token == "send-pack" for token in argv):
+        return {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
+    parsed = _parse_git_invocation(argv)
+    if parsed is None:
+        if any(token == "push" for token in argv):
             return {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
+        return {"ok": False, "need_approval": False, "reason": "git_subcommand_rejected"}
+    alias_kind, subcommand, rest, bad_config = parsed
+    if subcommand in ("push", "send-pack") or (subcommand == "subtree" and "push" in rest):
+        return {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
     if alias_kind == "push":
         return {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
-    if alias_kind == "bang" or _config_mentions_alias(subcommand, rest):
+    if alias_kind == "bang" or bad_config:
         return {"ok": False, "need_approval": True, "reason": "not_allowlisted"}
+    if subcommand not in _GIT_SUBCOMMANDS:
+        return {"ok": False, "need_approval": False, "reason": "git_subcommand_rejected"}
     return None
 
 
-def _is_git_push(subcommand: str | None, rest: list[str]) -> bool:
-    if subcommand == "push" or subcommand == "send-pack":
-        return True
-    return subcommand == "subtree" and "push" in rest
-
-
-def _config_mentions_alias(subcommand: str | None, rest: list[str]) -> bool:
-    return subcommand == "config" and any("alias." in token.lower() for token in rest)
-
-
-def _split_git_command(argv: list[str]) -> tuple[str, str | None, list[str]]:
+def _parse_git_invocation(argv: list[str]) -> tuple[str, str | None, list[str], bool] | None:
     alias_kind = ""
+    bad_config = False
     index = 1
     while index < len(argv):
         arg = argv[index]
         if arg == "--":
-            return alias_kind, None, []
-        if arg in ("-c", "--config-env"):
-            value = argv[index + 1] if index + 1 < len(argv) else ""
-            alias_kind = _prefer_alias(alias_kind, _alias_option_kind(value))
-            index += 2
+            index += 1
+            break
+        name, attached = _split_option(arg)
+        if name in ("-c", "--config-env"):
+            if attached is None:
+                if index + 1 >= len(argv):
+                    return None
+                token = argv[index + 1]
+                index += 2
+            else:
+                token = attached
+                index += 1
+            alias_kind, bad_config = _note_config(token, alias_kind, bad_config)
             continue
-        if arg.startswith("--config-env="):
-            alias_kind = _prefer_alias(alias_kind, _alias_option_kind(arg.split("=", 1)[1]))
+        if name in _GIT_VALUE_OPTIONS:
+            if attached is None:
+                if index + 1 >= len(argv):
+                    return None
+                index += 2
+            else:
+                index += 1
+            continue
+        if name in _GIT_FLAG_OPTIONS:
             index += 1
             continue
-        if arg in _GIT_OPTIONS_WITH_VALUE:
-            index += 2
-            continue
-        if arg.startswith("--") and "=" in arg:
+        if attached is not None:
             index += 1
             continue
         if arg.startswith("-"):
-            index += 1
-            continue
-        return alias_kind, arg, argv[index + 1 :]
-    return alias_kind, None, []
+            return None
+        return alias_kind, arg, argv[index + 1 :], bad_config
+    if index >= len(argv):
+        return alias_kind, None, [], bad_config
+    if argv[index].startswith("-"):
+        return None
+    return alias_kind, argv[index], argv[index + 1 :], bad_config
+
+
+def _split_option(arg: str) -> tuple[str, str | None]:
+    if arg.startswith("--") and "=" in arg:
+        name, value = arg.split("=", 1)
+        return name, value
+    return arg, None
+
+
+def _note_config(token: str, alias_kind: str, bad_config: bool) -> tuple[str, bool]:
+    kind = _alias_option_kind(token)
+    if kind:
+        return _prefer_alias(alias_kind, kind), bad_config
+    key, _, _value = token.partition("=")
+    if key.strip().lower() != _SAFE_CONFIG_KEY:
+        bad_config = True
+    return alias_kind, bad_config
 
 
 def _alias_option_kind(token: str) -> str:

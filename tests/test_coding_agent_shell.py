@@ -93,15 +93,29 @@ def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
         (["git", "--config-env=alias.p=EVIL", "p"], "git_push_rejected"),
         (["git", "-c", "alias.x=!touch pwned.txt", "x"], "not_allowlisted"),
         (["git", "-c", "alias.x=!echo PWNED", "x"], "not_allowlisted"),
-        (["git", "config", "alias.q", "push"], "not_allowlisted"),
-        (["git", "config", "--global", "alias.p", "push"], "not_allowlisted"),
-        (["git", "config", "--local", "alias.foo", "!curl evil"], "not_allowlisted"),
-        (["git", "-c", "safe.directory=*", "config", "alias.p", "push"], "not_allowlisted"),
-        (["git", "config", "--get", "alias.p"], "not_allowlisted"),
+        (["git", "config", "alias.q", "push"], "git_subcommand_rejected"),
+        (["git", "config", "--global", "alias.p", "push"], "git_subcommand_rejected"),
+        (["git", "config", "--local", "alias.foo", "!curl evil"], "git_subcommand_rejected"),
+        (["git", "-c", "safe.directory=*", "config", "alias.p", "push"], "git_subcommand_rejected"),
+        (["git", "config", "--get", "alias.p"], "git_subcommand_rejected"),
+        (["git", "config", "user.name"], "git_subcommand_rejected"),
+        (["git", "config", "include.path", "../evil.gitconfig"], "git_subcommand_rejected"),
         (["git", "send-pack", "--dry-run", ".", "HEAD"], "git_push_rejected"),
         (["git", "subtree", "push", "--prefix=lib", "origin", "main"], "git_push_rejected"),
         (["git", "subtree", "--prefix=lib", "push", "origin", "main"], "git_push_rejected"),
         (["git", "-C", "repo", "-c", "safe.directory=*", "subtree", "push", "origin", "main"], "git_push_rejected"),
+        (["git", "--shallow-file", "/dev/null", "push", "--dry-run"], "git_push_rejected"),
+        (["git", "--shallow-file=/dev/null", "push", "--dry-run"], "git_push_rejected"),
+        (["git", "--attr-source", "HEAD", "push", "--dry-run"], "git_push_rejected"),
+        (["git", "--shallow-file", "/dev/null", "--attr-source", "HEAD", "push", "--dry-run"], "git_push_rejected"),
+        (["git", "--not-a-real-option", "push"], "git_push_rejected"),
+        (["git", "--not-a-real-option", "status"], "git_subcommand_rejected"),
+        (["git", "filter-branch", "-f", "--tree-filter", "touch pwned-filter.txt", "HEAD"], "git_subcommand_rejected"),
+        (["git", "grep", "push"], "git_subcommand_rejected"),
+        (["git", "subtree", "split", "--prefix=lib"], "git_subcommand_rejected"),
+        (["git", "branch"], "git_subcommand_rejected"),
+        (["git", "-c", "core.fsmonitor=touch pwned-fs.txt", "status", "--porcelain"], "not_allowlisted"),
+        (["git", "-c", "core.editor=touch pwned-editor.txt", "commit", "--allow-empty"], "not_allowlisted"),
     ]
 
     for argv, reason in blocked:
@@ -111,10 +125,15 @@ def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
         assert "Everything up-to-date" not in result.get("stdout", ""), argv
         if reason == "git_push_rejected":
             assert result == {"ok": False, "need_approval": False, "reason": "git_push_rejected"}, argv
+        elif reason == "git_subcommand_rejected":
+            assert result == {"ok": False, "need_approval": False, "reason": "git_subcommand_rejected"}, argv
         else:
             assert result == {"ok": False, "need_approval": True, "reason": "not_allowlisted"}, argv
 
     assert not (sandbox.root() / "pwned.txt").exists()
+    assert not (sandbox.root() / "pwned-fs.txt").exists()
+    assert not (sandbox.root() / "pwned-editor.txt").exists()
+    assert not (sandbox.root() / "pwned-filter.txt").exists()
 
 
 def test_git_non_push_commands_still_run(tmp_path: Path) -> None:
@@ -124,10 +143,11 @@ def test_git_non_push_commands_still_run(tmp_path: Path) -> None:
         ["git", "status"],
         ["git", "-c", "safe.directory=*", "status"],
         ["git", "diff", "-c"],
-        ["git", "config", "user.name"],
         ["git", "commit", "-m", "push"],
-        ["git", "grep", "push"],
-        ["git", "subtree", "split", "--prefix=lib"],
+        ["git", "show", "HEAD"],
+        ["git", "log", "-1"],
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        ["git", "--shallow-file", "/dev/null", "status"],
     ]
 
     for argv in allowed:
