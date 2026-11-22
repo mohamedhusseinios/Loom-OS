@@ -332,6 +332,19 @@ class AgentRunRecord(BaseModel):
     project: str
     family_id: str = "react"
     modifier_ids_json: str = "[]"
+    schema_version: int = 1
+    pattern_versions_json: str = "{}"
+    recommended_json: Optional[str] = None
+    chosen_source: Optional[str] = None
+    user_override: bool = False
+    stage1_profile_json: Optional[str] = None
+    fit_levels_json: Optional[str] = None
+    selection_scores_json: Optional[str] = None
+    selection_filter_provider: Optional[str] = None
+    selection_judgment_provider: Optional[str] = None
+    selection_filter_skipped: Optional[bool] = None
+    selection_judgment_skipped: Optional[bool] = None
+    selection_skip_reason: Optional[str] = None
     status: str
     worktree_path: Optional[str] = None
     run_dir: str

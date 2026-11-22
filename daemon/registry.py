@@ -269,6 +269,19 @@ class AgentRegistry:
                 project TEXT NOT NULL,
                 family_id TEXT NOT NULL DEFAULT 'react',
                 modifier_ids_json TEXT NOT NULL DEFAULT '[]',
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                pattern_versions_json TEXT NOT NULL DEFAULT '{}',
+                recommended_json TEXT,
+                chosen_source TEXT,
+                user_override INTEGER NOT NULL DEFAULT 0,
+                stage1_profile_json TEXT,
+                fit_levels_json TEXT,
+                selection_scores_json TEXT,
+                selection_filter_provider TEXT,
+                selection_judgment_provider TEXT,
+                selection_filter_skipped INTEGER,
+                selection_judgment_skipped INTEGER,
+                selection_skip_reason TEXT,
                 status TEXT NOT NULL,
                 worktree_path TEXT,
                 run_dir TEXT,
@@ -283,6 +296,25 @@ class AgentRegistry:
                 updated_at TEXT NOT NULL
             )
         """)
+        cursor = await self.db.execute("PRAGMA table_info(agent_runs)")
+        run_cols = [r[1] for r in await cursor.fetchall()]
+        for name, ddl in (
+            ("schema_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("pattern_versions_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("recommended_json", "TEXT"),
+            ("chosen_source", "TEXT"),
+            ("user_override", "INTEGER NOT NULL DEFAULT 0"),
+            ("stage1_profile_json", "TEXT"),
+            ("fit_levels_json", "TEXT"),
+            ("selection_scores_json", "TEXT"),
+            ("selection_filter_provider", "TEXT"),
+            ("selection_judgment_provider", "TEXT"),
+            ("selection_filter_skipped", "INTEGER"),
+            ("selection_judgment_skipped", "INTEGER"),
+            ("selection_skip_reason", "TEXT"),
+        ):
+            if name not in run_cols:
+                await self.db.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {ddl}")
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id)"
         )
@@ -1198,24 +1230,41 @@ class AgentRegistry:
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
-    async def create_agent_run(self, *, task_id: str, project: str, run_dir: str, worktree_path: str | None = None, family_id: str = "react", modifier_ids_json: str = "[]", status: str = "running", step_limit: int = 40, token_limit: int = 100000, cost_limit: float = 1.0, run_id: str | None = None) -> AgentRunRecord:
+    async def create_agent_run(self, *, task_id: str, project: str, run_dir: str, worktree_path: str | None = None, family_id: str = "react", modifier_ids_json: str = "[]", schema_version: int = 1, pattern_versions_json: str = "{}", recommended_json: str | None = None, chosen_source: str | None = None, user_override: bool = False, stage1_profile_json: str | None = None, fit_levels_json: str | None = None, selection_scores_json: str | None = None, selection_filter_provider: str | None = None, selection_judgment_provider: str | None = None, selection_filter_skipped: bool | None = None, selection_judgment_skipped: bool | None = None, selection_skip_reason: str | None = None, status: str = "running", step_limit: int = 40, token_limit: int = 100000, cost_limit: float = 1.0, run_id: str | None = None) -> AgentRunRecord:
         import uuid
         now = datetime.now(timezone.utc).isoformat()
         run_id = run_id or str(uuid.uuid4())
         await self.db.execute(
-            "INSERT INTO agent_runs (id, task_id, project, family_id, modifier_ids_json, status,"
-            " worktree_path, run_dir, step_limit, token_limit, cost_limit, steps_used, tokens_used,"
-            " cost_used, stop_reason, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, ?)",
+            "INSERT INTO agent_runs (id, task_id, project, family_id, modifier_ids_json,"
+            " schema_version, pattern_versions_json, recommended_json, chosen_source, user_override,"
+            " stage1_profile_json, fit_levels_json, selection_scores_json, selection_filter_provider,"
+            " selection_judgment_provider, selection_filter_skipped, selection_judgment_skipped,"
+            " selection_skip_reason, status, worktree_path, run_dir, step_limit, token_limit,"
+            " cost_limit, steps_used, tokens_used, cost_used, stop_reason, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " 0, 0, 0, NULL, ?, ?)",
             (
-                run_id, task_id, project, family_id, modifier_ids_json, status,
-                worktree_path, run_dir, step_limit, token_limit, cost_limit, now, now,
+                run_id, task_id, project, family_id, modifier_ids_json, schema_version,
+                pattern_versions_json, recommended_json, chosen_source, user_override,
+                stage1_profile_json, fit_levels_json, selection_scores_json,
+                selection_filter_provider, selection_judgment_provider, selection_filter_skipped,
+                selection_judgment_skipped, selection_skip_reason, status, worktree_path, run_dir,
+                step_limit, token_limit, cost_limit, now, now,
             ),
         )
         await self.db.commit()
         return AgentRunRecord(
             id=run_id, task_id=task_id, project=project, family_id=family_id,
-            modifier_ids_json=modifier_ids_json, status=status, worktree_path=worktree_path,
+            modifier_ids_json=modifier_ids_json, schema_version=schema_version,
+            pattern_versions_json=pattern_versions_json, recommended_json=recommended_json,
+            chosen_source=chosen_source, user_override=user_override,
+            stage1_profile_json=stage1_profile_json, fit_levels_json=fit_levels_json,
+            selection_scores_json=selection_scores_json,
+            selection_filter_provider=selection_filter_provider,
+            selection_judgment_provider=selection_judgment_provider,
+            selection_filter_skipped=selection_filter_skipped,
+            selection_judgment_skipped=selection_judgment_skipped,
+            selection_skip_reason=selection_skip_reason, status=status, worktree_path=worktree_path,
             run_dir=run_dir, step_limit=step_limit, token_limit=token_limit, cost_limit=cost_limit,
             steps_used=0, tokens_used=0, cost_used=0.0, stop_reason=None,
             created_at=now, updated_at=now,
@@ -1247,7 +1296,7 @@ class AgentRegistry:
         rows = await cursor.fetchall()
         return [self._row_to_agent_run(row) for row in rows]
 
-    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None, if_status: str | None = None) -> AgentRunRecord | None:
+    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None, schema_version: int | None = None, pattern_versions_json: str | None = None, recommended_json: str | None = None, chosen_source: str | None = None, user_override: bool | None = None, stage1_profile_json: str | None = None, fit_levels_json: str | None = None, selection_scores_json: str | None = None, selection_filter_provider: str | None = None, selection_judgment_provider: str | None = None, selection_filter_skipped: bool | None = None, selection_judgment_skipped: bool | None = None, selection_skip_reason: str | None = None, if_status: str | None = None) -> AgentRunRecord | None:
         current = await self.get_agent_run(run_id)
         if current is None:
             return None
@@ -1261,6 +1310,19 @@ class AgentRegistry:
             ("tokens_used", tokens_used),
             ("cost_used", cost_used),
             ("worktree_path", worktree_path),
+            ("schema_version", schema_version),
+            ("pattern_versions_json", pattern_versions_json),
+            ("recommended_json", recommended_json),
+            ("chosen_source", chosen_source),
+            ("user_override", user_override),
+            ("stage1_profile_json", stage1_profile_json),
+            ("fit_levels_json", fit_levels_json),
+            ("selection_scores_json", selection_scores_json),
+            ("selection_filter_provider", selection_filter_provider),
+            ("selection_judgment_provider", selection_judgment_provider),
+            ("selection_filter_skipped", selection_filter_skipped),
+            ("selection_judgment_skipped", selection_judgment_skipped),
+            ("selection_skip_reason", selection_skip_reason),
         ):
             if value is not None:
                 sets.append(f"{name} = ?")
@@ -1279,6 +1341,19 @@ class AgentRegistry:
             id=row["id"], task_id=row["task_id"], project=row["project"],
             family_id=row["family_id"] or "react",
             modifier_ids_json=row["modifier_ids_json"] or "[]",
+            schema_version=int(row["schema_version"]),
+            pattern_versions_json=row["pattern_versions_json"] or "{}",
+            recommended_json=row["recommended_json"],
+            chosen_source=row["chosen_source"],
+            user_override=bool(row["user_override"]),
+            stage1_profile_json=row["stage1_profile_json"],
+            fit_levels_json=row["fit_levels_json"],
+            selection_scores_json=row["selection_scores_json"],
+            selection_filter_provider=row["selection_filter_provider"],
+            selection_judgment_provider=row["selection_judgment_provider"],
+            selection_filter_skipped=(bool(row["selection_filter_skipped"]) if row["selection_filter_skipped"] is not None else None),
+            selection_judgment_skipped=(bool(row["selection_judgment_skipped"]) if row["selection_judgment_skipped"] is not None else None),
+            selection_skip_reason=row["selection_skip_reason"],
             status=row["status"],
             worktree_path=row["worktree_path"],
             run_dir=row["run_dir"] or "",
