@@ -8,6 +8,7 @@ import {
   implementTask,
   ImplementConflictError,
   type FitLevel,
+  type ImplementRequest,
   type RankedStrategy,
   type SelectionPreview,
 } from "@/lib/api";
@@ -43,14 +44,8 @@ const COST_KEY: Record<string, "low" | "med" | "high"> = {
 
 const SELECTION_FALLBACK_WHY = "selection_fallback";
 
-export function ImplementPickerModal({
-  projectId,
-  taskId,
-  preview: initialPreview,
-  notice: initialNotice = null,
-  onClose,
-  onImplemented,
-}: ImplementPickerModalProps) {
+export function ImplementPickerModal(props: ImplementPickerModalProps) {
+  const { projectId, taskId, preview: initialPreview, notice: initialNotice = null, onClose, onImplemented } = props;
   const t = useTranslations("ImplementPicker");
   const ref = useRef<HTMLDialogElement>(null);
   const [preview, setPreview] = useState<SelectionPreview>(initialPreview);
@@ -64,7 +59,7 @@ export function ImplementPickerModal({
     if (dialog && !dialog.open) dialog.showModal();
   }, []);
 
-  async function submit(body: Parameters<typeof implementTask>[2]) {
+  async function submit(body: ImplementRequest) {
     setBusy(true);
     setError("");
     try {
