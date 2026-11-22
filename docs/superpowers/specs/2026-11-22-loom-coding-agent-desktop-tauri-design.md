@@ -1,11 +1,12 @@
 # Loom Coding Agent Desktop (Tauri) — Design
 
 **Date:** 2026-11-22  
-**Status:** Draft — awaiting written-spec review  
+**Status:** Approved — 2026-11-23  
 **Related:**
 - `coding_agent/README.md`
 - `docs/superpowers/specs/2026-11-16-loom-coding-agent-pattern-routing-design.md`
 - `scripts/packaging/macos/build-dmg.sh` (interim shell-script `.app`; superseded as primary ship path)
+- Reuse targets already in dashboard: `components/loom-agent-chat.tsx`, `implement-picker-modal.tsx`, `agent-settings-panel.tsx` (today wired from `projects/[id]/tasks`)
 
 ---
 
@@ -101,7 +102,7 @@ scripts/packaging/
   (later) documented win/linux via tauri-cli
 ```
 
-Icon: `docs/branding/loom-icon-warp-512.png` → Tauri bundle icons.
+Icon: Warp mark → Tauri bundle icons. Source of truth is `docs/branding/loom-icon-warp.svg`; generate a 512 PNG (or iconset) in the packaging step if `loom-icon-warp-512.png` is not checked in (interim `build-dmg.sh` already expects that PNG).
 
 ---
 
@@ -140,8 +141,17 @@ Dev: `cargo tauri dev` with stack already running, or shell auto-start in debug 
 
 ---
 
-## 9. Open points (resolve in plan if needed)
+## 9. Resolved decisions (formerly open)
 
-- Dev vs prod Next: `next start` after `next build` in packaged app vs `next dev` in `tauri dev`.
-- Single webview + client-side tab vs two webviews.
-- Whether Agent tab is task-scoped (deep-link `?project=&task=`) in v1.
+| Topic | Decision |
+|-------|----------|
+| Dev vs prod Next | **Packaged app:** `next build` once (into install/support dir), then `next start` on `:3000`. **`tauri dev`:** prefer attaching to an already-running dashboard; if shell auto-starts, use `next dev`. |
+| Webview model | **Single webview** + chrome tab switcher. Agent tab navigates to `/{locale}/agent-app`; Dashboard tab navigates to `/{locale}/` (or last Dashboard path). Avoid dual webviews in v1 (shared session, simpler process/lifecycle). |
+| Agent deep-link | **v1 supports** `?project=<id>&task=<id>` (both optional). Agent page shows project picker when `project` missing; chat/implement bind to `task` when present (same props as `LoomAgentChat` today). |
+
+## 10. Spec self-review notes
+
+- No remaining TBD/TODO placeholders in normative sections.
+- Architecture matches UX: Tauri bootstraps stack; Next serves both surfaces; system browser stays opt-in via menu.
+- Scope is one shippable subsystem (desktop shell + one new Next route); win/linux packaging is documented after mac `tauri build`, not blocked on parity day-one.
+- Icon asset: SVG is in-repo; raster/PNG generation is a packaging step, not a product ambiguity.
