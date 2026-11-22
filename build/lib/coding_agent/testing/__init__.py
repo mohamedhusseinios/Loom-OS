@@ -1,1 +1,0 @@
-"""Test doubles for coding_agent."""
