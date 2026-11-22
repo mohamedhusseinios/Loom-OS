@@ -1,0 +1,58 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #e6e6ea;
+  background: #0b0b0f;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: #15151b;
+  border-bottom: 1px solid #26262f;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #a0a0ad;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #26262f;
+  color: #fff;
+  border-color: #3a3a46;
+}
+
+.url {
+  margin-left: auto;
+  color: #7a7a88;
+  font-size: 12px;
+}
+
+.content {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: #7a7a88;
+}

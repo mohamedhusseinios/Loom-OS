@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loom Coding Agent</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <header class="chrome">
+      <span class="brand">Loom Coding Agent</span>
+      <nav class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab" data-tab="agent">Agent</button>
+        <button type="button" role="tab" class="tab" data-tab="dashboard">Dashboard</button>
+      </nav>
+      <code id="url" class="url"></code>
+    </header>
+    <main class="content">
+      <p id="placeholder">Webview content is wired in a later task.</p>
+    </main>
+  </body>
+</html>
