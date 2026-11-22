@@ -6,14 +6,7 @@ from coding_agent.patterns.schema import PatternDoc
 from coding_agent.selection.types import StrategyCandidate, TaskProfile
 
 
-def prefilter_families(
-    docs: list[PatternDoc],
-    *,
-    profile: TaskProfile,
-    available_capabilities: set[str],
-    anti_hit_ids: set[str] | None = None,
-    limit: int = 5,
-) -> list[StrategyCandidate]:
+def prefilter_families(docs: list[PatternDoc], *, profile: TaskProfile, available_capabilities: set[str], anti_hit_ids: set[str] | None = None, limit: int = 5) -> list[StrategyCandidate]:
     del profile  # reserved for later Stage-1 signal; shape fixed for callers
     blocked = anti_hit_ids or set()
     candidates: list[StrategyCandidate] = []

@@ -13,11 +13,7 @@ def fit_level_from_score(score: float) -> FitLevel:
     return "Low"
 
 
-def rank_strategies(
-    candidates: list[StrategyCandidate],
-    scores: dict[str, float],
-    why_by_id: dict[str, list[str]],
-) -> list[RankedStrategy]:
+def rank_strategies(candidates: list[StrategyCandidate], scores: dict[str, float], why_by_id: dict[str, list[str]]) -> list[RankedStrategy]:
     ranked = [
         RankedStrategy(
             family_id=c.family_id,
@@ -35,12 +31,7 @@ def rank_strategies(
     return ranked
 
 
-def autonomy_decidable(
-    ranked: list[RankedStrategy],
-    *,
-    min_fit: FitLevel = "High",
-    require_margin: bool = True,
-) -> bool:
+def autonomy_decidable(ranked: list[RankedStrategy], *, min_fit: FitLevel = "High", require_margin: bool = True) -> bool:
     if not ranked:
         return False
     top = ranked[0]

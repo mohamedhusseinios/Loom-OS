@@ -25,14 +25,7 @@ _PROFILE = TaskProfile(
 )
 
 
-def _family(
-    id: str,
-    *,
-    status: str = "active",
-    required_capabilities: list[str] | None = None,
-    expected_cost_class: str | None = "Med",
-    name: str | None = None,
-) -> PatternDoc:
+def _family(id: str, *, status: str = "active", required_capabilities: list[str] | None = None, expected_cost_class: str | None = "Med", name: str | None = None) -> PatternDoc:
     return PatternDoc(
         id=id,
         name=name or id.replace("_", " ").title(),
