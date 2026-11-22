@@ -37,6 +37,7 @@ _PROFILE_LABELS: dict[str, tuple[str, ...]] = {
 @dataclass
 class SelectionPreview:
     ranked: list[RankedStrategy] = field(default_factory=list)
+    top3: list[RankedStrategy] = field(default_factory=list)
     auto_decidable: bool = False
     fallback: bool = False
     stage1_profile: TaskProfile = DEFAULT_PROFILE
@@ -55,9 +56,9 @@ class SelectionPreview:
     stage2_skip_reason: str | None = None
     latency_ms: float = 0.0
 
-    @property
-    def top3(self) -> list[RankedStrategy]:
-        return self.ranked[:3]
+
+def _is_score(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _error_result() -> DecisionResult:
@@ -128,6 +129,7 @@ def _react_doc(registry: PatternRegistry) -> PatternDoc | None:
 
 def _finish(preview: SelectionPreview, ranked: list[RankedStrategy], *, min_fit: FitLevel, require_margin: bool) -> SelectionPreview:
     preview.ranked = ranked
+    preview.top3 = ranked[:3]
     preview.recommended = ranked[0] if ranked else None
     preview.auto_decidable = autonomy_decidable(ranked, min_fit=min_fit, require_margin=require_margin)
     return preview
@@ -174,8 +176,8 @@ async def preview_strategies(*, task_instruction: str, acceptance_criteria: str,
     preview.stage2_provider, preview.stage2_model = stage2.provider, stage2.model
     preview.provider, preview.model = stage2.provider, stage2.model
     preview.latency_ms += stage2.latency_ms
-    scored = [c for c in candidates if isinstance(stage2.scores.get(c.family_id), (int, float)) and not isinstance(stage2.scores.get(c.family_id), bool)]
-    if stage2.skipped or not scored:
+    scored = [c for c in candidates if _is_score(stage2.scores.get(c.family_id))]
+    if stage2.skipped or len(scored) != len(candidates):
         preview.stage2_skipped = True
         preview.stage2_skip_reason = (stage2.skip_reason or "error") if stage2.skipped else "bad_payload"
         return fall_back(preview.stage2_skip_reason)
