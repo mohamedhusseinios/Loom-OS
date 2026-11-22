@@ -77,6 +77,33 @@ def test_process_task_worktree_failure_marks_blocked(monkeypatch):
     assert any("Worktree failed" in m for (_tid, _k, m) in w.progress)
 
 
+def test_loom_agent_early_exit_seals_terminal_event(monkeypatch, tmp_path):
+    import json
+    from pathlib import Path
+
+    events = tmp_path / "events.jsonl"
+    manifest = {
+        "prompt": "do the thing",
+        "events_path": str(events),
+        "run_dir": str(tmp_path),
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", str(manifest_path))
+    w = _CaptureWorker(project="noor", agent="loom-agent", project_path="/tmp/noor", base_url="http://x")
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+
+    def _boom(*a, **k):
+        raise RuntimeError("not a git repo")
+
+    monkeypatch.setattr(worker_mod, "create_worktree", _boom)
+    w.process_task({"id": "t9", "title": "T", "instruction": "x", "result": None})
+
+    last = json.loads(events.read_text(encoding="utf-8").splitlines()[-1])
+    assert last == {"type": "run.failed", "stop_reason": "worker_exit"}
+    assert w.patches[-1][1]["status"] == "blocked"
+
+
 def test_agent_id_matches_daemon_convention():
     assert _worker().agent_id == "claude-code-noor"
 

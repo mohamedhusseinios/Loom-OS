@@ -12,6 +12,7 @@ from daemon.models import (
     AgentSettings, AgentSettingsUpdate, AgentProviderConfig,
     AgentChatRecord, AgentMessageRecord,
     TaskSuggestionRecord, SuggestionStatus,
+    AgentRunRecord,
 )
 from daemon.agent_credentials import (
     DEFAULT_AGENT_PROVIDERS,
@@ -47,6 +48,9 @@ _SETTINGS_DECISION_COLUMNS = (
     ("filter_provider", "TEXT"),
     ("judgment_provider", "TEXT"),
     ("threshold_overrides_json", "TEXT"),
+    ("selection_autonomy_enabled", "INTEGER NOT NULL DEFAULT 1"),
+    ("autonomy_min_fit", "TEXT NOT NULL DEFAULT 'High'"),
+    ("autonomy_require_margin", "INTEGER NOT NULL DEFAULT 1"),
 )
 
 
@@ -160,7 +164,10 @@ class AgentRegistry:
                 api_keys_json TEXT NOT NULL DEFAULT '{}',
                 filter_provider TEXT,
                 judgment_provider TEXT,
-                threshold_overrides_json TEXT
+                threshold_overrides_json TEXT,
+                selection_autonomy_enabled INTEGER NOT NULL DEFAULT 1,
+                autonomy_min_fit TEXT NOT NULL DEFAULT 'High',
+                autonomy_require_margin INTEGER NOT NULL DEFAULT 1
             )
         """)
         cursor = await self.db.execute("PRAGMA table_info(agent_settings)")
@@ -261,6 +268,66 @@ class AgentRegistry:
                 "UPDATE task_suggestions SET legacy_decision_input_tokens = jev_input_tokens"
                 " WHERE legacy_decision_input_tokens IS NULL"
             )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                project TEXT NOT NULL,
+                family_id TEXT NOT NULL DEFAULT 'react',
+                modifier_ids_json TEXT NOT NULL DEFAULT '[]',
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                pattern_versions_json TEXT NOT NULL DEFAULT '{}',
+                recommended_json TEXT,
+                chosen_source TEXT,
+                user_override INTEGER NOT NULL DEFAULT 0,
+                stage1_profile_json TEXT,
+                fit_levels_json TEXT,
+                selection_scores_json TEXT,
+                selection_filter_provider TEXT,
+                selection_judgment_provider TEXT,
+                selection_filter_skipped INTEGER,
+                selection_judgment_skipped INTEGER,
+                selection_skip_reason TEXT,
+                status TEXT NOT NULL,
+                worktree_path TEXT,
+                run_dir TEXT,
+                step_limit INTEGER NOT NULL DEFAULT 40,
+                token_limit INTEGER NOT NULL DEFAULT 100000,
+                cost_limit REAL NOT NULL DEFAULT 1.0,
+                steps_used INTEGER NOT NULL DEFAULT 0,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                cost_used REAL NOT NULL DEFAULT 0,
+                stop_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        cursor = await self.db.execute("PRAGMA table_info(agent_runs)")
+        run_cols = [r[1] for r in await cursor.fetchall()]
+        for name, ddl in (
+            ("schema_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("pattern_versions_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("recommended_json", "TEXT"),
+            ("chosen_source", "TEXT"),
+            ("user_override", "INTEGER NOT NULL DEFAULT 0"),
+            ("stage1_profile_json", "TEXT"),
+            ("fit_levels_json", "TEXT"),
+            ("selection_scores_json", "TEXT"),
+            ("selection_filter_provider", "TEXT"),
+            ("selection_judgment_provider", "TEXT"),
+            ("selection_filter_skipped", "INTEGER"),
+            ("selection_judgment_skipped", "INTEGER"),
+            ("selection_skip_reason", "TEXT"),
+        ):
+            if name not in run_cols:
+                await self.db.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {ddl}")
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id)"
+        )
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_project_status"
+            " ON agent_runs(project, status)"
+        )
         await self.db.commit()
 
     async def close(self):
@@ -844,7 +911,7 @@ class AgentRegistry:
         raw = row["threshold_overrides_json"] if "threshold_overrides_json" in keys else None
         return filt, judg, AgentRegistry._threshold_overrides_from_raw(raw)
 
-    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool, filter_provider: str | None = None, judgment_provider: str | None = None, threshold_overrides: dict | None = None) -> AgentSettings:
+    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool, filter_provider: str | None = None, judgment_provider: str | None = None, threshold_overrides: dict | None = None, selection_autonomy_enabled: bool = True, autonomy_min_fit: str = "High", autonomy_require_margin: bool = True) -> AgentSettings:
         providers = [AgentProviderConfig(**p) for p in creds.providers]
         masked = creds.masked_keys() if mask_keys else dict(creds.keys)
         return AgentSettings(
@@ -855,6 +922,9 @@ class AgentRegistry:
             filter_provider=filter_provider,
             judgment_provider=judgment_provider,
             threshold_overrides=threshold_overrides,
+            selection_autonomy_enabled=selection_autonomy_enabled,
+            autonomy_min_fit=autonomy_min_fit,
+            autonomy_require_margin=autonomy_require_margin,
         )
 
     async def _ensure_default_agent_providers(self) -> None:
@@ -877,7 +947,8 @@ class AgentRegistry:
     async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
         cursor = await self.db.execute(
             "SELECT default_model, providers_json, api_keys_json,"
-            " filter_provider, judgment_provider, threshold_overrides_json"
+            " filter_provider, judgment_provider, threshold_overrides_json,"
+            " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
@@ -885,6 +956,9 @@ class AgentRegistry:
         return self._agent_settings_view(
             self._settings_from_row(row), mask_keys,
             filter_provider=filt, judgment_provider=judg, threshold_overrides=overrides,
+            selection_autonomy_enabled=bool(row["selection_autonomy_enabled"]),
+            autonomy_min_fit=row["autonomy_min_fit"],
+            autonomy_require_margin=bool(row["autonomy_require_margin"]),
         )
 
     async def get_raw_api_keys(self) -> dict[str, str]:
@@ -900,7 +974,8 @@ class AgentRegistry:
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
         cursor = await self.db.execute(
             "SELECT default_model, providers_json, api_keys_json,"
-            " filter_provider, judgment_provider, threshold_overrides_json"
+            " filter_provider, judgment_provider, threshold_overrides_json,"
+            " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
@@ -929,11 +1004,25 @@ class AgentRegistry:
             judg = payload.judgment_provider
         if payload.threshold_overrides is not None:
             raw_overrides = json.dumps(payload.threshold_overrides)
+        selection_autonomy_enabled = bool(row["selection_autonomy_enabled"])
+        autonomy_min_fit = row["autonomy_min_fit"]
+        autonomy_require_margin = bool(row["autonomy_require_margin"])
+        if payload.selection_autonomy_enabled is not None:
+            selection_autonomy_enabled = payload.selection_autonomy_enabled
+        if payload.autonomy_min_fit is not None:
+            autonomy_min_fit = payload.autonomy_min_fit
+        if payload.autonomy_require_margin is not None:
+            autonomy_require_margin = payload.autonomy_require_margin
         await self.db.execute(
             "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?,"
-            " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?"
+            " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?,"
+            " selection_autonomy_enabled = ?, autonomy_min_fit = ?, autonomy_require_margin = ?"
             " WHERE id = 1",
-            (default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg, raw_overrides),
+            (
+                default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg,
+                raw_overrides, selection_autonomy_enabled, autonomy_min_fit,
+                autonomy_require_margin,
+            ),
         )
         await self.db.commit()
         return await self.get_agent_settings(mask_keys=True)
@@ -1166,5 +1255,142 @@ class AgentRegistry:
             judgment_latency_ms=_opt_float("judgment_latency_ms"),
             effective_thresholds_json=_opt_text("effective_thresholds_json"),
             legacy_decision_input_tokens=_opt_int("legacy_decision_input_tokens"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    async def create_agent_run(self, *, task_id: str, project: str, run_dir: str, worktree_path: str | None = None, family_id: str = "react", modifier_ids_json: str = "[]", schema_version: int = 1, pattern_versions_json: str = "{}", recommended_json: str | None = None, chosen_source: str | None = None, user_override: bool = False, stage1_profile_json: str | None = None, fit_levels_json: str | None = None, selection_scores_json: str | None = None, selection_filter_provider: str | None = None, selection_judgment_provider: str | None = None, selection_filter_skipped: bool | None = None, selection_judgment_skipped: bool | None = None, selection_skip_reason: str | None = None, status: str = "running", step_limit: int = 40, token_limit: int = 100000, cost_limit: float = 1.0, run_id: str | None = None) -> AgentRunRecord:
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        run_id = run_id or str(uuid.uuid4())
+        await self.db.execute(
+            "INSERT INTO agent_runs (id, task_id, project, family_id, modifier_ids_json,"
+            " schema_version, pattern_versions_json, recommended_json, chosen_source, user_override,"
+            " stage1_profile_json, fit_levels_json, selection_scores_json, selection_filter_provider,"
+            " selection_judgment_provider, selection_filter_skipped, selection_judgment_skipped,"
+            " selection_skip_reason, status, worktree_path, run_dir, step_limit, token_limit,"
+            " cost_limit, steps_used, tokens_used, cost_used, stop_reason, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " 0, 0, 0, NULL, ?, ?)",
+            (
+                run_id, task_id, project, family_id, modifier_ids_json, schema_version,
+                pattern_versions_json, recommended_json, chosen_source, user_override,
+                stage1_profile_json, fit_levels_json, selection_scores_json,
+                selection_filter_provider, selection_judgment_provider, selection_filter_skipped,
+                selection_judgment_skipped, selection_skip_reason, status, worktree_path, run_dir,
+                step_limit, token_limit, cost_limit, now, now,
+            ),
+        )
+        await self.db.commit()
+        return AgentRunRecord(
+            id=run_id, task_id=task_id, project=project, family_id=family_id,
+            modifier_ids_json=modifier_ids_json, schema_version=schema_version,
+            pattern_versions_json=pattern_versions_json, recommended_json=recommended_json,
+            chosen_source=chosen_source, user_override=user_override,
+            stage1_profile_json=stage1_profile_json, fit_levels_json=fit_levels_json,
+            selection_scores_json=selection_scores_json,
+            selection_filter_provider=selection_filter_provider,
+            selection_judgment_provider=selection_judgment_provider,
+            selection_filter_skipped=selection_filter_skipped,
+            selection_judgment_skipped=selection_judgment_skipped,
+            selection_skip_reason=selection_skip_reason, status=status, worktree_path=worktree_path,
+            run_dir=run_dir, step_limit=step_limit, token_limit=token_limit, cost_limit=cost_limit,
+            steps_used=0, tokens_used=0, cost_used=0.0, stop_reason=None,
+            created_at=now, updated_at=now,
+        )
+
+    async def get_agent_run(self, run_id: str) -> AgentRunRecord | None:
+        cursor = await self.db.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_agent_run(row)
+
+    async def list_agent_runs(self, project: str | None = None, task_id: str | None = None, status: str | None = None) -> list[AgentRunRecord]:
+        clauses: list[str] = []
+        params: list = []
+        if project is not None:
+            clauses.append("project = ?")
+            params.append(project)
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        cursor = await self.db.execute(
+            f"SELECT * FROM agent_runs{where} ORDER BY created_at ASC", params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_agent_run(row) for row in rows]
+
+    async def update_agent_run(self, run_id: str, status: str | None = None, stop_reason: str | None = None, steps_used: int | None = None, tokens_used: int | None = None, cost_used: float | None = None, worktree_path: str | None = None, schema_version: int | None = None, pattern_versions_json: str | None = None, recommended_json: str | None = None, chosen_source: str | None = None, user_override: bool | None = None, stage1_profile_json: str | None = None, fit_levels_json: str | None = None, selection_scores_json: str | None = None, selection_filter_provider: str | None = None, selection_judgment_provider: str | None = None, selection_filter_skipped: bool | None = None, selection_judgment_skipped: bool | None = None, selection_skip_reason: str | None = None, if_status: str | None = None) -> AgentRunRecord | None:
+        current = await self.get_agent_run(run_id)
+        if current is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ["updated_at = ?"]
+        params: list = [now]
+        for name, value in (
+            ("status", status),
+            ("stop_reason", stop_reason),
+            ("steps_used", steps_used),
+            ("tokens_used", tokens_used),
+            ("cost_used", cost_used),
+            ("worktree_path", worktree_path),
+            ("schema_version", schema_version),
+            ("pattern_versions_json", pattern_versions_json),
+            ("recommended_json", recommended_json),
+            ("chosen_source", chosen_source),
+            ("user_override", user_override),
+            ("stage1_profile_json", stage1_profile_json),
+            ("fit_levels_json", fit_levels_json),
+            ("selection_scores_json", selection_scores_json),
+            ("selection_filter_provider", selection_filter_provider),
+            ("selection_judgment_provider", selection_judgment_provider),
+            ("selection_filter_skipped", selection_filter_skipped),
+            ("selection_judgment_skipped", selection_judgment_skipped),
+            ("selection_skip_reason", selection_skip_reason),
+        ):
+            if value is not None:
+                sets.append(f"{name} = ?")
+                params.append(value)
+        params.append(run_id)
+        sql = f"UPDATE agent_runs SET {', '.join(sets)} WHERE id = ?"
+        if if_status is not None:
+            sql += " AND status = ?"
+            params.append(if_status)
+        await self.db.execute(sql, params)
+        await self.db.commit()
+        return await self.get_agent_run(run_id)
+
+    def _row_to_agent_run(self, row) -> AgentRunRecord:
+        return AgentRunRecord(
+            id=row["id"], task_id=row["task_id"], project=row["project"],
+            family_id=row["family_id"] or "react",
+            modifier_ids_json=row["modifier_ids_json"] or "[]",
+            schema_version=int(row["schema_version"]),
+            pattern_versions_json=row["pattern_versions_json"] or "{}",
+            recommended_json=row["recommended_json"],
+            chosen_source=row["chosen_source"],
+            user_override=bool(row["user_override"]),
+            stage1_profile_json=row["stage1_profile_json"],
+            fit_levels_json=row["fit_levels_json"],
+            selection_scores_json=row["selection_scores_json"],
+            selection_filter_provider=row["selection_filter_provider"],
+            selection_judgment_provider=row["selection_judgment_provider"],
+            selection_filter_skipped=(bool(row["selection_filter_skipped"]) if row["selection_filter_skipped"] is not None else None),
+            selection_judgment_skipped=(bool(row["selection_judgment_skipped"]) if row["selection_judgment_skipped"] is not None else None),
+            selection_skip_reason=row["selection_skip_reason"],
+            status=row["status"],
+            worktree_path=row["worktree_path"],
+            run_dir=row["run_dir"] or "",
+            step_limit=int(row["step_limit"] or 0),
+            token_limit=int(row["token_limit"] or 0),
+            cost_limit=float(row["cost_limit"] or 0),
+            steps_used=int(row["steps_used"] or 0),
+            tokens_used=int(row["tokens_used"] or 0),
+            cost_used=float(row["cost_used"] or 0),
+            stop_reason=row["stop_reason"],
             created_at=row["created_at"], updated_at=row["updated_at"],
         )

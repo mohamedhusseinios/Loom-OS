@@ -8,6 +8,7 @@ from typing import Optional
 
 import asyncio
 import logging
+from pathlib import Path
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
@@ -28,7 +29,9 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError
+from fastapi.responses import JSONResponse
+from daemon.models import ImplementRequest
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
 from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -113,6 +116,7 @@ async def lifespan(app: FastAPI):
         watcher.start(router.handle_file, loop)
         # Background task: broadcast events to WebSocket clients
         asyncio.create_task(_broadcast_events())
+        asyncio.create_task(_tail_agent_run_events())
 
     logger.info("Loom daemon started")
     yield
@@ -708,7 +712,7 @@ def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
         f.write(payload.model_dump_json())
 
 
-async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+async def _route_task_execution(project_id: str, task: AgentTaskRecord, manifest_path: str | None = None) -> bool:
     """Route a Running task by assignee. Returns True if execution was started."""
     if not task.assignee:
         return False
@@ -719,8 +723,10 @@ async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
         project = await registry.get_project(project_id)
         if project is None:
             return False
-        supervisor.spawn(project_id, agent, project.project_path, task.id,
-                         WORKER_MAX_BUDGET_USD)
+        supervisor.spawn(
+            project_id, agent, project.project_path, task.id,
+            WORKER_MAX_BUDGET_USD, manifest_path=manifest_path,
+        )
         if router:
             await router._emit_event("worker:started", project_id, {"id": task.id})
         return True
@@ -926,6 +932,8 @@ def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
 async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
     current = await registry.get_agent_settings(mask_keys=True)
     _validate_decision_settings(payload, current)
+    if payload.autonomy_min_fit is not None and payload.autonomy_min_fit not in {"High", "Medium", "Low"}:
+        raise HTTPException(status_code=400, detail="autonomy_min_fit must be High, Medium, or Low")
     return (await registry.update_agent_settings(payload)).model_dump()
 
 
@@ -998,8 +1006,20 @@ async def get_pending_suggestion(project_id: str, task_id: str):
     return {"suggestion": sug.model_dump(mode="json")}
 
 
+@app.post("/api/projects/{project_id}/tasks/{task_id}/implement/preview")
+async def implement_preview(project_id: str, task_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    task = await registry.get_agent_task(task_id)
+    if task is None or task.project != project_id:
+        raise HTTPException(status_code=404, detail="task not found")
+    preview = await _get_agent_runtime().preview_selection(task)
+    return selection_preview_to_dict(preview)
+
+
 @app.post("/api/projects/{project_id}/tasks/{task_id}/implement")
-async def implement_task(project_id: str, task_id: str):
+async def implement_task(project_id: str, task_id: str, payload: Optional[ImplementRequest] = Body(default=None)):
     project = await registry.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1007,15 +1027,37 @@ async def implement_task(project_id: str, task_id: str):
     def _spawn(updated):
         pass
 
+    def _worker_live(task_id: str) -> bool:
+        return supervisor is not None and supervisor.is_running(task_id)
+
     try:
-        updated = await _get_agent_runtime().implement(
-            project_id, task_id, spawn_worker=_spawn,
+        updated, manifest_path = await _get_agent_runtime().implement(
+            project_id, task_id, spawn_worker=_spawn, request=payload or ImplementRequest(),
+            worker_live=_worker_live,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SelectionConflict as e:
+        return JSONResponse(status_code=409, content=selection_preview_to_dict(e.preview))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if updated:
-        await _route_task_execution(project_id, updated)
+        await _route_task_execution(project_id, updated, manifest_path=manifest_path)
     return updated.model_dump() if updated else {}
+
+
+@app.post("/api/projects/{project_id}/runs/{run_id}/cancel")
+async def cancel_agent_run(project_id: str, run_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        run = await _get_agent_runtime().cancel_run(project_id, run_id, tail=_run_event_tail)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return run.model_dump(mode="json") if run else {}
 
 
 
@@ -1430,6 +1472,28 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
+
+
+_run_event_tail = JsonlEventTail()
+
+
+async def _tail_agent_run_events() -> None:
+    """Poll open-run JSONL sinks and emit ``agent:run_event`` on the bus."""
+    while True:
+        try:
+            if registry is not None and getattr(registry, "db", None):
+                runtime = _get_agent_runtime()
+                runs = []
+                for status in ("running", "cancelling"):
+                    runs.extend(await registry.list_agent_runs(status=status))
+                for run in runs:
+                    if not run.run_dir:
+                        continue
+                    await drain_run_jsonl(run, _run_event_tail, runtime.emit_event, registry)
+                await seal_exited_worker_runs(registry, supervisor, runtime.emit_event, _run_event_tail)
+        except Exception:
+            logger.exception("agent run JSONL tail failed")
+        await asyncio.sleep(0.5)
 
 
 async def _broadcast_events():

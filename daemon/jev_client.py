@@ -251,7 +251,51 @@ def _filter_request(task: Any, hits: list[dict], pack: str) -> tuple[dict[str, d
     return questions, state
 
 
+def _items_with_id(*groups: list[dict] | None) -> list[dict]:
+    seen: set[str] = set()
+    items: list[dict] = []
+    for group in groups:
+        for item in group or []:
+            if isinstance(item, dict) and item.get("id") and str(item["id"]) not in seen:
+                seen.add(str(item["id"]))
+                items.append(item)
+    return items
+
+
+def _text_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)] if value else []
+
+
+def _pattern_stage1_request(task: Any, pack: str, candidates: list[dict]) -> tuple[dict[str, dict], dict]:
+    questions: dict[str, dict] = {}
+    labels: dict[str, str] = {}
+    for item in _items_with_id(candidates):
+        cid = str(item["id"])
+        label = str(item.get("label") or cid)
+        labels[cid] = label
+        questions[cid] = {"type": "noul", "instructions": f"How well does the profile label `{label}` (id `{cid}`) describe the task in `task`? Judge only this label's dimension.", "criteria": {"true": "The label accurately describes this aspect of the task.", "false": "The label does not describe this aspect of the task."}}
+    return questions, {"task": _task_view(task), "pack": pack, "profile_labels": labels}
+
+
+def _pattern_stage2_request(task: Any, pack: str, catalog: list[dict], candidates: list[dict]) -> tuple[dict[str, dict], dict]:
+    questions: dict[str, dict] = {}
+    families: dict[str, dict] = {}
+    for item in _items_with_id(catalog, candidates):
+        fid = str(item["id"])
+        when_to_use = _text_list(item.get("when_to_use"))
+        anti_criteria = _text_list(item.get("anti_criteria"))
+        families[fid] = {"name": str(item.get("name") or fid), "when_to_use": when_to_use, "anti_criteria": anti_criteria}
+        questions[fid] = {"type": "noul", "instructions": f"How well does the `{fid}` strategy family fit the task in `task`, given its when_to_use and anti_criteria in `families`?", "criteria": {"true": "The task matches the family's when_to_use and none of its anti_criteria apply.", "false": "The task does not match when_to_use, or an anti_criteria applies."}}
+    return questions, {"task": _task_view(task), "pack": pack, "families": families}
+
+
 def _judge_request(task: Any, pack: str, catalog: list[dict], candidates: list[dict]) -> tuple[dict[str, dict], dict]:
+    if pack == "pattern_stage1":
+        return _pattern_stage1_request(task, pack, candidates)
+    if pack == "pattern_stage2":
+        return _pattern_stage2_request(task, pack, catalog, candidates)
     questions: dict[str, dict] = {
         "complete": {"type": "noul", "instructions": "Is the work on this task already complete?", "criteria": {"true": "The graph context and task description show the work is finished.", "false": "The work is not finished, or there is not enough evidence it is done."}},
         "blocked": {"type": "noul", "instructions": "Is this task blocked?", "criteria": {"true": "The task cannot proceed because of a missing dependency, decision, or obstacle.", "false": "The task can proceed."}},
