@@ -118,6 +118,16 @@ def _worktree_root(manifest: dict) -> Path:
     return Path.cwd()
 
 
+def _manifest_family_id(manifest: dict) -> str:
+    raw = manifest.get("family_id", "react")
+    return raw if isinstance(raw, str) else "react"
+
+
+def _should_emit_runner_fallback(manifest: dict) -> bool:
+    family_id = _manifest_family_id(manifest)
+    return family_id != "react" or manifest.get("runner_fallback") is True
+
+
 def run_manifest(path: str, *, prompt: str | None = None, model: str | None = None) -> int:
     """Load a JSON run manifest and execute the ReAct loop."""
     manifest_file = Path(path)
@@ -140,12 +150,19 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
         manifest["model"] = resolved_model
 
     events_path = _events_path(manifest, manifest_file)
+    event_sink = JsonlEventSink(events_path)
+    if _should_emit_runner_fallback(manifest):
+        event_sink.emit({
+            "type": "strategy.runner_fallback",
+            "family_id": _manifest_family_id(manifest),
+            "executed_runner": "react",
+        })
     try:
         client = LlmClient(api_key=api_key, base_url=base_url)
         session = RunSession(
             manifest,
             WorktreeSandbox(_worktree_root(manifest)),
-            JsonlEventSink(events_path),
+            event_sink,
             LlmClientAdapter(client),
             SimpleUsageMeter(),
             StubContextSource(),

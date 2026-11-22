@@ -54,6 +54,42 @@ def test_manifest_loop_exits_0_and_events_end_succeeded(tmp_path: Path, monkeypa
     assert json.loads(lines[-1]) == {"type": "run.succeeded", "stop_reason": "done"}
 
 
+def test_runner_fallback_event_when_family_id_tdd(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(tmp_path, family_id="tdd", runner_fallback=True)
+    _patch_chat(monkeypatch, _done_action())
+
+    code = main(["--manifest", str(manifest_path)])
+
+    assert code == 0
+    types = [json.loads(line)["type"] for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert types[0] == "strategy.runner_fallback"
+    assert json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]) == {
+        "type": "strategy.runner_fallback",
+        "family_id": "tdd",
+        "executed_runner": "react",
+    }
+
+
+def test_react_manifest_skips_runner_fallback_event(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(tmp_path, family_id="react", runner_fallback=False)
+    _patch_chat(monkeypatch, _done_action())
+
+    main(["--manifest", str(manifest_path)])
+
+    types = [json.loads(line)["type"] for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert "strategy.runner_fallback" not in types
+
+
+def test_runner_fallback_event_when_flag_only(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(tmp_path, family_id="react", runner_fallback=True)
+    _patch_chat(monkeypatch, _done_action())
+
+    main(["--manifest", str(manifest_path)])
+
+    first = json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert first == {"type": "strategy.runner_fallback", "family_id": "react", "executed_runner": "react"}
+
+
 def test_manifest_events_path_override(tmp_path: Path, monkeypatch) -> None:
     events_path = tmp_path / "custom" / "events.jsonl"
     manifest_path, _run_dir, _worktree = _write_manifest(tmp_path, events_path=str(events_path))
