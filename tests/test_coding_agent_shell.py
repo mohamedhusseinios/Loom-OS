@@ -104,7 +104,7 @@ def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
         (["git", "send-pack", "--dry-run", ".", "HEAD"], "git_push_rejected"),
         (["git", "subtree", "push", "--prefix=lib", "origin", "main"], "git_push_rejected"),
         (["git", "subtree", "--prefix=lib", "push", "origin", "main"], "git_push_rejected"),
-        (["git", "-C", "repo", "-c", "safe.directory=*", "subtree", "push", "origin", "main"], "git_push_rejected"),
+        (["git", "-C", "repo", "-c", "safe.directory=*", "subtree", "push", "origin", "main"], "git_path_escape_rejected"),
         (["git", "--shallow-file", "/dev/null", "push", "--dry-run"], "git_push_rejected"),
         (["git", "--shallow-file=/dev/null", "push", "--dry-run"], "git_push_rejected"),
         (["git", "--attr-source", "HEAD", "push", "--dry-run"], "git_push_rejected"),
@@ -128,6 +128,8 @@ def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
             assert result == {"ok": False, "need_approval": False, "reason": "git_push_rejected"}, argv
         elif reason == "git_subcommand_rejected":
             assert result == {"ok": False, "need_approval": False, "reason": "git_subcommand_rejected"}, argv
+        elif reason == "git_path_escape_rejected":
+            assert result == {"ok": False, "need_approval": False, "reason": "git_path_escape_rejected"}, argv
         else:
             assert result == {"ok": False, "need_approval": True, "reason": "not_allowlisted"}, argv
 
@@ -135,6 +137,19 @@ def test_git_push_bypasses_never_run(tmp_path: Path) -> None:
     assert not (sandbox.root() / "pwned-fs.txt").exists()
     assert not (sandbox.root() / "pwned-editor.txt").exists()
     assert not (sandbox.root() / "pwned-filter.txt").exists()
+
+
+def test_git_c_and_work_tree_rejected_without_run(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    calls = _spy_runs(sandbox)
+    for argv in (
+        ["git", "-C", "/tmp", "status"],
+        ["git", "--git-dir=/tmp/repo", "status"],
+        ["git", "--work-tree", "/tmp", "status"],
+    ):
+        result = shell(sandbox, argv)
+        assert result == {"ok": False, "need_approval": False, "reason": "git_path_escape_rejected"}
+    assert calls == []
 
 
 def test_git_non_push_commands_still_run(tmp_path: Path) -> None:

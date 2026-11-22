@@ -9,13 +9,16 @@ SHELL_ALLOWLIST = frozenset({"pytest", "python", "python3", "npm", "npx", "ruff"
 
 _GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "add", "commit", "rev-parse"})
 
-_GIT_VALUE_OPTIONS = frozenset({
+_GIT_PATH_ESCAPE_OPTIONS = frozenset({
     "-C",
-    "-c",
     "--git-dir",
     "--work-tree",
-    "--namespace",
     "--super-prefix",
+    "--namespace",
+})
+
+_GIT_VALUE_OPTIONS = frozenset({
+    "-c",
     "--config-env",
     "--shallow-file",
     "--attr-source",
@@ -70,6 +73,9 @@ def shell(sandbox: Sandbox, argv: list[str]) -> dict:
 def _blocked_git(argv: list[str]) -> dict | None:
     if not argv or argv[0] != "git":
         return None
+    escaped = _git_path_escape(argv)
+    if escaped is not None:
+        return escaped
     if any(token == "send-pack" for token in argv):
         return {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
     parsed = _parse_git_invocation(argv)
@@ -86,6 +92,30 @@ def _blocked_git(argv: list[str]) -> dict | None:
         return {"ok": False, "need_approval": True, "reason": "not_allowlisted"}
     if subcommand not in _GIT_SUBCOMMANDS:
         return {"ok": False, "need_approval": False, "reason": "git_subcommand_rejected"}
+    return None
+
+
+def _git_path_escape(argv: list[str]) -> dict | None:
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            break
+        name, attached = _split_option(arg)
+        if name in _GIT_PATH_ESCAPE_OPTIONS:
+            return {"ok": False, "need_approval": False, "reason": "git_path_escape_rejected"}
+        if name in _GIT_VALUE_OPTIONS:
+            index += 2 if attached is None and index + 1 < len(argv) else 1
+            continue
+        if name in _GIT_FLAG_OPTIONS:
+            index += 1
+            continue
+        if attached is not None:
+            index += 1
+            continue
+        if arg.startswith("-"):
+            return None
+        break
     return None
 
 

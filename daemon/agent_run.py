@@ -177,7 +177,7 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
     if outcome.error:
         print(outcome.error, file=sys.stderr)
     print(f"{outcome.status}: {outcome.stop_reason}")
-    return 0 if outcome.status == "succeeded" else 1
+    return 0 if outcome.status in ("succeeded", "cancelled") else 1
 
 
 def main(argv: list[str] | None = None) -> int:

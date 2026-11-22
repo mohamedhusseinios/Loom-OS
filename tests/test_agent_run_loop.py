@@ -158,6 +158,20 @@ def test_llm_error_emits_run_failed(tmp_path: Path, monkeypatch) -> None:
     assert last["stop_reason"] == "llm_error"
 
 
+def test_manifest_cancelled_exits_0(tmp_path: Path, monkeypatch) -> None:
+    manifest_path, run_dir, _worktree = _write_manifest(
+        tmp_path, cancel_path=str(tmp_path / "run" / "cancel"),
+    )
+    (run_dir / "cancel").write_text("cancelled\n", encoding="utf-8")
+    _patch_chat(monkeypatch, _done_action())
+
+    code = main(["--manifest", str(manifest_path)])
+
+    assert code == 0
+    last = json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.cancelled"
+
+
 def test_unexpected_runner_error_emits_worker_exit(tmp_path: Path, monkeypatch) -> None:
     manifest_path, run_dir, _worktree = _write_manifest(tmp_path)
 

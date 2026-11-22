@@ -141,6 +141,8 @@ async def test_implement_creates_run_row_and_manifest(client, tmp_path):
     assert manifest["run_dir"] == str(run_dir)
     assert manifest["cancel_path"] == str(run_dir / "cancel")
     assert manifest["events_path"] == str(run_dir / "events.jsonl")
+    assert manifest["test_command"] == ["python", "-m", "pytest", "-q"]
+    assert manifest["lint_command"] == ["python", "-m", "ruff", "check", "."]
     assert "LOOM_AGENT_MANIFEST" not in os.environ
 
 
@@ -1012,3 +1014,47 @@ async def test_implement_emits_dismissed_suggestion_event(client):
     assert suggestion_events[0][2]["id"] == sug.id
     assert suggestion_events[0][2]["status"] == SuggestionStatus.DISMISSED.value
     assert any(e[0] == "task:updated" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_implement_open_run_failure_keeps_prior_status(client, monkeypatch):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Fail open", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    runtime = api_module._get_agent_runtime()
+    with patch.object(runtime, "_open_coding_run", side_effect=OSError("disk full")):
+        with pytest.raises(OSError):
+            await runtime.implement("noor", tid, spawn_worker=None)
+    task = await reg.get_agent_task(tid)
+    assert task.status == AgentTaskStatus.READY
+    assert await reg.list_agent_runs(task_id=tid) == []
+
+
+@pytest.mark.asyncio
+async def test_implement_rejects_live_worker(client):
+    import daemon.supervisor as sup_mod
+    from daemon.agent_runtime import ConflictError
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Busy", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    api_module.supervisor = sup_mod.WorkerSupervisor()
+    proc = MagicMock()
+    proc.poll.return_value = None
+    api_module.supervisor._procs[tid] = proc
+    try:
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+        assert res.status_code == 409
+        assert "worker" in res.json()["detail"].lower()
+        task = await reg.get_agent_task(tid)
+        assert task.status == AgentTaskStatus.READY
+        assert await reg.list_agent_runs(task_id=tid) == []
+        runtime = api_module._get_agent_runtime()
+        with pytest.raises(ConflictError):
+            await runtime.implement("noor", tid, worker_live=lambda _tid: True)
+    finally:
+        api_module.supervisor = None

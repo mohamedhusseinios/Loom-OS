@@ -14,6 +14,10 @@ from coding_agent.ports import CompletedProc, LlmReply
 from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S, TrackedProcess
 from daemon.llm_client import LlmClient
 
+# Rough USD/MTok estimates for runtime budget checks (not billing truth).
+_DEFAULT_INPUT_USD_PER_MTOK = 0.14
+_DEFAULT_OUTPUT_USD_PER_MTOK = 0.28
+
 
 class WorktreeSandbox:
     """Sandbox whose root is the worker worktree (typically the process cwd)."""
@@ -79,7 +83,9 @@ class SimpleUsageMeter:
         return self._input + self._output
 
     def cost_usd(self) -> float:
-        return 0.0
+        inp = (self._input / 1_000_000) * _DEFAULT_INPUT_USD_PER_MTOK
+        out = (self._output / 1_000_000) * _DEFAULT_OUTPUT_USD_PER_MTOK
+        return inp + out
 
 
 class StubContextSource:

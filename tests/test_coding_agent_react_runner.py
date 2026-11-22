@@ -170,6 +170,31 @@ def test_cancel_between_steps_emits_cancelled_without_further_llm(tmp_path: Path
     assert _events(tmp_path)[-1] == {"type": "run.cancelled", "stop_reason": "cancelled"}
 
 
+def test_fenced_json_action_parses_and_succeeds(tmp_path: Path) -> None:
+    action = _action("finished", None, done=True)
+    fenced = f"Here is the action:\n```json\n{action}\n```\n"
+    llm = ScriptedLlm([fenced])
+    session = _session(tmp_path, llm)
+
+    outcome = ReactRunner().run(session)
+
+    assert outcome.status == "succeeded"
+    assert outcome.stop_reason == "done"
+    assert llm.calls == 1
+
+
+def test_prose_wrapped_json_object_parses(tmp_path: Path) -> None:
+    payload = _action("wrap", None, done=True)
+    wrapped = f"Sure! {payload} Thanks."
+    llm = ScriptedLlm([wrapped])
+    session = _session(tmp_path, llm)
+
+    outcome = ReactRunner().run(session)
+
+    assert outcome.status == "succeeded"
+    assert outcome.stop_reason == "done"
+
+
 def test_invalid_action_json_fails_without_another_llm_call(tmp_path: Path) -> None:
     llm = ScriptedLlm(["not json", _action("should not run", None, done=True)])
     session = _session(tmp_path, llm)

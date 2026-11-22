@@ -1027,14 +1027,20 @@ async def implement_task(project_id: str, task_id: str, payload: Optional[Implem
     def _spawn(updated):
         pass
 
+    def _worker_live(task_id: str) -> bool:
+        return supervisor is not None and supervisor.is_running(task_id)
+
     try:
         updated, manifest_path = await _get_agent_runtime().implement(
             project_id, task_id, spawn_worker=_spawn, request=payload or ImplementRequest(),
+            worker_live=_worker_live,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except SelectionConflict as e:
         return JSONResponse(status_code=409, content=selection_preview_to_dict(e.preview))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if updated:

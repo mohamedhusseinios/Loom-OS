@@ -127,6 +127,10 @@ def _manifest_prompt(instruction: str, criteria: str) -> str:
     return text
 
 
+_DEFAULT_TEST_COMMAND = ["python", "-m", "pytest", "-q"]
+_DEFAULT_LINT_COMMAND = ["python", "-m", "ruff", "check", "."]
+
+
 async def seal_exited_worker_runs(registry, supervisor, emit_event, tail: JsonlEventTail) -> int:
     """Write a terminal JSONL event for open runs whose worker has already exited."""
     if supervisor is None or not hasattr(supervisor, "exited_task_ids"):
@@ -417,10 +421,12 @@ class AgentRuntime:
             return lock(recommended.family_id, list(recommended.modifier_ids), "auto", False)
         return self._fallback_lock(preview)
 
-    async def implement(self, project_id: str, task_id: str, spawn_worker=None, request: ImplementRequest | None = None):
+    async def implement(self, project_id: str, task_id: str, spawn_worker=None, request: ImplementRequest | None = None, worker_live=None):
         task = await self.registry.get_agent_task(task_id)
         if task is None or task.project != project_id:
             raise LookupError("task not found")
+        if worker_live is not None and worker_live(task_id):
+            raise ConflictError("a worker is already running for this task")
         selection = await self._resolve_selection(task, request or ImplementRequest())
         pending = await self.registry.get_pending_suggestion(task_id)
         if pending is not None:
@@ -430,22 +436,22 @@ class AgentRuntime:
                 if dismissed is not None:
                     await self.emit_event("task:suggestion", project_id, dismissed.model_dump(mode="json"))
         assignee = f"loom-agent-{project_id}"
-        await self.registry.update_agent_task(
-            task_id, status=AgentTaskStatus.RUNNING, assignee=assignee,
-        )
-        # Ensure agent row exists for worker routing
-        from daemon.models import AgentInfo
-        await self.registry.upsert_agent(AgentInfo(
-            agent_id=assignee,
-            agent_name="loom-agent",
-            version="1.0",
-            project=project_id,
-            capabilities=["chat", "implement", "orchestration"],
-        ))
         manifest_path = None
         updated = await self.registry.get_agent_task(task_id)
         if updated:
             manifest_path = await self._open_coding_run(project_id, updated, selection)
+            from daemon.models import AgentInfo
+            await self.registry.update_agent_task(
+                task_id, status=AgentTaskStatus.RUNNING, assignee=assignee,
+            )
+            await self.registry.upsert_agent(AgentInfo(
+                agent_id=assignee,
+                agent_name="loom-agent",
+                version="1.0",
+                project=project_id,
+                capabilities=["chat", "implement", "orchestration"],
+            ))
+            updated = await self.registry.get_agent_task(task_id)
         if spawn_worker and updated:
             spawn_worker(updated)
         if self.emit_event and updated:
@@ -481,6 +487,8 @@ class AgentRuntime:
             "worktree_path": task.workspace_path or "",
             "task_id": task.id,
             "project": project_id,
+            "test_command": list(_DEFAULT_TEST_COMMAND),
+            "lint_command": list(_DEFAULT_LINT_COMMAND),
         }
         manifest_path = run_dir / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

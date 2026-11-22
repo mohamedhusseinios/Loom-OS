@@ -80,8 +80,48 @@ class ReactRunner:
             messages.append({"role": "user", "content": _observation(action.tool, result)})
 
 
+def _json_payload_from_llm(content: str) -> str:
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except json.JSONDecodeError:
+        pass
+    start = cleaned.find("{")
+    if start < 0:
+        return cleaned
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(cleaned)):
+        ch = cleaned[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return cleaned[start : index + 1]
+    return cleaned
+
+
 def _parse_action(content: str) -> TurnResult:
-    data = json.loads(content)
+    data = json.loads(_json_payload_from_llm(content))
     if not isinstance(data, dict):
         raise ValueError("action must be a JSON object")
     thought = data.get("thought", "")
