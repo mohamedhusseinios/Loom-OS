@@ -10,6 +10,7 @@ const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
 
 type DecisionModel = "" | "typesafe" | "ollama" | "gliclass";
 type JudgmentBackend = "typesafe" | "ollama" | "none";
+type AutonomyMinFit = "High" | "Medium" | "Low";
 
 function providerBase(settings: AgentSettings | null, id: string): string {
   return settings?.providers?.find((p) => p.id === id)?.base_url || "";
@@ -53,6 +54,10 @@ function defaultJudgment(hasTypesafeKey: boolean): JudgmentBackend {
   return hasTypesafeKey ? "typesafe" : "none";
 }
 
+function isAutonomyMinFit(value: string | null | undefined): value is AutonomyMinFit {
+  return value === "High" || value === "Medium" || value === "Low";
+}
+
 export function AgentSettingsPanel() {
   const t = useTranslations("LoomAgent");
   const [settings, setSettings] = useState<AgentSettings | null>(null);
@@ -69,6 +74,9 @@ export function AgentSettingsPanel() {
   const [gliclassModel, setGliclassModel] = useState("");
   const [decisionModel, setDecisionModel] = useState<DecisionModel>("");
   const [judgmentProvider, setJudgmentProvider] = useState<JudgmentBackend>("none");
+  const [selectionAutonomyEnabled, setSelectionAutonomyEnabled] = useState(true);
+  const [autonomyMinFit, setAutonomyMinFit] = useState<AutonomyMinFit>("High");
+  const [autonomyRequireMargin, setAutonomyRequireMargin] = useState(true);
   const [model, setModel] = useState("deepseek-chat");
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
@@ -98,6 +106,9 @@ export function AgentSettingsPanel() {
     } else {
       setJudgmentProvider(defaultJudgment(Boolean(s.has_keys?.typesafe)));
     }
+    setSelectionAutonomyEnabled(s.selection_autonomy_enabled ?? true);
+    setAutonomyMinFit(isAutonomyMinFit(s.autonomy_min_fit) ? s.autonomy_min_fit : "High");
+    setAutonomyRequireMargin(s.autonomy_require_margin ?? true);
   }
 
   useEffect(() => {
@@ -151,6 +162,9 @@ export function AgentSettingsPanel() {
       const next = await updateAgentSettings({
         default_model: model,
         providers,
+        selection_autonomy_enabled: selectionAutonomyEnabled,
+        autonomy_min_fit: autonomyMinFit,
+        autonomy_require_margin: autonomyRequireMargin,
         ...(Object.keys(api_keys).length ? { api_keys } : {}),
         ...(roles ?? {}),
       });
@@ -248,6 +262,42 @@ export function AgentSettingsPanel() {
         </select>
       </label>
       <p className="text-[11px] text-zinc-500">{t("decisionHint")}</p>
+      <div className="border-t border-zinc-800 pt-3 space-y-2">
+        <h4 className="text-xs font-medium text-zinc-300">{t("selectionAutonomyTitle")}</h4>
+        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selectionAutonomyEnabled}
+            onChange={(e) => setSelectionAutonomyEnabled(e.target.checked)}
+            className="accent-emerald-500 w-3 h-3"
+          />
+          {t("selectionAutonomyEnabled")}
+        </label>
+        <label className="block text-xs text-zinc-400">
+          {t("autonomyMinFit")}
+          <select
+            className={FIELD_CLASS}
+            value={autonomyMinFit}
+            onChange={(e) => {
+              if (isAutonomyMinFit(e.target.value)) setAutonomyMinFit(e.target.value);
+            }}
+          >
+            <option value="High">{t("autonomyFitHigh")}</option>
+            <option value="Medium">{t("autonomyFitMedium")}</option>
+            <option value="Low">{t("autonomyFitLow")}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autonomyRequireMargin}
+            onChange={(e) => setAutonomyRequireMargin(e.target.checked)}
+            className="accent-emerald-500 w-3 h-3"
+          />
+          {t("autonomyRequireMargin")}
+        </label>
+        <p className="text-[11px] text-zinc-500">{t("selectionAutonomyHint")}</p>
+      </div>
       {showGliclass && (
         <label className="block text-xs text-zinc-400">
           {t("judgmentBackend")}

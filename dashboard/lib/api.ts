@@ -557,6 +557,9 @@ export async function updateAgentSettings(payload: {
   api_keys?: Record<string, string>;
   filter_provider?: string;
   judgment_provider?: string;
+  selection_autonomy_enabled?: boolean;
+  autonomy_min_fit?: string;
+  autonomy_require_margin?: boolean;
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
