@@ -60,6 +60,25 @@ def test_builtin_react_loads_as_active_family() -> None:
     assert doc.runner == "react"
 
 
+_LAUNCH_ACTIVE_IDS = frozenset({
+    "react",
+    "plan_then_execute",
+    "tdd",
+    "debug",
+    "review_only",
+})
+
+
+def test_launch_catalog_has_five_active_families() -> None:
+    registry = load_patterns(FAMILIES)
+    active_ids = frozenset(doc.id for doc in registry.active_families())
+
+    assert active_ids == _LAUNCH_ACTIVE_IDS
+    planned = registry.get("orchestrator_workers")
+    assert planned.status == "planned"
+    assert "orchestrator_workers" not in active_ids
+
+
 def test_planned_family_excluded_from_active_families() -> None:
     registry = load_patterns(FAMILIES)
     planned = registry.get("orchestrator_workers")
@@ -67,7 +86,9 @@ def test_planned_family_excluded_from_active_families() -> None:
     assert planned.status == "planned"
     assert planned.schema_version == 1
     active = registry.active_families()
-    assert [doc.id for doc in active] == ["react"]
+    active_ids = {doc.id for doc in active}
+    assert "orchestrator_workers" not in active_ids
+    assert active_ids == _LAUNCH_ACTIVE_IDS
     assert all(doc.status == "active" for doc in active)
 
 

@@ -1,0 +1,36 @@
+id: tdd
+name: TDD
+kind: family
+schema_version: 1
+version: 1
+status: active
+description: >
+  Test-driven loop. Write or extend a failing test, implement the minimum code
+  to pass, refactor, and repeat until the task criteria are met.
+when_to_use:
+  - New behavior with clear acceptance checks expressible as tests
+  - Bug fixes where a regression test should lock the fix
+  - Codebases with fast, reliable unit or integration tests
+anti_criteria:
+  - No test runner or harness is available
+  - The change is docs-only or configuration with no executable checks
+  - Exploratory spikes where tests would be throwaway
+steps:
+  - id: red
+    description: Add or update a test that fails for the missing behavior.
+  - id: green
+    description: Implement the smallest change that makes the test pass.
+  - id: refactor
+    description: Clean up while keeping tests green.
+allowed_tools:
+  - read_file
+  - edit
+  - search
+  - shell
+  - git
+  - run_tests
+  - run_lint
+required_capabilities: []
+expected_cost_class: Med
+expected_steps: "3-50"
+runner: tdd
