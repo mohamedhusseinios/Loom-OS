@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -17,11 +18,19 @@ pub struct StackConfig {
     pub packaged: bool,
 }
 
+/// Child handles live behind a *sync* mutex that is never held across an `.await`, so
+/// `shutdown` (GUI exit / SIGINT) can always run, even while `ensure_and_start` is in flight.
 #[derive(Default)]
+pub(crate) struct Inner {
+    pub(crate) owned: bool,
+    shutting_down: bool,
+    pub(crate) daemon: Option<Child>,
+    pub(crate) dashboard: Option<Child>,
+}
+
+#[derive(Clone, Default)]
 pub struct StackManager {
-    pub owned: bool,
-    daemon: Option<Child>,
-    dashboard: Option<Child>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 /// Split `http://host:port/path` into (host, port, path). Only plain http is supported.
@@ -51,8 +60,9 @@ pub fn parse_status_line(response: &str) -> Option<u16> {
     parts.next()?.parse().ok()
 }
 
-pub fn is_success(status: u16) -> bool {
-    (200..300).contains(&status)
+/// Dashboard readiness: Next + next-intl answers `/` with a 307 redirect to `/en`, so 2xx or 3xx both mean "up".
+pub fn is_dashboard_ready(status: u16) -> bool {
+    (200..400).contains(&status)
 }
 
 async fn http_get_status(url: &str) -> Option<u16> {
@@ -69,16 +79,16 @@ async fn http_get_status(url: &str) -> Option<u16> {
     tokio::time::timeout(Duration::from_secs(2), work).await.ok().flatten()
 }
 
-/// True iff daemon `/api/health` is 200 and dashboard `/` is 2xx.
+/// True iff daemon `/api/health` is 200 and dashboard `/` is 2xx or 3xx.
 pub async fn probe_healthy(daemon_url: &str, dashboard_url: &str) -> bool {
     let daemon_ok = http_get_status(&format!("{}/api/health", daemon_url.trim_end_matches('/'))).await == Some(200);
     if !daemon_ok {
         return false;
     }
-    http_get_status(&format!("{}/", dashboard_url.trim_end_matches('/'))).await.is_some_and(is_success)
+    http_get_status(&format!("{}/", dashboard_url.trim_end_matches('/'))).await.is_some_and(is_dashboard_ready)
 }
 
-/// Install root: `LOOM_DESKTOP_REPO` override, else repo checkout (`manifest_dir/../../..`) in dev, else the support `app` dir.
+/// Install root: `LOOM_DESKTOP_REPO` override, else repo checkout (`manifest_dir/../..`, since manifest_dir is `<repo>/desktop/src-tauri`) in dev, else the support `app` dir.
 pub fn resolve_install_root(packaged: bool, env_override: Option<PathBuf>, manifest_dir: &Path, packaged_dir: &Path) -> PathBuf {
     if let Some(p) = env_override {
         return p;
@@ -86,7 +96,7 @@ pub fn resolve_install_root(packaged: bool, env_override: Option<PathBuf>, manif
     if packaged {
         return packaged_dir.to_path_buf();
     }
-    manifest_dir.join("..").join("..").join("..")
+    manifest_dir.join("..").join("..")
 }
 
 /// Packaged when built without debug assertions, or when `LOOM_DESKTOP_PACKAGED=1`.
@@ -177,14 +187,34 @@ fn spawn_logged(label: &str, cmd: &mut std::process::Command, log: &str) -> Resu
 }
 
 #[cfg(unix)]
+fn group_alive(pgid: i32) -> bool {
+    unsafe { libc::kill(-pgid, 0) == 0 }
+}
+
+#[cfg(unix)]
 fn kill_tree(child: &mut Child) {
     let pgid = child.id() as i32;
     // Child leads its own process group (process_group(0)), so signalling -pgid reaches the whole tree.
     unsafe {
         libc::kill(-pgid, libc::SIGTERM);
     }
+    let mut leader_gone = false;
     for _ in 0..20 {
         if matches!(child.try_wait(), Ok(Some(_))) {
+            leader_gone = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if !leader_gone {
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+    // The leader may exit while descendants ignore/outlive SIGTERM: give them a short grace, then SIGKILL the group.
+    for _ in 0..10 {
+        if !group_alive(pgid) {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -192,7 +222,6 @@ fn kill_tree(child: &mut Child) {
     unsafe {
         libc::kill(-pgid, libc::SIGKILL);
     }
-    let _ = child.wait();
 }
 
 #[cfg(windows)]
@@ -206,9 +235,17 @@ impl StackManager {
         Self::default()
     }
 
-    pub async fn ensure_and_start(&mut self, cfg: &StackConfig) -> Result<()> {
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn is_owned(&self) -> bool {
+        self.lock().owned
+    }
+
+    pub async fn ensure_and_start(&self, cfg: &StackConfig) -> Result<()> {
         if probe_healthy(&cfg.daemon_url, &cfg.dashboard_url).await {
-            self.owned = false;
+            self.lock().owned = false;
             return Ok(());
         }
         let cfg_owned = cfg.clone();
@@ -224,29 +261,45 @@ impl StackManager {
         if !daemon_up {
             let mut cmd = std::process::Command::new(venv_bin(root).join(exe("loom")));
             cmd.args(["start", "--host", &daemon_host, "--port", &daemon_port.to_string()]).current_dir(root).env("PATH", &path).env("VIRTUAL_ENV", root.join(".venv"));
-            self.daemon = Some(spawn_logged("daemon", &mut cmd, "daemon.log")?);
+            // Handle is stored (and `owned` set) under the sync lock the instant the child exists; no await in between.
+            let mut g = self.lock();
+            if g.shutting_down {
+                return Err("shutdown in progress".to_string());
+            }
+            g.daemon = Some(spawn_logged("daemon", &mut cmd, "daemon.log")?);
+            g.owned = true;
         }
-        let dashboard_up = http_get_status(&format!("{}/", cfg.dashboard_url.trim_end_matches('/'))).await.is_some_and(is_success);
+        let dashboard_up = http_get_status(&format!("{}/", cfg.dashboard_url.trim_end_matches('/'))).await.is_some_and(is_dashboard_ready);
         if !dashboard_up {
             let script = if cfg.packaged { "start" } else { "dev" };
             let mut cmd = std::process::Command::new(npm());
             cmd.args(["run", script, "--", "-p", &dashboard_port.to_string()]).current_dir(root.join("dashboard")).env("PATH", &path);
-            self.dashboard = Some(spawn_logged("dashboard", &mut cmd, "dashboard.log")?);
+            let mut g = self.lock();
+            if g.shutting_down {
+                return Err("shutdown in progress".to_string());
+            }
+            g.dashboard = Some(spawn_logged("dashboard", &mut cmd, "dashboard.log")?);
+            g.owned = true;
         }
-        self.owned = true;
 
         for _ in 0..HEALTH_POLL_ATTEMPTS {
             if probe_healthy(&cfg.daemon_url, &cfg.dashboard_url).await {
                 return Ok(());
             }
-            if let Some(c) = self.daemon.as_mut() {
-                if let Ok(Some(status)) = c.try_wait() {
-                    return Err(format!("daemon exited early ({status}); see daemon.log"));
+            {
+                let mut g = self.lock();
+                if g.shutting_down {
+                    return Err("shutdown in progress".to_string());
                 }
-            }
-            if let Some(c) = self.dashboard.as_mut() {
-                if let Ok(Some(status)) = c.try_wait() {
-                    return Err(format!("dashboard exited early ({status}); see dashboard.log"));
+                if let Some(c) = g.daemon.as_mut() {
+                    if let Ok(Some(status)) = c.try_wait() {
+                        return Err(format!("daemon exited early ({status}); see daemon.log"));
+                    }
+                }
+                if let Some(c) = g.dashboard.as_mut() {
+                    if let Ok(Some(status)) = c.try_wait() {
+                        return Err(format!("dashboard exited early ({status}); see dashboard.log"));
+                    }
                 }
             }
             tokio::time::sleep(HEALTH_POLL_INTERVAL).await;
@@ -255,14 +308,21 @@ impl StackManager {
     }
 
     /// Kill owned process trees; no-op when attached to an externally managed stack.
-    pub fn shutdown(&mut self) {
-        if !self.owned {
-            return;
-        }
-        for mut child in [self.dashboard.take(), self.daemon.take()].into_iter().flatten() {
+    /// Safe to call from any thread at any time (GUI exit, SIGINT handler), including mid-`ensure_and_start`.
+    pub fn shutdown(&self) {
+        let children = {
+            let mut g = self.lock();
+            g.shutting_down = true; // stop any in-flight ensure from spawning more
+            if !g.owned {
+                return;
+            }
+            g.owned = false;
+            [g.dashboard.take(), g.daemon.take()]
+        };
+        // Kill outside the lock so ensure_and_start is never blocked behind the SIGTERM grace period.
+        for mut child in children.into_iter().flatten() {
             kill_tree(&mut child);
         }
-        self.owned = false;
     }
 }
 
@@ -308,6 +368,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn probe_true_when_dashboard_redirects() {
+        // Next + next-intl answers `/` with 307 -> `/en`.
+        let daemon = serve(vec![("/api/health", "200 OK")]).await;
+        let dash = serve(vec![("/", "307 Temporary Redirect")]).await;
+        assert!(probe_healthy(&daemon, &dash).await);
+    }
+
+    #[tokio::test]
     async fn probe_false_when_dashboard_not_2xx() {
         let daemon = serve(vec![("/api/health", "200 OK")]).await;
         let dash = serve(vec![("/", "503 Service Unavailable")]).await;
@@ -322,13 +390,24 @@ mod tests {
         assert!(!probe_healthy(&dead, &dead).await);
     }
 
+    #[cfg(unix)]
     #[test]
     fn shutdown_noop_when_not_owned() {
-        let mut m = StackManager::new();
-        m.owned = false;
+        let child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let pid = child.id() as i32;
+        let m = StackManager::new();
+        {
+            let mut g = m.lock();
+            g.owned = false;
+            g.daemon = Some(child);
+        }
         m.shutdown();
-        assert!(!m.owned);
-        assert!(m.daemon.is_none() && m.dashboard.is_none());
+        assert!(!m.is_owned());
+        assert!(m.lock().daemon.is_some(), "attached stack: child handle must be untouched");
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "non-owned child must still be alive");
+        let mut c = m.lock().daemon.take().unwrap();
+        let _ = c.kill();
+        let _ = c.wait();
     }
 
     #[cfg(unix)]
@@ -339,13 +418,52 @@ mod tests {
         cmd.args(["-c", "sleep 60 & wait"]).process_group(0);
         let child = cmd.spawn().unwrap();
         let pid = child.id() as i32;
-        let mut m = StackManager::new();
-        m.owned = true;
-        m.daemon = Some(child);
+        let m = StackManager::new();
+        {
+            let mut g = m.lock();
+            g.owned = true;
+            g.daemon = Some(child);
+        }
         m.shutdown();
-        assert!(!m.owned);
+        assert!(!m.is_owned());
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(unsafe { libc::kill(-pid, 0) }, -1, "process group should be gone");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_sigkills_group_when_leader_exits_but_descendant_survives() {
+        use std::os::unix::process::CommandExt;
+        // Leader exits on SIGTERM-independent path; the background sleep ignores SIGTERM and outlives it.
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", "trap '' TERM; sleep 60 & exit 0"]).process_group(0);
+        let child = cmd.spawn().unwrap();
+        let pid = child.id() as i32;
+        std::thread::sleep(Duration::from_millis(300));
+        let m = StackManager::new();
+        {
+            let mut g = m.lock();
+            g.owned = true;
+            g.dashboard = Some(child);
+        }
+        m.shutdown();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(unsafe { libc::kill(-pid, 0) }, -1, "surviving descendant must be SIGKILLed");
+    }
+
+    #[test]
+    fn shutdown_during_ensure_still_sees_children() {
+        // Children registered by ensure_and_start are reachable from shutdown without any async lock.
+        let m = StackManager::new();
+        let m2 = m.clone();
+        let t = std::thread::spawn(move || {
+            let mut g = m2.lock();
+            g.owned = true;
+        });
+        t.join().unwrap();
+        m.shutdown();
+        assert!(!m.is_owned());
+        assert!(m.lock().shutting_down);
     }
 
     #[test]
@@ -355,7 +473,7 @@ mod tests {
         assert_eq!(parse_http_url("https://x"), None);
         assert_eq!(parse_status_line("HTTP/1.1 204 No Content\r\n"), Some(204));
         assert_eq!(parse_status_line("garbage"), None);
-        assert!(is_success(200) && !is_success(404));
+        assert!(is_dashboard_ready(307) && is_dashboard_ready(200) && !is_dashboard_ready(404) && !is_dashboard_ready(503));
     }
 
     #[test]
@@ -365,6 +483,24 @@ mod tests {
         assert_eq!(resolve_install_root(false, Some("/custom".into()), manifest, app), PathBuf::from("/custom"));
         assert_eq!(resolve_install_root(true, Some("/custom".into()), manifest, app), PathBuf::from("/custom"));
         assert_eq!(resolve_install_root(true, None, manifest, app), PathBuf::from("/support/app"));
-        assert_eq!(resolve_install_root(false, None, manifest, app), PathBuf::from("/repo/desktop/src-tauri/../../.."));
+        assert_eq!(resolve_install_root(false, None, manifest, app), PathBuf::from("/repo/desktop/src-tauri/../.."));
+    }
+
+    #[test]
+    fn install_root_is_repo_checkout_with_real_manifest_dir() {
+        let root = resolve_install_root(false, None, Path::new(env!("CARGO_MANIFEST_DIR")), Path::new("/unused"));
+        assert!(root.join("pyproject.toml").is_file(), "pyproject.toml missing under {}", root.display());
+        assert!(root.join("dashboard").is_dir(), "dashboard/ missing under {}", root.display());
+    }
+
+    #[test]
+    fn install_root_resolves_to_repo_in_temp_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = tmp.path().join("desktop").join("src-tauri");
+        std::fs::create_dir_all(&manifest).unwrap();
+        std::fs::write(tmp.path().join("pyproject.toml"), "").unwrap();
+        std::fs::create_dir_all(tmp.path().join("dashboard")).unwrap();
+        let root = resolve_install_root(false, None, &manifest, Path::new("/unused"));
+        assert_eq!(root.canonicalize().unwrap(), tmp.path().canonicalize().unwrap());
     }
 }
