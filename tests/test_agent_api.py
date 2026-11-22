@@ -795,3 +795,82 @@ async def test_implement_fallback_default_when_clients_skip(client):
     assert run.selection_skip_reason
     manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["runner_fallback"] is False
+
+
+@pytest.mark.asyncio
+async def test_implement_cross_project_task_404(client):
+    reg = api_module.registry
+    await reg.upsert_project("other", "/tmp/other-project")
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(project="other", title="Theirs", instruction="not yours"))
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+    assert res.status_code == 404
+    assert prev.status_code == 404
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_settings_failure_falls_back_to_react(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+
+    async def boom(self):
+        raise RuntimeError("settings unavailable")
+
+    with patch.object(agent_runtime_module.AgentRuntime, "_decision_settings", boom), patch.object(api_module, "_route_task_execution", return_value=True):
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert prev.status_code == 200
+    assert prev.json()["fallback"] is True
+    assert prev.json()["recommended"]["family_id"] == "react"
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+
+
+@pytest.mark.asyncio
+async def test_implement_pattern_load_failure_falls_back_to_react(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+
+    def boom(directory):
+        raise RuntimeError("bad families dir")
+
+    with patch.object(agent_runtime_module, "load_patterns", boom), patch.object(api_module, "_route_task_execution", return_value=True):
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd"})
+    assert prev.status_code == 200
+    assert prev.json()["fallback"] is True
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+
+
+@pytest.mark.asyncio
+async def test_implement_runner_fallback_derives_from_runner_key(client, tmp_path):
+    import coding_agent.patterns as patterns_pkg
+    src = (Path(patterns_pkg.__file__).parent / "families" / "react.yaml").read_text(encoding="utf-8")
+    fam_dir = tmp_path / "families"
+    fam_dir.mkdir()
+    (fam_dir / "react.yaml").write_text(src, encoding="utf-8")
+    alias = src.replace("id: react\n", "id: react_alias\n", 1)
+    assert "id: react_alias" in alias and "runner: react" in alias
+    (fam_dir / "react_alias.yaml").write_text(alias, encoding="utf-8")
+    norunner = src.replace("id: react\n", "id: norunner\n", 1).replace("runner: react\n", "")
+    assert "runner:" not in norunner
+    (fam_dir / "norunner.yaml").write_text(norunner, encoding="utf-8")
+    reg = api_module.registry
+    results = {}
+    for fam in ("react_alias", "norunner"):
+        tid = await _new_task(reg)
+        with _patch_selection(), patch.object(agent_runtime_module, "FAMILIES_DIR", fam_dir), patch.object(api_module, "_route_task_execution", return_value=True):
+            res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": fam})
+        assert res.status_code == 200
+        run = (await reg.list_agent_runs(task_id=tid))[0]
+        assert run.family_id == fam
+        results[fam] = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))["runner_fallback"]
+    assert results == {"react_alias": False, "norunner": True}

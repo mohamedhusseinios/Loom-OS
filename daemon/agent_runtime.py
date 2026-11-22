@@ -39,6 +39,7 @@ class LockedSelection:
     chosen_source: str  # user | auto | fallback_default
     user_override: bool
     preview: SelectionPreview | None
+    runner_key: str = FALLBACK_FAMILY_ID
 
 # task_id -> last auto-suggest monotonic time
 _suggest_cooldown: dict[str, float] = {}
@@ -325,49 +326,78 @@ class AgentRuntime:
             null = NullDecisionClient()
             return null, null
 
-    async def preview_selection(self, task) -> SelectionPreview:
-        """Stateless strategy preview. Never raises on provider/config failure (falls back to react)."""
-        settings, raw_keys = await self._decision_settings()
-        registry = load_patterns(FAMILIES_DIR)
+    def _synthetic_preview(self, reason: str) -> SelectionPreview:
+        preview = SelectionPreview(fallback=True, skip_reason=reason)
+        react = RankedStrategy(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], fit="High", why=[FALLBACK_WHY], expected_cost_class=None, name="ReAct")
+        preview.ranked, preview.top3, preview.recommended = [react], [react], react
+        preview.auto_decidable = True
+        return preview
+
+    async def _preview_with(self, task, settings, raw_keys, registry) -> SelectionPreview:
         relevance, judgment = self._selection_clients(settings, raw_keys)
+        return await preview_strategies(
+            task_instruction=task.instruction or "",
+            acceptance_criteria=getattr(task, "acceptance_criteria", "") or "",
+            registry=registry, relevance=relevance, judgment=judgment,
+            available_capabilities=set(),
+            autonomy_min_fit=settings.autonomy_min_fit,
+            autonomy_require_margin=settings.autonomy_require_margin,
+        )
+
+    async def preview_selection(self, task) -> SelectionPreview:
+        """Stateless strategy preview. Never raises on settings/pattern/provider failure (falls back to react)."""
         try:
-            return await preview_strategies(
-                task_instruction=task.instruction or "",
-                acceptance_criteria=getattr(task, "acceptance_criteria", "") or "",
-                registry=registry, relevance=relevance, judgment=judgment,
-                available_capabilities=set(),
-                autonomy_min_fit=settings.autonomy_min_fit,
-                autonomy_require_margin=settings.autonomy_require_margin,
-            )
+            settings, raw_keys = await self._decision_settings()
+            registry = load_patterns(FAMILIES_DIR)
+            return await self._preview_with(task, settings, raw_keys, registry)
         except Exception:
             logger.warning("strategy preview failed; falling back to react", exc_info=True)
-            preview = SelectionPreview(fallback=True, skip_reason="error")
-            react = RankedStrategy(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], fit="High", why=[FALLBACK_WHY], expected_cost_class=None, name="ReAct")
-            preview.ranked, preview.top3, preview.recommended = [react], [react], react
-            preview.auto_decidable = True
-            return preview
+            return self._synthetic_preview("error")
+
+    def _fallback_lock(self, preview: SelectionPreview) -> LockedSelection:
+        return LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=preview, runner_key=FALLBACK_FAMILY_ID)
 
     async def _resolve_selection(self, task, request: ImplementRequest) -> LockedSelection:
-        settings, _ = await self._decision_settings()
-        preview = await self.preview_selection(task)
-        active_ids = {doc.id for doc in load_patterns(FAMILIES_DIR).active_families()}
+        try:
+            settings, raw_keys = await self._decision_settings()
+            registry = load_patterns(FAMILIES_DIR)
+            active = {doc.id: doc for doc in registry.active_families()}
+            try:
+                preview = await self._preview_with(task, settings, raw_keys, registry)
+            except Exception:
+                logger.warning("strategy preview failed; falling back to react", exc_info=True)
+                preview = self._synthetic_preview("error")
+            return self._lock_from_preview(request, preview, active, settings.selection_autonomy_enabled)
+        except (SelectionConflict, ValueError):
+            raise
+        except Exception:
+            logger.warning("selection setup failed; falling back to react", exc_info=True)
+            return self._fallback_lock(self._synthetic_preview("error"))
+
+    def _lock_from_preview(self, request: ImplementRequest, preview: SelectionPreview, active: dict, autonomy_enabled: bool) -> LockedSelection:
         recommended = preview.recommended
+
+        def lock(family_id: str, modifier_ids: list[str], source: str, override: bool) -> LockedSelection:
+            doc = active.get(family_id)
+            runner_key = (doc.runner or doc.id) if doc is not None else family_id
+            return LockedSelection(family_id=family_id, modifier_ids=modifier_ids, chosen_source=source, user_override=override, preview=preview, runner_key=runner_key)
+
         if request.choice == "user":
-            if not request.family_id or request.family_id not in active_ids:
-                raise ValueError(f"family_id must be one of the active families: {sorted(active_ids)}")
+            if not request.family_id or request.family_id not in active:
+                raise ValueError(f"family_id must be one of the active families: {sorted(active)}")
             override = recommended is None or request.family_id != recommended.family_id
-            return LockedSelection(family_id=request.family_id, modifier_ids=list(request.modifier_ids), chosen_source="user", user_override=override, preview=preview)
+            return lock(request.family_id, list(request.modifier_ids), "user", override)
         if preview.fallback:
-            return LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=preview)
-        if not preview.auto_decidable and settings.selection_autonomy_enabled:
+            return self._fallback_lock(preview)
+        if not preview.auto_decidable and autonomy_enabled:
             raise SelectionConflict(preview)
-        if recommended is not None and recommended.family_id in active_ids:
-            return LockedSelection(family_id=recommended.family_id, modifier_ids=list(recommended.modifier_ids), chosen_source="auto", user_override=False, preview=preview)
-        return LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=preview)
+        if recommended is not None and recommended.family_id in active:
+            return lock(recommended.family_id, list(recommended.modifier_ids), "auto", False)
+        return self._fallback_lock(preview)
 
     async def implement(self, project_id: str, task_id: str, spawn_worker=None, request: ImplementRequest | None = None):
         task = await self.registry.get_agent_task(task_id)
-        if task is None:
+        if task is None or task.project != project_id:
             raise LookupError("task not found")
         selection = await self._resolve_selection(task, request or ImplementRequest())
         assignee = f"loom-agent-{project_id}"
@@ -397,7 +427,7 @@ class AgentRuntime:
         if selection is None:
             selection = LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=None)
         preview = selection.preview
-        runner_fallback = selection.family_id != FALLBACK_FAMILY_ID
+        runner_fallback = selection.runner_key != FALLBACK_FAMILY_ID
         telemetry = _selection_telemetry(selection)
         run_id = str(uuid.uuid4())
         run_dir = loom_run_dir(run_id)
