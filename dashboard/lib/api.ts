@@ -505,6 +505,9 @@ export interface AgentSettings {
   has_keys: Record<string, boolean>;
   filter_provider?: string | null;
   judgment_provider?: string | null;
+  selection_autonomy_enabled?: boolean;
+  autonomy_min_fit?: string;
+  autonomy_require_margin?: boolean;
 }
 
 export interface TaskSuggestion {
@@ -621,11 +624,62 @@ export async function dismissSuggestion(projectId: string, suggestionId: string)
   return res.json();
 }
 
-export async function implementTask(projectId: string, taskId: string): Promise<AgentTask> {
-  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
+export type FitLevel = "High" | "Medium" | "Low";
+
+export interface RankedStrategy {
+  family_id: string;
+  modifier_ids: string[];
+  fit: FitLevel;
+  why: string[];
+  expected_cost_class: string | null;
+  name: string;
+}
+
+export interface SelectionPreview {
+  ranked: RankedStrategy[];
+  top3: RankedStrategy[];
+  auto_decidable: boolean;
+  fallback: boolean;
+  recommended: RankedStrategy | null;
+  scores: Record<string, number>;
+  skip_reason: string | null;
+  provider: string;
+  model: string;
+}
+
+export interface ImplementRequest {
+  choice: "user" | "auto";
+  family_id?: string;
+  modifier_ids?: string[];
+}
+
+/** Thrown by implementTask when the daemon answers 409 with a fresh selection preview. */
+export class ImplementConflictError extends Error {
+  preview: SelectionPreview;
+
+  constructor(preview: SelectionPreview) {
+    super("Implement selection conflict");
+    this.name = "ImplementConflictError";
+    this.preview = preview;
+  }
+}
+
+export async function previewImplement(projectId: string, taskId: string): Promise<SelectionPreview> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement/preview`, {
     method: "POST",
     headers: authHeaders(),
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function implementTask(projectId: string, taskId: string, body?: ImplementRequest): Promise<AgentTask> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
+    method: "POST",
+    headers: body ? authHeaders({ "Content-Type": "application/json" }) : authHeaders(),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 409) throw new ImplementConflictError(await res.json());
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

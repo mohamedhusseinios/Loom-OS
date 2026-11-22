@@ -284,6 +284,33 @@
     "loading": "Loading federation index...",
     "degree": "Degree {deg}"
   },
+  "ImplementPicker": {
+    "title": "Choose an implementation pattern",
+    "subtitle": "Pick how the agent should approach this task, or let it decide.",
+    "fit": {
+      "high": "High fit",
+      "medium": "Medium fit",
+      "low": "Low fit"
+    },
+    "cost": "Cost: {band}",
+    "costBand": {
+      "low": "Low",
+      "med": "Medium",
+      "high": "High"
+    },
+    "costUnknown": "Unknown",
+    "why": "Why",
+    "selectionFallback": "Selection fell back to the default pattern.",
+    "pick": "Use this pattern",
+    "letAgentDecide": "Let agent decide",
+    "autonomyBlocked": "The agent could not decide on its own for this task. Please pick a pattern.",
+    "autonomyDisabled": "Agent autonomy is turned off in settings. Please pick a pattern.",
+    "fallbackNotice": "Pattern ranking was unavailable. Showing the default pattern.",
+    "noCandidates": "No patterns available for this task.",
+    "loading": "Ranking patterns…",
+    "error": "Could not start implementation.",
+    "cancel": "Cancel"
+  },
   "LoomAgent": {
     "title": "Loom Agent",
     "settings": "Settings",
