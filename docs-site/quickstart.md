@@ -7,17 +7,24 @@ Get a daemon and dashboard running, register your first agent, and see it show u
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install loom-os
-loom --port 8472
+loom start --port 8472
 ```
 
-This starts the Loom daemon (FastAPI + uvicorn) on `http://127.0.0.1:8472`. It watches `~/.loom/inbox/` for files and persists state to `~/.loom/state.db` (SQLite).
+This starts the Loom daemon (FastAPI + uvicorn) on `http://127.0.0.1:8472`. It watches `~/.loom/inbox/` for files and persists state to `~/.loom/state.db` (SQLite). (`loom --port 8472` is shorthand for `loom start`.)
 
 !!! note "No LLM keys required"
     The base install works without any LLM. If you want optional LLM-powered extraction (Ollama / OpenAI / Claude), install with `pip install loom-os[llm]` instead — see [Knowledge graph](concepts/knowledge-graph.md).
 
-## 2. Register an agent
+## 2. Bootstrap a project (or register an agent)
 
-Drop a `register.json` into the inbox for your project. Create the directory and file directly:
+Fastest path — create the inbox, drop a starter `register.json`, and wire agent configs:
+
+```bash
+loom init --project my-project --project-path /abs/path/to/my-project
+loom wire --project my-project --project-path /abs/path/to/my-project   # optional if init already wired
+```
+
+Or drop a `register.json` by hand:
 
 ```bash
 mkdir -p ~/.loom/inbox/my-project

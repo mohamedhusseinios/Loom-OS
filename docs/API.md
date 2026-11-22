@@ -1,6 +1,6 @@
 # API Reference
 
-All endpoints on `http://localhost:8472`. CORS allows only `http://localhost:3000`.
+All endpoints on `http://localhost:8472`. CORS allows `http://localhost:3000` and `http://127.0.0.1:3000`.
 
 ## REST Endpoints
 
@@ -44,6 +44,17 @@ All endpoints on `http://localhost:8472`. CORS allows only `http://localhost:300
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/projects/:id/agents` | List agents with status and capabilities |
+| `GET` | `/api/projects/:id/agents/match?capability=` | Match agents by capability name/description |
+| `GET` | `/api/team/status` | Team mode status (auth enabled + active users) |
+| `GET` | `/api/plugins` | Discovered extractor plugins |
+
+### Federation (cross-project, read-only)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/federated/stats` | Org-wide index summary + shared symbols |
+| `GET` | `/api/federated/query?q=` | Search symbols/nodes across all projects |
+| `GET` | `/api/federated/references?q=` | Cross-project references for a symbol |
 
 ### Tasks & Dispatch
 

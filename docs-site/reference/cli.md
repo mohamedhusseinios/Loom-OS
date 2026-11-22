@@ -21,7 +21,7 @@ loom start --port 8472    # explicit form
 
 ## `loom init`
 
-Bootstrap a project: creates the inbox directory and a starter `register.json` in one step.
+Bootstrap a project: creates the inbox directory and a starter `register.json` in one step. By default also runs agent wiring (same as `loom wire`); pass `--no-wire` to skip.
 
 ```bash
 loom init --project my-app --project-path .
@@ -32,6 +32,21 @@ loom init --project my-app --project-path .
 | `--project` | required | Project identifier |
 | `--project-path` | `.` | Path to the project |
 | `--agent` | `claude-code` | Initial agent name |
+| `--no-wire` | off | Skip writing `CLAUDE.md` / `AGENTS.md` / `.mcp.json` / `.cursorrules` |
+
+## `loom wire`
+
+Zero-config agent wiring for a project. Detects installed coding assistants and writes or updates instruction / MCP config files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.mcp.json`) so agents can talk to Loom without hand-editing configs.
+
+```bash
+loom wire --project my-app
+loom wire --project my-app --project-path /abs/path/to/repo
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--project` | required | Project identifier |
+| `--project-path` | `.` | Path to the project |
 
 ## `loom register`
 

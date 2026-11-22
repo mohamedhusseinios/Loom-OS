@@ -123,3 +123,71 @@ def test_supervisor_loom_agent_env_injects_settings_key(tmp_path, monkeypatch):
     env = WorkerSupervisor._loom_agent_env()
     assert env["LOOM_AGENT_API_KEY"] == "sk-injected"
     assert env["DEEPSEEK_API_KEY"] == "sk-injected"
+
+
+def test_supervisor_loom_agent_env_overrides_process_deepseek_key(tmp_path, monkeypatch):
+    """Dashboard BYOK must win over a daemon-process DEEPSEEK_API_KEY."""
+    import json
+    import sqlite3
+    from daemon.supervisor import WorkerSupervisor
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+        (
+            "deepseek-chat",
+            json.dumps([{
+                "id": "deepseek", "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+            }]),
+            json.dumps({"deepseek": "sk-dashboard"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    env = WorkerSupervisor._loom_agent_env()
+    assert env["LOOM_AGENT_API_KEY"] == "sk-dashboard"
+    assert env["DEEPSEEK_API_KEY"] == "sk-dashboard"
+
+
+def test_resolve_llm_config_prefers_settings_over_deepseek_env(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from daemon.agent_run import resolve_llm_config
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?)",
+        (
+            "deepseek-chat",
+            json.dumps([{
+                "id": "deepseek", "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+            }]),
+            json.dumps({"deepseek": "sk-from-dashboard"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    key, _, _ = resolve_llm_config()
+    assert key == "sk-from-dashboard"

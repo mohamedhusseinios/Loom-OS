@@ -44,12 +44,13 @@ def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str,
 
 
 def resolve_llm_config() -> tuple[str, str, str]:
-    """Env overrides settings DB (for supervisor-injected keys)."""
+    """Match chat: dashboard settings first, then LOOM_AGENT_*/DEEPSEEK_* env."""
     db_key, db_base, db_model = load_llm_config_from_settings()
     api_key = (
-        os.environ.get("LOOM_AGENT_API_KEY")
+        db_key
+        or os.environ.get("LOOM_AGENT_API_KEY")
         or os.environ.get("DEEPSEEK_API_KEY")
-        or db_key
+        or ""
     )
     base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
     model = os.environ.get("LOOM_AGENT_MODEL") or db_model

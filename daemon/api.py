@@ -984,6 +984,8 @@ async def dismiss_suggestion(project_id: str, suggestion_id: str):
         sug = await _get_agent_runtime().dismiss_suggestion(project_id, suggestion_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return sug.model_dump(mode="json") if sug else {}
 
 

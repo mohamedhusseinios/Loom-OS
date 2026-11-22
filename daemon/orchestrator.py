@@ -404,8 +404,9 @@ def template_reply(action_label: str) -> str:
     return f"Suggested next step: {action_label}"
 
 
-def filter_cache_key(provider: str, model: str, ctx_hash: str) -> str:
-    return f"{provider}\x1f{model}\x1f{ctx_hash}"
+def filter_cache_key(provider: str, model: str, ctx_hash: str, thresholds: Mapping[str, float] | None = None) -> str:
+    thr = json.dumps(dict(thresholds or {}), sort_keys=True, separators=(",", ":"))
+    return f"{provider}\x1f{model}\x1f{ctx_hash}\x1f{thr}"
 
 
 def _provider_id(value: str) -> ProviderId:
@@ -606,7 +607,7 @@ class Orchestrator:
             filter_skipped = True
             filter_skip_reason = "error"
         elif hits and relevance is not None:
-            cache_key = filter_cache_key(filter_provider, filter_model, ctx_hash)
+            cache_key = filter_cache_key(filter_provider, filter_model, ctx_hash, filter_thresholds)
             cached = _filter_cache_get(cache_key)
             if cached is not None:
                 filtered, mid_from_filter = cached
