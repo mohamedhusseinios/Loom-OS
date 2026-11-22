@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -278,6 +278,12 @@ class AgentMessageRecord(BaseModel):
     role: str  # user | assistant | system
     content: str
     created_at: str
+
+
+class ImplementRequest(BaseModel):
+    choice: Literal["user", "auto"] = "auto"
+    family_id: Optional[str] = None
+    modifier_ids: list[str] = Field(default_factory=list)
 
 
 class AgentChatRequest(BaseModel):

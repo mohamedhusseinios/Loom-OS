@@ -624,3 +624,174 @@ def test_decision_fields_round_trip_keeps_masked_keys(client):
     kept = client.get("/api/agent/settings")
     assert kept.json()["filter_provider"] == "gliclass"
     assert kept.json()["judgment_provider"] == "typesafe"
+
+
+_SEL_STAGE1 = {"type:bugfix": 0.9, "size:small": 0.8, "risk:low": 0.7, "has_tests:yes": 0.9, "repo_familiarity:high": 0.6}
+_SEL_DECIDABLE = {"debug": 0.9, "tdd": 0.4, "react": 0.3, "plan_then_execute": 0.2, "review_only": 0.1}
+_SEL_AMBIGUOUS = {"debug": 0.9, "tdd": 0.85, "react": 0.3, "plan_then_execute": 0.2, "review_only": 0.1}
+
+
+class _SelClient:
+    def __init__(self, scores, skipped=False):
+        self.scores, self.skipped = scores, skipped
+
+    def filter_relevance(self, **kwargs):
+        raise AssertionError("unused")
+
+    def judge(self, *, pack, **kwargs):
+        from daemon.decision import DecisionResult
+        scores = _SEL_STAGE1 if pack == "pattern_stage1" else self.scores
+        return DecisionResult(scores=dict(scores), provider="fake", model="m", skipped=self.skipped, skip_reason="none" if self.skipped else None)
+
+
+def _patch_selection(scores=None, skipped=False):
+    stage1 = _SelClient(_SEL_STAGE1, skipped)
+    stage2 = _SelClient(scores or _SEL_DECIDABLE, skipped)
+    return patch.object(agent_runtime_module.AgentRuntime, "_selection_clients", lambda self, settings, raw_keys: (stage1, stage2))
+
+
+async def _new_task(reg):
+    return await reg.create_agent_task(AgentTaskCreatePayload(project="noor", title="Sel", instruction="fix login bug"))
+
+
+@pytest.mark.asyncio
+async def test_implement_preview_shape_and_stateless(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection():
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["recommended"]["family_id"] == "debug"
+    assert body["auto_decidable"] is True
+    assert [r["family_id"] for r in body["top3"]][0] == "debug"
+    assert len(body["top3"]) == 3
+    assert body["fallback"] is False
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_preview_unknown_task_404(client):
+    assert client.post("/api/projects/noor/tasks/nope/implement/preview").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_locks_family(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "modifier_ids": ["m1"]})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "tdd"
+    assert json.loads(run.modifier_ids_json) == ["m1"]
+    assert run.chosen_source == "user"
+    assert run.user_override is True
+    assert json.loads(run.recommended_json)["family_id"] == "debug"
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["family_id"] == "tdd"
+    assert manifest["modifier_ids"] == ["m1"]
+    assert manifest["runner_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_matching_recommendation_not_override(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "debug"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.user_override is False
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_react_no_runner_fallback(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "react"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{"choice": "user"}, {"choice": "user", "family_id": "orchestrator_workers"}, {"choice": "user", "family_id": "nope"}])
+async def test_implement_user_pick_invalid_family_400(client, body):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection():
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json=body)
+    assert res.status_code == 400
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_409_when_not_decidable(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 409
+    assert res.json()["auto_decidable"] is False
+    assert res.json()["recommended"]["family_id"] == "debug"
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_not_decidable_autonomy_disabled_proceeds(client):
+    reg = api_module.registry
+    from daemon.models import AgentSettingsUpdate
+    await reg.update_agent_settings(AgentSettingsUpdate(selection_autonomy_enabled=False))
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    assert (await reg.list_agent_runs(task_id=tid))[0].family_id == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_success_locks_recommended(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "debug"
+    assert run.chosen_source == "auto"
+    assert run.user_override is False
+    assert run.selection_filter_provider == "fake"
+    assert json.loads(run.selection_scores_json)["debug"] == 0.9
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_implement_empty_body_compat(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    assert (await reg.list_agent_runs(task_id=tid))[0].family_id == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_fallback_default_when_clients_skip(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(skipped=True), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+    assert run.selection_skip_reason
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is False

@@ -3,24 +3,42 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+import coding_agent.patterns as patterns_pkg
+from coding_agent.patterns import load_patterns
+from coding_agent.selection import RankedStrategy
 from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
 from daemon.agent_credentials import resolve_deepseek_key
+from daemon.decision import NullDecisionClient, DecisionClient, build_decision_clients, resolve_decision_config
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
-    AgentChatRequest, AgentChatResponse, AgentTaskStatus, SuggestionStatus,
+    AgentChatRequest, AgentChatResponse, AgentTaskStatus, ImplementRequest, SuggestionStatus,
 )
+from daemon.pattern_selection import FALLBACK_FAMILY_ID, FALLBACK_WHY, SelectionPreview, preview_strategies
 from daemon.orchestrator import (
     LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult, context_hash,
 )
 
 logger = logging.getLogger("loom.agent_runtime")
+
+FAMILIES_DIR = Path(patterns_pkg.__file__).parent / "families"
+
+
+@dataclass
+class LockedSelection:
+    family_id: str
+    modifier_ids: list[str]
+    chosen_source: str  # user | auto | fallback_default
+    user_override: bool
+    preview: SelectionPreview | None
 
 # task_id -> last auto-suggest monotonic time
 _suggest_cooldown: dict[str, float] = {}
@@ -298,10 +316,60 @@ class AgentRuntime:
             raise LookupError("suggestion not found")
         return await self.registry.set_suggestion_status(suggestion_id, SuggestionStatus.DISMISSED)
 
-    async def implement(self, project_id: str, task_id: str, spawn_worker=None):
+    def _selection_clients(self, settings, raw_keys) -> tuple[DecisionClient, DecisionClient]:
+        try:
+            config = resolve_decision_config(settings, raw_keys)
+            return build_decision_clients(config)
+        except Exception:
+            logger.warning("decision config unavailable; selection will fall back to react", exc_info=True)
+            null = NullDecisionClient()
+            return null, null
+
+    async def preview_selection(self, task) -> SelectionPreview:
+        """Stateless strategy preview. Never raises on provider/config failure (falls back to react)."""
+        settings, raw_keys = await self._decision_settings()
+        registry = load_patterns(FAMILIES_DIR)
+        relevance, judgment = self._selection_clients(settings, raw_keys)
+        try:
+            return await preview_strategies(
+                task_instruction=task.instruction or "",
+                acceptance_criteria=getattr(task, "acceptance_criteria", "") or "",
+                registry=registry, relevance=relevance, judgment=judgment,
+                available_capabilities=set(),
+                autonomy_min_fit=settings.autonomy_min_fit,
+                autonomy_require_margin=settings.autonomy_require_margin,
+            )
+        except Exception:
+            logger.warning("strategy preview failed; falling back to react", exc_info=True)
+            preview = SelectionPreview(fallback=True, skip_reason="error")
+            react = RankedStrategy(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], fit="High", why=[FALLBACK_WHY], expected_cost_class=None, name="ReAct")
+            preview.ranked, preview.top3, preview.recommended = [react], [react], react
+            preview.auto_decidable = True
+            return preview
+
+    async def _resolve_selection(self, task, request: ImplementRequest) -> LockedSelection:
+        settings, _ = await self._decision_settings()
+        preview = await self.preview_selection(task)
+        active_ids = {doc.id for doc in load_patterns(FAMILIES_DIR).active_families()}
+        recommended = preview.recommended
+        if request.choice == "user":
+            if not request.family_id or request.family_id not in active_ids:
+                raise ValueError(f"family_id must be one of the active families: {sorted(active_ids)}")
+            override = recommended is None or request.family_id != recommended.family_id
+            return LockedSelection(family_id=request.family_id, modifier_ids=list(request.modifier_ids), chosen_source="user", user_override=override, preview=preview)
+        if preview.fallback:
+            return LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=preview)
+        if not preview.auto_decidable and settings.selection_autonomy_enabled:
+            raise SelectionConflict(preview)
+        if recommended is not None and recommended.family_id in active_ids:
+            return LockedSelection(family_id=recommended.family_id, modifier_ids=list(recommended.modifier_ids), chosen_source="auto", user_override=False, preview=preview)
+        return LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=preview)
+
+    async def implement(self, project_id: str, task_id: str, spawn_worker=None, request: ImplementRequest | None = None):
         task = await self.registry.get_agent_task(task_id)
         if task is None:
             raise LookupError("task not found")
+        selection = await self._resolve_selection(task, request or ImplementRequest())
         assignee = f"loom-agent-{project_id}"
         await self.registry.update_agent_task(
             task_id, status=AgentTaskStatus.RUNNING, assignee=assignee,
@@ -318,22 +386,31 @@ class AgentRuntime:
         manifest_path = None
         updated = await self.registry.get_agent_task(task_id)
         if updated:
-            manifest_path = await self._open_coding_run(project_id, updated)
+            manifest_path = await self._open_coding_run(project_id, updated, selection)
         if spawn_worker and updated:
             spawn_worker(updated)
         if self.emit_event and updated:
             await self.emit_event("task:updated", project_id, updated.model_dump(mode="json"))
         return updated, manifest_path
 
-    async def _open_coding_run(self, project_id: str, task) -> str:
+    async def _open_coding_run(self, project_id: str, task, selection: LockedSelection | None = None) -> str:
+        if selection is None:
+            selection = LockedSelection(family_id=FALLBACK_FAMILY_ID, modifier_ids=[], chosen_source="fallback_default", user_override=False, preview=None)
+        preview = selection.preview
+        runner_fallback = selection.family_id != FALLBACK_FAMILY_ID
+        telemetry = _selection_telemetry(selection)
         run_id = str(uuid.uuid4())
         run_dir = loom_run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         cancel_path = run_dir / "cancel"
         events_path = run_dir / "events.jsonl"
         manifest = {
-            "family_id": "react",
-            "modifier_ids": [],
+            "family_id": selection.family_id,
+            "modifier_ids": list(selection.modifier_ids),
+            "runner_fallback": runner_fallback,
+            "chosen_source": selection.chosen_source,
+            "user_override": selection.user_override,
+            "selection": telemetry,
             "step_limit": DEFAULT_STEP_LIMIT,
             "token_limit": DEFAULT_TOKEN_LIMIT,
             "cost_limit": DEFAULT_COST_LIMIT_USD,
@@ -352,9 +429,12 @@ class AgentRuntime:
         os.environ.pop("LOOM_AGENT_MANIFEST", None)
         await self.registry.create_agent_run(
             task_id=task.id, project=project_id, run_dir=str(run_dir),
-            worktree_path=task.workspace_path, family_id="react", modifier_ids_json="[]",
+            worktree_path=task.workspace_path, family_id=selection.family_id,
+            modifier_ids_json=json.dumps(list(selection.modifier_ids)),
+            chosen_source=selection.chosen_source, user_override=selection.user_override,
             status="running", step_limit=DEFAULT_STEP_LIMIT, token_limit=DEFAULT_TOKEN_LIMIT,
             cost_limit=DEFAULT_COST_LIMIT_USD, run_id=run_id,
+            **_selection_run_columns(preview),
         )
         return str(manifest_path)
 
@@ -395,6 +475,53 @@ def _suggestion_fields(result: SuggestResult) -> dict:
         "judgment_latency_ms": result.judgment_latency_ms,
         "effective_thresholds_json": result.effective_thresholds_json or None,
     }
+
+
+def selection_preview_to_dict(preview: SelectionPreview) -> dict:
+    return dataclasses.asdict(preview)
+
+
+def _selection_telemetry(selection: LockedSelection) -> dict:
+    preview = selection.preview
+    if preview is None:
+        return {"chosen_source": selection.chosen_source}
+    data = selection_preview_to_dict(preview)
+    return {
+        "chosen_source": selection.chosen_source,
+        "user_override": selection.user_override,
+        "recommended": data["recommended"],
+        "scores": data["scores"],
+        "fallback": data["fallback"],
+        "skip_reason": data["skip_reason"],
+        "stage1_profile": data["stage1_profile"],
+        "stage1_provider": data["stage1_provider"],
+        "stage2_provider": data["stage2_provider"],
+    }
+
+
+def _selection_run_columns(preview: SelectionPreview | None) -> dict:
+    if preview is None:
+        return {}
+    data = selection_preview_to_dict(preview)
+    return {
+        "recommended_json": json.dumps(data["recommended"]) if data["recommended"] is not None else None,
+        "stage1_profile_json": json.dumps(data["stage1_profile"]),
+        "fit_levels_json": json.dumps({r["family_id"]: r["fit"] for r in data["ranked"]}),
+        "selection_scores_json": json.dumps(data["scores"]),
+        "selection_filter_provider": data["stage1_provider"],
+        "selection_judgment_provider": data["stage2_provider"],
+        "selection_filter_skipped": data["stage1_skipped"],
+        "selection_judgment_skipped": data["stage2_skipped"],
+        "selection_skip_reason": data["skip_reason"],
+    }
+
+
+class SelectionConflict(Exception):
+    """HTTP 409 — auto selection is not decidable; carries the preview for the client."""
+
+    def __init__(self, preview: SelectionPreview) -> None:
+        super().__init__("auto selection is not decidable; choose a strategy")
+        self.preview = preview
 
 
 class ConflictError(Exception):

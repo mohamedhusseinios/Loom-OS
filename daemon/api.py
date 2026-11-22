@@ -29,7 +29,9 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, drain_run_jsonl, seal_exited_worker_runs
+from fastapi.responses import JSONResponse
+from daemon.models import ImplementRequest
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
 from daemon.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -1002,8 +1004,20 @@ async def get_pending_suggestion(project_id: str, task_id: str):
     return {"suggestion": sug.model_dump(mode="json")}
 
 
+@app.post("/api/projects/{project_id}/tasks/{task_id}/implement/preview")
+async def implement_preview(project_id: str, task_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    task = await registry.get_agent_task(task_id)
+    if task is None or task.project != project_id:
+        raise HTTPException(status_code=404, detail="task not found")
+    preview = await _get_agent_runtime().preview_selection(task)
+    return selection_preview_to_dict(preview)
+
+
 @app.post("/api/projects/{project_id}/tasks/{task_id}/implement")
-async def implement_task(project_id: str, task_id: str):
+async def implement_task(project_id: str, task_id: str, payload: Optional[ImplementRequest] = Body(default=None)):
     project = await registry.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1013,10 +1027,14 @@ async def implement_task(project_id: str, task_id: str):
 
     try:
         updated, manifest_path = await _get_agent_runtime().implement(
-            project_id, task_id, spawn_worker=_spawn,
+            project_id, task_id, spawn_worker=_spawn, request=payload or ImplementRequest(),
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SelectionConflict as e:
+        return JSONResponse(status_code=409, content=selection_preview_to_dict(e.preview))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if updated:
         await _route_task_execution(project_id, updated, manifest_path=manifest_path)
     return updated.model_dump() if updated else {}
