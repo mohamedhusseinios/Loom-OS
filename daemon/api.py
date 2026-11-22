@@ -930,6 +930,8 @@ def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
 async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
     current = await registry.get_agent_settings(mask_keys=True)
     _validate_decision_settings(payload, current)
+    if payload.autonomy_min_fit is not None and payload.autonomy_min_fit not in {"High", "Medium", "Low"}:
+        raise HTTPException(status_code=400, detail="autonomy_min_fit must be High, Medium, or Low")
     return (await registry.update_agent_settings(payload)).model_dump()
 
 

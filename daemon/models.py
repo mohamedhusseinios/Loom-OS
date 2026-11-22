@@ -247,6 +247,9 @@ class AgentSettings(BaseModel):
     filter_provider: Optional[str] = None
     judgment_provider: Optional[str] = None
     threshold_overrides: Optional[dict] = None
+    selection_autonomy_enabled: bool = True
+    autonomy_min_fit: str = "High"
+    autonomy_require_margin: bool = True
 
 
 class AgentSettingsUpdate(BaseModel):
@@ -256,6 +259,9 @@ class AgentSettingsUpdate(BaseModel):
     filter_provider: Optional[str] = None
     judgment_provider: Optional[str] = None
     threshold_overrides: Optional[dict] = None
+    selection_autonomy_enabled: Optional[bool] = None
+    autonomy_min_fit: Optional[str] = None
+    autonomy_require_margin: Optional[bool] = None
 
 
 class AgentChatRecord(BaseModel):

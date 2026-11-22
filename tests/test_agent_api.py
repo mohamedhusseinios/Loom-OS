@@ -506,6 +506,30 @@ def test_get_settings_includes_decision_providers(client):
     assert body["judgment_provider"] is None
 
 
+def test_autonomy_settings_defaults_update_and_validate(client):
+    initial = client.get("/api/agent/settings")
+    assert initial.status_code == 200
+    assert initial.json()["selection_autonomy_enabled"] is True
+    assert initial.json()["autonomy_min_fit"] == "High"
+    assert initial.json()["autonomy_require_margin"] is True
+
+    updated = client.put("/api/agent/settings", json={
+        "selection_autonomy_enabled": False,
+        "autonomy_min_fit": "Medium",
+        "autonomy_require_margin": False,
+    })
+    assert updated.status_code == 200
+    assert updated.json()["selection_autonomy_enabled"] is False
+    assert updated.json()["autonomy_min_fit"] == "Medium"
+    assert updated.json()["autonomy_require_margin"] is False
+
+    invalid = client.put("/api/agent/settings", json={"autonomy_min_fit": "medium"})
+    assert invalid.status_code == 400
+    assert "autonomy_min_fit" in invalid.json()["detail"]
+    kept = client.get("/api/agent/settings")
+    assert kept.json()["autonomy_min_fit"] == "Medium"
+
+
 def test_judgment_provider_gliclass_rejected(client):
     res = client.put("/api/agent/settings", json={
         "filter_provider": "gliclass",

@@ -48,6 +48,9 @@ _SETTINGS_DECISION_COLUMNS = (
     ("filter_provider", "TEXT"),
     ("judgment_provider", "TEXT"),
     ("threshold_overrides_json", "TEXT"),
+    ("selection_autonomy_enabled", "INTEGER NOT NULL DEFAULT 1"),
+    ("autonomy_min_fit", "TEXT NOT NULL DEFAULT 'High'"),
+    ("autonomy_require_margin", "INTEGER NOT NULL DEFAULT 1"),
 )
 
 
@@ -161,7 +164,10 @@ class AgentRegistry:
                 api_keys_json TEXT NOT NULL DEFAULT '{}',
                 filter_provider TEXT,
                 judgment_provider TEXT,
-                threshold_overrides_json TEXT
+                threshold_overrides_json TEXT,
+                selection_autonomy_enabled INTEGER NOT NULL DEFAULT 1,
+                autonomy_min_fit TEXT NOT NULL DEFAULT 'High',
+                autonomy_require_margin INTEGER NOT NULL DEFAULT 1
             )
         """)
         cursor = await self.db.execute("PRAGMA table_info(agent_settings)")
@@ -905,7 +911,7 @@ class AgentRegistry:
         raw = row["threshold_overrides_json"] if "threshold_overrides_json" in keys else None
         return filt, judg, AgentRegistry._threshold_overrides_from_raw(raw)
 
-    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool, filter_provider: str | None = None, judgment_provider: str | None = None, threshold_overrides: dict | None = None) -> AgentSettings:
+    def _agent_settings_view(self, creds: StoredAgentCredentials, mask_keys: bool, filter_provider: str | None = None, judgment_provider: str | None = None, threshold_overrides: dict | None = None, selection_autonomy_enabled: bool = True, autonomy_min_fit: str = "High", autonomy_require_margin: bool = True) -> AgentSettings:
         providers = [AgentProviderConfig(**p) for p in creds.providers]
         masked = creds.masked_keys() if mask_keys else dict(creds.keys)
         return AgentSettings(
@@ -916,6 +922,9 @@ class AgentRegistry:
             filter_provider=filter_provider,
             judgment_provider=judgment_provider,
             threshold_overrides=threshold_overrides,
+            selection_autonomy_enabled=selection_autonomy_enabled,
+            autonomy_min_fit=autonomy_min_fit,
+            autonomy_require_margin=autonomy_require_margin,
         )
 
     async def _ensure_default_agent_providers(self) -> None:
@@ -938,7 +947,8 @@ class AgentRegistry:
     async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
         cursor = await self.db.execute(
             "SELECT default_model, providers_json, api_keys_json,"
-            " filter_provider, judgment_provider, threshold_overrides_json"
+            " filter_provider, judgment_provider, threshold_overrides_json,"
+            " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
@@ -946,6 +956,9 @@ class AgentRegistry:
         return self._agent_settings_view(
             self._settings_from_row(row), mask_keys,
             filter_provider=filt, judgment_provider=judg, threshold_overrides=overrides,
+            selection_autonomy_enabled=bool(row["selection_autonomy_enabled"]),
+            autonomy_min_fit=row["autonomy_min_fit"],
+            autonomy_require_margin=bool(row["autonomy_require_margin"]),
         )
 
     async def get_raw_api_keys(self) -> dict[str, str]:
@@ -961,7 +974,8 @@ class AgentRegistry:
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
         cursor = await self.db.execute(
             "SELECT default_model, providers_json, api_keys_json,"
-            " filter_provider, judgment_provider, threshold_overrides_json"
+            " filter_provider, judgment_provider, threshold_overrides_json,"
+            " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
@@ -990,11 +1004,25 @@ class AgentRegistry:
             judg = payload.judgment_provider
         if payload.threshold_overrides is not None:
             raw_overrides = json.dumps(payload.threshold_overrides)
+        selection_autonomy_enabled = bool(row["selection_autonomy_enabled"])
+        autonomy_min_fit = row["autonomy_min_fit"]
+        autonomy_require_margin = bool(row["autonomy_require_margin"])
+        if payload.selection_autonomy_enabled is not None:
+            selection_autonomy_enabled = payload.selection_autonomy_enabled
+        if payload.autonomy_min_fit is not None:
+            autonomy_min_fit = payload.autonomy_min_fit
+        if payload.autonomy_require_margin is not None:
+            autonomy_require_margin = payload.autonomy_require_margin
         await self.db.execute(
             "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?,"
-            " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?"
+            " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?,"
+            " selection_autonomy_enabled = ?, autonomy_min_fit = ?, autonomy_require_margin = ?"
             " WHERE id = 1",
-            (default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg, raw_overrides),
+            (
+                default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg,
+                raw_overrides, selection_autonomy_enabled, autonomy_min_fit,
+                autonomy_require_margin,
+            ),
         )
         await self.db.commit()
         return await self.get_agent_settings(mask_keys=True)
