@@ -23,7 +23,8 @@ class ApplyResult:
 
 def apply_search_replace(path: Path, search: str, replace: str) -> ApplyResult:
     try:
-        original = path.read_text(encoding="utf-8", newline="")
+        with path.open(encoding="utf-8", newline="") as source:
+            original = source.read()
     except (OSError, UnicodeError):
         return ApplyResult(ok=False, reason="not_found")
     updated, result = _replace_text(original, search, replace)
