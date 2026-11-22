@@ -681,7 +681,7 @@ async def test_implement_user_pick_locks_family(client):
     reg = api_module.registry
     tid = await _new_task(reg)
     with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
-        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "modifier_ids": ["m1"]})
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "modifier_ids": ["m1"], "recommended_family_id": "debug"})
     assert res.status_code == 200
     run = (await reg.list_agent_runs(task_id=tid))[0]
     assert run.family_id == "tdd"
@@ -700,7 +700,7 @@ async def test_implement_user_pick_matching_recommendation_not_override(client):
     reg = api_module.registry
     tid = await _new_task(reg)
     with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
-        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "debug"})
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "debug", "recommended_family_id": "debug"})
     assert res.status_code == 200
     run = (await reg.list_agent_runs(task_id=tid))[0]
     assert run.user_override is False
@@ -874,3 +874,50 @@ async def test_implement_runner_fallback_derives_from_runner_key(client, tmp_pat
         assert run.family_id == fam
         results[fam] = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))["runner_fallback"]
     assert results == {"react_alias": False, "norunner": True}
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_does_not_rescore(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    stage1 = _SelClient(_SEL_STAGE1, False)
+    stage2 = _SelClient(_SEL_DECIDABLE, False)
+    calls = []
+    orig = _SelClient.judge
+
+    def counting(self, *, pack, **kwargs):
+        calls.append(pack)
+        return orig(self, pack=pack, **kwargs)
+
+    with patch.object(_SelClient, "judge", counting), patch.object(agent_runtime_module.AgentRuntime, "_selection_clients", lambda self, settings, raw_keys: (stage1, stage2)), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "recommended_family_id": "debug"})
+    assert res.status_code == 200
+    assert calls == []
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "tdd" and run.user_override is True
+    assert json.loads(run.recommended_json)["family_id"] == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_without_recommended_not_override(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.user_override is False
+    assert run.recommended_json is None
+
+
+@pytest.mark.asyncio
+async def test_implement_delegate_never_409_when_not_decidable(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "delegate"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "debug"
+    assert run.chosen_source == "auto"
+    assert run.user_override is False

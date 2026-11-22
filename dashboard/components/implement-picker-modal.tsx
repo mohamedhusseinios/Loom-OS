@@ -79,11 +79,11 @@ export function ImplementPickerModal(props: ImplementPickerModalProps) {
   }
 
   function handlePick(strategy: RankedStrategy) {
-    void submit({ choice: "user", family_id: strategy.family_id, modifier_ids: strategy.modifier_ids });
+    void submit({ choice: "user", family_id: strategy.family_id, modifier_ids: strategy.modifier_ids, recommended_family_id: preview.recommended?.family_id });
   }
 
   function handleAuto() {
-    void submit({ choice: "auto" });
+    void submit({ choice: "delegate" });
   }
 
   function whyText(line: string): string {

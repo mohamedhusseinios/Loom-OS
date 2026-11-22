@@ -22,6 +22,8 @@ STAGE1_PACK = "pattern_stage1"
 STAGE2_PACK = "pattern_stage2"
 FALLBACK_FAMILY_ID = "react"
 FALLBACK_WHY = "selection_fallback"
+CLIENT_SNAPSHOT_WHY = "client_snapshot"
+_STAGE1_RETRY_REASONS = frozenset({"unsupported"})
 DEFAULT_PROFILE = TaskProfile(type="feature", size="med", risk="med", has_tests=False, repo_familiarity="unknown")
 
 # Profile dimension -> allowed labels. Candidate ids are ``<dimension>:<label>``.
@@ -112,6 +114,12 @@ def _catalog(candidates: list[StrategyCandidate]) -> list[dict]:
     return [{"id": c.family_id, "name": c.doc.name, "when_to_use": list(c.doc.when_to_use), "anti_criteria": list(c.doc.anti_criteria)} for c in candidates]
 
 
+def _why_lines(doc: PatternDoc, score: float) -> list[str]:
+    """Human-readable reasons: the family's first when_to_use lines, else a bare fit label (never numeric scores)."""
+    lines = [line.strip() for line in doc.when_to_use if isinstance(line, str) and line.strip()][:3]
+    return lines or [f"{fit_level_from_score(score)} fit"]
+
+
 def _fallback_ranked(registry: PatternRegistry) -> list[RankedStrategy]:
     doc = _react_doc(registry)
     if doc is None:
@@ -147,6 +155,10 @@ async def preview_strategies(*, task_instruction: str, acceptance_criteria: str,
 
     # Stage 1: task profile
     stage1 = await _call_judge(relevance, pack=STAGE1_PACK, task=task, catalog=profile_candidates, candidates=profile_candidates)
+    if stage1.skipped and stage1.skip_reason in _STAGE1_RETRY_REASONS:
+        # e.g. GLiClass judge always skips (unsupported): retry the profile on the judgment client.
+        preview.latency_ms += stage1.latency_ms
+        stage1 = await _call_judge(judgment, pack=STAGE1_PACK, task=task, catalog=profile_candidates, candidates=profile_candidates)
     preview.stage1_provider, preview.stage1_model = stage1.provider, stage1.model
     preview.latency_ms += stage1.latency_ms
     profile = None if stage1.skipped else _profile_from_scores(stage1.scores)
@@ -184,6 +196,6 @@ async def preview_strategies(*, task_instruction: str, acceptance_criteria: str,
 
     scores = {c.family_id: float(stage2.scores[c.family_id]) for c in scored}
     preview.scores = scores
-    why_by_id = {fid: [f"{fit_level_from_score(score)} fit (score {score:.2f})"] for fid, score in scores.items()}
+    why_by_id = {c.family_id: _why_lines(c.doc, scores[c.family_id]) for c in scored}
     ranked = rank_strategies(scored, scores, why_by_id)
     return _finish(preview, ranked, min_fit=autonomy_min_fit, require_margin=autonomy_require_margin)

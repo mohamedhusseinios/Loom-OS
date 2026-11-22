@@ -22,7 +22,7 @@ from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, ImplementRequest, SuggestionStatus,
 )
-from daemon.pattern_selection import FALLBACK_FAMILY_ID, FALLBACK_WHY, SelectionPreview, preview_strategies
+from daemon.pattern_selection import CLIENT_SNAPSHOT_WHY, FALLBACK_FAMILY_ID, FALLBACK_WHY, SelectionPreview, preview_strategies
 from daemon.orchestrator import (
     LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult, context_hash,
 )
@@ -359,9 +359,12 @@ class AgentRuntime:
 
     async def _resolve_selection(self, task, request: ImplementRequest) -> LockedSelection:
         try:
-            settings, raw_keys = await self._decision_settings()
             registry = load_patterns(FAMILIES_DIR)
             active = {doc.id: doc for doc in registry.active_families()}
+            if request.choice == "user":
+                # The client already holds a preview; never re-score on the user path.
+                return self._lock_user_pick(request, self._client_snapshot_preview(request, active), active)
+            settings, raw_keys = await self._decision_settings()
             try:
                 preview = await self._preview_with(task, settings, raw_keys, registry)
             except Exception:
@@ -374,6 +377,22 @@ class AgentRuntime:
             logger.warning("selection setup failed; falling back to react", exc_info=True)
             return self._fallback_lock(self._synthetic_preview("error"))
 
+    def _client_snapshot_preview(self, request: ImplementRequest, active: dict) -> SelectionPreview:
+        """Preview stand-in built from the client's recommendation snapshot (no provider calls)."""
+        preview = SelectionPreview()
+        doc = active.get(request.recommended_family_id) if request.recommended_family_id else None
+        if doc is not None:
+            rec = RankedStrategy(family_id=doc.id, modifier_ids=[], fit="Medium", why=[CLIENT_SNAPSHOT_WHY], expected_cost_class=doc.expected_cost_class, name=doc.name)
+            preview.ranked, preview.top3, preview.recommended = [rec], [rec], rec
+        return preview
+
+    def _lock_user_pick(self, request: ImplementRequest, preview: SelectionPreview, active: dict) -> LockedSelection:
+        if not request.family_id or request.family_id not in active:
+            raise ValueError(f"family_id must be one of the active families: {sorted(active)}")
+        doc = active[request.family_id]
+        override = request.recommended_family_id is not None and request.family_id != request.recommended_family_id
+        return LockedSelection(family_id=request.family_id, modifier_ids=list(request.modifier_ids), chosen_source="user", user_override=override, preview=preview, runner_key=doc.runner or doc.id)
+
     def _lock_from_preview(self, request: ImplementRequest, preview: SelectionPreview, active: dict, autonomy_enabled: bool) -> LockedSelection:
         recommended = preview.recommended
 
@@ -383,13 +402,11 @@ class AgentRuntime:
             return LockedSelection(family_id=family_id, modifier_ids=modifier_ids, chosen_source=source, user_override=override, preview=preview, runner_key=runner_key)
 
         if request.choice == "user":
-            if not request.family_id or request.family_id not in active:
-                raise ValueError(f"family_id must be one of the active families: {sorted(active)}")
-            override = recommended is None or request.family_id != recommended.family_id
-            return lock(request.family_id, list(request.modifier_ids), "user", override)
+            return self._lock_user_pick(request, preview, active)
         if preview.fallback:
             return self._fallback_lock(preview)
-        if not preview.auto_decidable and autonomy_enabled:
+        # "delegate" never conflicts: it accepts the recommendation even when not auto-decidable.
+        if request.choice == "auto" and not preview.auto_decidable and autonomy_enabled:
             raise SelectionConflict(preview)
         if recommended is not None and recommended.family_id in active:
             return lock(recommended.family_id, list(recommended.modifier_ids), "auto", False)

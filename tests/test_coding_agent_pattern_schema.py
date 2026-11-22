@@ -77,6 +77,7 @@ def test_launch_catalog_has_five_active_families() -> None:
     planned = registry.get("orchestrator_workers")
     assert planned.status == "planned"
     assert "orchestrator_workers" not in active_ids
+    assert "edit" not in registry.get("review_only").allowed_tools
 
 
 def test_planned_family_excluded_from_active_families() -> None:

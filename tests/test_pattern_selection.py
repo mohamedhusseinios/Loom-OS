@@ -173,3 +173,35 @@ async def test_partial_stage2_scores_fall_back_to_react() -> None:
     assert [r.family_id for r in preview.ranked] == ["react"]
     assert preview.ranked[0].why == ["selection_fallback"]
     assert preview.scores == {}
+
+
+async def test_stage1_unsupported_relevance_retries_on_judgment() -> None:
+    relevance = FakeClient(skipped=True, skip_reason="unsupported")
+    judgment = FakeClient({**_STAGE1_SCORES, "debug": 0.9, "tdd": 0.5, "react": 0.4, "plan_then_execute": 0.1, "review_only": 0.1})
+    preview = await _run(relevance, judgment)
+    assert not preview.fallback
+    assert not preview.stage1_skipped
+    assert preview.stage1_profile.type == "bugfix"
+    assert [c["pack"] for c in judgment.calls] == ["pattern_stage1", "pattern_stage2"]
+    assert preview.recommended is not None and preview.recommended.family_id == "debug"
+
+
+async def test_stage1_non_unsupported_skip_does_not_retry() -> None:
+    judgment = FakeClient(_STAGE1_SCORES)
+    preview = await _run(FakeClient(skipped=True, skip_reason="timeout"), judgment)
+    assert preview.fallback and judgment.calls == []
+
+
+async def test_why_lines_use_when_to_use_without_scores() -> None:
+    preview = await _run(FakeClient(_STAGE1_SCORES), FakeClient({"debug": 0.9, "tdd": 0.6, "react": 0.5, "plan_then_execute": 0.2, "review_only": 0.1}))
+    docs = {d.id: d for d in _registry().active_families()}
+    for r in preview.ranked:
+        assert r.why and len(r.why) <= 3
+        assert not any("score" in w.lower() or "0." in w for w in r.why)
+        assert r.why == [w.strip() for w in docs[r.family_id].when_to_use][:3]
+
+
+async def test_why_falls_back_to_fit_label_when_no_when_to_use() -> None:
+    doc = PatternDoc(id="react", name="ReAct", kind="family", schema_version=1, version=1, status="active", description="d", expected_cost_class="Med")
+    preview = await preview_strategies(task_instruction="x", acceptance_criteria="y", registry=PatternRegistry([doc]), relevance=FakeClient(_STAGE1_SCORES), judgment=FakeClient({"react": 0.9}), available_capabilities=_CAPS)
+    assert preview.recommended is not None and preview.recommended.why == ["High fit"]

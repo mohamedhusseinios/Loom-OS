@@ -651,8 +651,9 @@ export interface SelectionPreview {
 }
 
 export interface ImplementRequest {
-  choice: "user" | "auto";
+  choice: "user" | "auto" | "delegate";
   family_id?: string;
+  recommended_family_id?: string;
   modifier_ids?: string[];
 }
 

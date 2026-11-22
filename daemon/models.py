@@ -281,8 +281,9 @@ class AgentMessageRecord(BaseModel):
 
 
 class ImplementRequest(BaseModel):
-    choice: Literal["user", "auto"] = "auto"
+    choice: Literal["user", "auto", "delegate"] = "auto"
     family_id: Optional[str] = None
+    recommended_family_id: Optional[str] = None
     modifier_ids: list[str] = Field(default_factory=list)
 
 
