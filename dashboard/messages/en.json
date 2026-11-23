@@ -390,5 +390,17 @@
     "costDismiss": "Dismiss {rate}",
     "costEmpty": "No suggestion usage yet.",
     "costLoadError": "Could not load usage summary."
+  },
+  "AgentApp": {
+    "title": "Loom Agent",
+    "pickProject": "Choose a project",
+    "noProjects": "No projects registered yet.",
+    "selectTask": "Task",
+    "projectChat": "Project chat (no task)",
+    "changeProject": "Change project",
+    "implement": "Implement",
+    "cancelRun": "Cancel run",
+    "loading": "Loading…",
+    "stackHint": "Runs against your local Loom stack at 127.0.0.1:8472."
   }
 }

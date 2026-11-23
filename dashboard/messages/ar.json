@@ -390,5 +390,17 @@
     "costDismiss": "رفض {rate}",
     "costEmpty": "لا يوجد استخدام للاقتراحات بعد.",
     "costLoadError": "تعذر تحميل ملخص الاستخدام."
+  },
+  "AgentApp": {
+    "title": "وكيل Loom",
+    "pickProject": "اختر مشروعًا",
+    "noProjects": "لا توجد مشاريع مسجلة بعد.",
+    "selectTask": "المهمة",
+    "projectChat": "محادثة المشروع (بدون مهمة)",
+    "changeProject": "تغيير المشروع",
+    "implement": "تنفيذ",
+    "cancelRun": "إلغاء التشغيل",
+    "loading": "جارٍ التحميل…",
+    "stackHint": "يعمل على حزمة Loom المحلية عبر 127.0.0.1:8472."
   }
 }
