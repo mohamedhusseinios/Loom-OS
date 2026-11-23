@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { Settings } from "lucide-react";
 import { Link, usePathname } from "@/i18n/navigation";
 
 /**
@@ -10,7 +11,8 @@ import { Link, usePathname } from "@/i18n/navigation";
 export function DesktopAppChrome() {
   const t = useTranslations("AgentApp");
   const pathname = usePathname();
-  const active: "agent" | "dashboard" = pathname.startsWith("/agent-app") ? "agent" : "dashboard";
+  const onAgent = pathname.startsWith("/agent-app") || pathname.startsWith("/agent-settings");
+  const active: "agent" | "dashboard" = onAgent ? "agent" : "dashboard";
 
   const tabClass = (id: "agent" | "dashboard") =>
     `px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
@@ -30,6 +32,18 @@ export function DesktopAppChrome() {
           {t("tabDashboard")}
         </Link>
       </nav>
+      <div className="flex-1" />
+      <Link
+        href="/agent-settings"
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs border transition-colors ${
+          pathname.startsWith("/agent-settings")
+            ? "bg-zinc-800 text-zinc-100 border-zinc-600"
+            : "text-zinc-400 border-transparent hover:text-zinc-200 hover:bg-zinc-900"
+        }`}
+      >
+        <Settings className="w-3.5 h-3.5" />
+        {t("settings")}
+      </Link>
     </header>
   );
 }

@@ -405,6 +405,12 @@
     "stackHint": "Runs against your local Loom stack at 127.0.0.1:8472.",
     "tabAgent": "Agent",
     "tabDashboard": "Dashboard",
-    "addProject": "Add Project"
+    "addProject": "Add Project",
+    "settings": "Settings"
+  },
+  "AgentSettingsPage": {
+    "title": "Agent settings",
+    "subtitle": "API keys, models, and Implement autonomy",
+    "back": "Back to Agent"
   }
 }
