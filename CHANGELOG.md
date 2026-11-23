@@ -2,6 +2,27 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.4] — 2026-11-23
+
+Fourth public alpha after `v0.3.0-alpha.3`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with project-chat graph grounding.
+
+### Highlights
+
+- **Project chat uses graph memory** — Loom Agent project-level chat (no task selected) now retrieves via `hybrid_query`, injects `.loom/SHARED_CONTEXT.md`, and answers from shared graph context on the first message instead of claiming it has no project files
+- **Clearer LLM HTTP errors** — provider error bodies are surfaced (credential-looking substrings stripped) when chat completions fail
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.4
+./run.sh --open
+# or: pip install -e ".[dev,llm]" && loom start
+```
+
+**macOS app:** download `Loom-Coding-Agent-0.3.0a4.dmg` or `Loom-Coding-Agent-Tauri-0.3.0a4-aarch64.dmg` from this release, open it, and run **Loom Coding Agent** (first launch installs under `~/Library/Application Support/LoomCodingAgent`).
+
 ## [0.3.0-alpha.3] — 2026-11-23
 
 Third public alpha after `v0.3.0-alpha.2`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** interim DMG with OpenRouter Jev.
