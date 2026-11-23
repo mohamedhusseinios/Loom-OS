@@ -4,7 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { usePathname as useNextPathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Home, Plus, Activity, GitGraph, Users, Compass } from "lucide-react";
+import { Home, Plus, Activity, GitGraph, Users, Compass, Bot } from "lucide-react";
 import { listProjects } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/api";
 import { AddProjectModal } from "@/components/add-project-modal";
@@ -83,6 +83,18 @@ export function Sidebar() {
           >
             <Home className="w-4 h-4" />
             {t("navProjects")}
+          </Link>
+
+          <Link
+            href="/agent-app"
+            className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              pathname.startsWith("/agent-app")
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+            }`}
+          >
+            <Bot className="w-4 h-4" />
+            {t("navAgent")}
           </Link>
 
           {projects.length > 0 && (

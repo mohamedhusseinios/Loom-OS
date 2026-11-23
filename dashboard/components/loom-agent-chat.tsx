@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Link } from "@/i18n/navigation";
 import { agentChat } from "@/lib/api";
-import { AgentSettingsPanel } from "@/components/agent-settings-panel";
 
 interface Msg {
   role: "user" | "assistant";
@@ -25,7 +25,6 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [chatId, setChatId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     setMessages([]);
@@ -66,15 +65,14 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             {taskId ? t("taskScoped") : t("projectScoped")}
           </p>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setShowSettings((s) => !s)}>
+        <Link
+          href="/agent-settings"
+          className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[0.8rem] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+        >
+          <Settings className="w-3.5 h-3.5" />
           {t("settings")}
-        </Button>
+        </Link>
       </div>
-      {showSettings && (
-        <div className="p-3 border-b border-zinc-800">
-          <AgentSettingsPanel />
-        </div>
-      )}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {messages.length === 0 && (
           <p className="text-xs text-zinc-500">{t("emptyHint")}</p>

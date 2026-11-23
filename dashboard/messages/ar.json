@@ -12,7 +12,8 @@
     "graph": "الرسم البياني",
     "agents": "الوكلاء",
     "directory": "الدليل",
-    "addProject": "إضافة مشروع"
+    "addProject": "إضافة مشروع",
+    "navAgent": "وكيل البرمجة"
   },
   "ProjectsPage": {
     "loading": "جارٍ تحميل المشاريع...",
@@ -421,5 +422,26 @@
     "gettingModels": "جارٍ جلب النماذج…",
     "modelsLoaded": "تم تحميل {count} نموذجًا.",
     "modelsLoadError": "تعذر جلب قائمة النماذج."
+  },
+  "AgentApp": {
+    "title": "وكيل Loom",
+    "pickProject": "اختر مشروعًا",
+    "noProjects": "لا توجد مشاريع مسجلة بعد.",
+    "selectTask": "المهمة",
+    "projectChat": "محادثة المشروع (بدون مهمة)",
+    "changeProject": "تغيير المشروع",
+    "implement": "تنفيذ",
+    "cancelRun": "إلغاء التشغيل",
+    "loading": "جارٍ التحميل…",
+    "stackHint": "يعمل على حزمة Loom المحلية عبر 127.0.0.1:8472.",
+    "tabAgent": "الوكيل",
+    "tabDashboard": "لوحة التحكم",
+    "addProject": "إضافة مشروع",
+    "settings": "الإعدادات"
+  },
+  "AgentSettingsPage": {
+    "title": "إعدادات الوكيل",
+    "subtitle": "مفاتيح API والنماذج واستقلالية التنفيذ",
+    "back": "العودة إلى الوكيل"
   }
 }

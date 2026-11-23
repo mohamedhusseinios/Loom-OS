@@ -12,7 +12,8 @@
     "graph": "Graph",
     "agents": "Agents",
     "directory": "Directory",
-    "addProject": "Add Project"
+    "addProject": "Add Project",
+    "navAgent": "Coding Agent"
   },
   "ProjectsPage": {
     "loading": "Loading projects...",
@@ -421,5 +422,26 @@
     "gettingModels": "Fetching models…",
     "modelsLoaded": "Loaded {count} models.",
     "modelsLoadError": "Could not list models."
+  },
+  "AgentApp": {
+    "title": "Loom Agent",
+    "pickProject": "Choose a project",
+    "noProjects": "No projects registered yet.",
+    "selectTask": "Task",
+    "projectChat": "Project chat (no task)",
+    "changeProject": "Change project",
+    "implement": "Implement",
+    "cancelRun": "Cancel run",
+    "loading": "Loading…",
+    "stackHint": "Runs against your local Loom stack at 127.0.0.1:8472.",
+    "tabAgent": "Agent",
+    "tabDashboard": "Dashboard",
+    "addProject": "Add Project",
+    "settings": "Settings"
+  },
+  "AgentSettingsPage": {
+    "title": "Agent settings",
+    "subtitle": "API keys, models, and Implement autonomy",
+    "back": "Back to Agent"
   }
 }
