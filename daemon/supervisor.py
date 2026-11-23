@@ -18,9 +18,21 @@ logger = logging.getLogger("loom.supervisor")
 class WorkerSupervisor:
     def __init__(self) -> None:
         self._procs: dict[str, subprocess.Popen] = {}
+        self._exited: set[str] = set()
 
-    def spawn(self, project: str, agent: str, project_path: str,
-              task_id: str, max_budget_usd: float = 5.0) -> None:
+    def _note_exit(self, task_id: str) -> None:
+        self._procs.pop(task_id, None)
+        self._exited.add(task_id)
+
+    def exited_task_ids(self) -> set[str]:
+        for task_id in list(self._procs):
+            self.is_running(task_id)
+        return set(self._exited)
+
+    def forget_exited(self, task_ids: set[str]) -> None:
+        self._exited.difference_update(task_ids)
+
+    def spawn(self, project: str, agent: str, project_path: str, task_id: str, max_budget_usd: float = 5.0, manifest_path: str | None = None) -> None:
         """Launch a one-shot worker for a single task. No-op if already live."""
         if self.is_running(task_id):
             return
@@ -34,19 +46,30 @@ class WorkerSupervisor:
         logger.info("spawning one-shot worker for task %s", task_id)
         env = None
         if agent == "loom-agent":
-            env = self._loom_agent_env()
+            env = self._loom_agent_env(manifest_path)
         self._procs[task_id] = subprocess.Popen(cmd, env=env)
+        # This process replaces any earlier exit. Leaving the id in _exited
+        # makes the JSONL tail seal the replacement run as worker_exit.
+        self._exited.discard(task_id)
 
     @staticmethod
-    def _loom_agent_env() -> dict[str, str]:
-        """Pass dashboard BYOK keys into the loom-agent worker process."""
+    def _loom_agent_env(manifest_path: str | None = None) -> dict[str, str]:
+        """Pass BYOK keys and this run's manifest into one worker process."""
         import os
         env = os.environ.copy()
+        env.pop("LOOM_AGENT_MANIFEST", None)
+        if manifest_path:
+            env["LOOM_AGENT_MANIFEST"] = manifest_path
         try:
             from daemon.agent_run import load_llm_config_from_settings
             api_key, base_url, model, api_style, provider_id = load_llm_config_from_settings()
         except Exception:
             return env
+        env["LOOM_AGENT_PROVIDER"] = provider_id
+        if provider_id != "deepseek":
+            # Non-DeepSeek endpoint: only its own stored key (possibly none); never the DeepSeek credential.
+            env.pop("DEEPSEEK_API_KEY", None)
+            env.pop("LOOM_AGENT_API_KEY", None)
         # Dashboard BYOK wins over process-level provider env, matching chat.
         if api_key:
             env["LOOM_AGENT_API_KEY"] = api_key
@@ -70,7 +93,7 @@ class WorkerSupervisor:
             return False
         if proc.poll() is None:
             return True
-        self._procs.pop(task_id, None)  # exited — reap
+        self._note_exit(task_id)
         return False
 
     def running_ids(self) -> list[str]:
@@ -79,8 +102,10 @@ class WorkerSupervisor:
     def stop(self, task_id: str) -> bool:
         """Terminate a live worker. Returns True if one was running."""
         proc = self._procs.get(task_id)
-        if proc is None or proc.poll() is not None:
-            self._procs.pop(task_id, None)
+        if proc is None:
+            return False
+        if proc.poll() is not None:
+            self._note_exit(task_id)
             return False
         proc.terminate()
         try:
@@ -88,5 +113,5 @@ class WorkerSupervisor:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        self._procs.pop(task_id, None)
+        self._note_exit(task_id)
         return True

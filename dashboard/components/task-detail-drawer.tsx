@@ -18,6 +18,11 @@ import {
   acceptSuggestion,
   dismissSuggestion,
   implementTask,
+  previewImplement,
+  getAgentSettings,
+  ImplementConflictError,
+  isSelectionPreview,
+  type SelectionPreview,
   type AgentTask,
   type AgentInfo,
   type AgentTaskStatus,
@@ -25,6 +30,7 @@ import {
   type TaskSuggestion,
 } from "@/lib/api";
 import { SuggestionChip } from "@/components/suggestion-chip";
+import { ImplementPickerModal, type ImplementPickerNotice } from "@/components/implement-picker-modal";
 
 const STATUSES: AgentTaskStatus[] = [
   "triage", "todo", "ready", "running", "blocked", "done", "archived",
@@ -79,6 +85,7 @@ export function TaskDetailDrawer({
   const feedRef = useRef<HTMLDivElement>(null);
   const [suggestion, setSuggestion] = useState<TaskSuggestion | null>(null);
   const [sugBusy, setSugBusy] = useState(false);
+  const [picker, setPicker] = useState<{ preview: SelectionPreview; notice: ImplementPickerNotice } | null>(null);
 
   // Load diff for completed/blocked tasks.
   useEffect(() => {
@@ -201,8 +208,23 @@ export function TaskDetailDrawer({
     if (!task) return;
     setSugBusy(true);
     try {
-      await implementTask(projectId, task.id);
-      onChanged();
+      const [preview, settings] = await Promise.all([
+        previewImplement(projectId, task.id),
+        getAgentSettings().catch(() => null),
+      ]);
+      const autonomyEnabled = settings?.selection_autonomy_enabled ?? true;
+      if (preview.auto_decidable && autonomyEnabled) {
+        try {
+          await implementTask(projectId, task.id, { choice: "auto" });
+          onChanged();
+          return;
+        } catch (e) {
+          if (!(e instanceof ImplementConflictError) || !isSelectionPreview(e.preview)) throw e;
+          setPicker({ preview: e.preview, notice: "blocked" });
+          return;
+        }
+      }
+      setPicker({ preview, notice: preview.auto_decidable ? "disabled" : null });
     } catch { /* ignore */ } finally { setSugBusy(false); }
   }
 
@@ -413,6 +435,16 @@ export function TaskDetailDrawer({
           </div>
         )}
       </div>
+      {picker && (
+        <ImplementPickerModal
+          projectId={projectId}
+          taskId={task.id}
+          preview={picker.preview}
+          notice={picker.notice}
+          onClose={() => setPicker(null)}
+          onImplemented={onChanged}
+        />
+      )}
     </div>
   );
 }

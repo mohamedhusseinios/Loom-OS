@@ -8,13 +8,17 @@ from typing import Optional
 
 import asyncio
 import logging
+from pathlib import Path
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.agent_credentials import (
+    BUILTIN_PROVIDER_IDS,
+    PROVIDER_KIND_OPENAI,
     is_chat_provider_id,
     is_masked_key,
+    is_valid_custom_provider_id,
     merge_providers,
     normalize_api_style,
     resolve_chat_key,
@@ -36,7 +40,9 @@ from daemon.models import (
     ListModelsRequest, ListModelsResponse,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from daemon.agent_runtime import AgentRuntime, ConflictError
+from fastapi.responses import JSONResponse
+from daemon.models import ImplementRequest
+from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
 from daemon.llm_client import LlmError, list_remote_models
 
 logger = logging.getLogger(__name__)
@@ -121,6 +127,7 @@ async def lifespan(app: FastAPI):
         watcher.start(router.handle_file, loop)
         # Background task: broadcast events to WebSocket clients
         asyncio.create_task(_broadcast_events())
+        asyncio.create_task(_tail_agent_run_events())
 
     logger.info("Loom daemon started")
     yield
@@ -716,7 +723,7 @@ def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
         f.write(payload.model_dump_json())
 
 
-async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
+async def _route_task_execution(project_id: str, task: AgentTaskRecord, manifest_path: str | None = None) -> bool:
     """Route a Running task by assignee. Returns True if execution was started."""
     if not task.assignee:
         return False
@@ -727,8 +734,10 @@ async def _route_task_execution(project_id: str, task: AgentTaskRecord) -> bool:
         project = await registry.get_project(project_id)
         if project is None:
             return False
-        supervisor.spawn(project_id, agent, project.project_path, task.id,
-                         WORKER_MAX_BUDGET_USD)
+        supervisor.spawn(
+            project_id, agent, project.project_path, task.id,
+            WORKER_MAX_BUDGET_USD, manifest_path=manifest_path,
+        )
         if router:
             await router._emit_event("worker:started", project_id, {"id": task.id})
         return True
@@ -907,17 +916,58 @@ def _ollama_model_set(providers: list) -> bool:
     return False
 
 
+def _provider_has_model(provider: dict) -> bool:
+    return any(isinstance(model, str) and model.strip() for model in (provider.get("model_ids") or []))
+
+
+def _validate_custom_provider_rows(payload: AgentSettingsUpdate) -> None:
+    for provider in payload.providers or []:
+        pid = provider.id
+        if pid in BUILTIN_PROVIDER_IDS:
+            if provider.kind == PROVIDER_KIND_OPENAI:
+                raise HTTPException(status_code=400, detail=f"Custom provider id '{pid}' collides with a built-in provider")
+            continue
+        if pid == "none" or not is_valid_custom_provider_id(pid):
+            raise HTTPException(status_code=400, detail=f"Custom provider id '{pid}' is invalid (use lowercase letters, digits, - or _, min 2 chars, not 'none')")
+        if provider.kind not in (None, PROVIDER_KIND_OPENAI):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' must have kind openai_compatible")
+        if not provider.base_url.strip():
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' requires a base_url")
+        if not _provider_has_model(provider.model_dump()):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' requires a model")
+
+
+def _validate_provider_removal(payload: AgentSettingsUpdate, current, merged: list[dict], filt: str | None, judg: str | None) -> None:
+    removed = set(payload.remove_provider_ids or [])
+    for pid in sorted(removed):
+        if pid in BUILTIN_PROVIDER_IDS:
+            raise HTTPException(status_code=400, detail=f"Built-in provider '{pid}' cannot be removed")
+        if pid == filt or pid == judg:
+            role = "filter_provider" if pid == filt else "judgment_provider"
+            raise HTTPException(status_code=400, detail=f"Provider '{pid}' is in use as {role}")
+    default_model = payload.default_model or current.default_model
+    remaining_models = {m for p in merged if p.get("id") not in removed for m in (p.get("model_ids") or [])}
+    for provider in merged:
+        if provider.get("id") in removed and default_model in (provider.get("model_ids") or []) and default_model not in remaining_models:
+            raise HTTPException(status_code=400, detail=f"Provider '{provider['id']}' is in use by default_model '{default_model}'")
+
+
 def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
+    _validate_custom_provider_rows(payload)
     filt_in = payload.filter_provider
     judg_in = payload.judgment_provider
     filt = _normalize_decision_provider(filt_in if filt_in is not None else current.filter_provider)
     judg = _normalize_decision_provider(judg_in if judg_in is not None else current.judgment_provider)
-    if filt_in is not None and filt not in _FILTER_PROVIDERS:
-        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, or none")
+    merged = merge_providers(list(current.providers), list(payload.providers) if payload.providers is not None else None)
+    _validate_provider_removal(payload, current, merged, filt, judg)
+    removed = set(payload.remove_provider_ids or [])
+    custom_ids = {p["id"] for p in merged if p["id"] not in BUILTIN_PROVIDER_IDS and p["id"] not in removed and p.get("kind") == PROVIDER_KIND_OPENAI}
+    if filt_in is not None and filt not in _FILTER_PROVIDERS and filt not in custom_ids:
+        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, none, or a custom openai_compatible provider id")
     if judg_in is not None and judg == "gliclass":
         raise HTTPException(status_code=400, detail="judgment_provider=gliclass is not supported")
-    if judg_in is not None and judg not in _JUDGMENT_PROVIDERS:
-        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, or none")
+    if judg_in is not None and judg not in _JUDGMENT_PROVIDERS and judg not in custom_ids:
+        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, none, or a custom openai_compatible provider id")
     if filt_in is not None:
         payload.filter_provider = filt
     if judg_in is not None:
@@ -925,9 +975,12 @@ def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
     touches_ollama = filt == "ollama" or judg == "ollama"
     sets_ollama_role = _normalize_decision_provider(filt_in) == "ollama" or _normalize_decision_provider(judg_in) == "ollama"
     updates_ollama = any(provider.id == "ollama" for provider in (payload.providers or []))
-    merged = merge_providers(list(current.providers), list(payload.providers) if payload.providers is not None else None)
     if touches_ollama and (sets_ollama_role or updates_ollama) and not _ollama_model_set(merged):
         raise HTTPException(status_code=400, detail="Ollama decision provider requires a model")
+    for role_value in {filt, judg} & custom_ids:
+        provider = next(p for p in merged if p["id"] == role_value)
+        if not _provider_has_model(provider):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{role_value}' requires a model")
 
 
 def _validate_chat_provider(payload: AgentSettingsUpdate, current) -> None:
@@ -954,6 +1007,8 @@ def _validate_chat_provider(payload: AgentSettingsUpdate, current) -> None:
 async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
     current = await registry.get_agent_settings(mask_keys=True)
     _validate_decision_settings(payload, current)
+    if payload.autonomy_min_fit is not None and payload.autonomy_min_fit not in {"High", "Medium", "Low"}:
+        raise HTTPException(status_code=400, detail="autonomy_min_fit must be High, Medium, or Low")
     _validate_chat_provider(payload, current)
     return (await registry.update_agent_settings(payload)).model_dump()
 
@@ -1082,8 +1137,20 @@ async def get_pending_suggestion(project_id: str, task_id: str):
     return {"suggestion": sug.model_dump(mode="json")}
 
 
+@app.post("/api/projects/{project_id}/tasks/{task_id}/implement/preview")
+async def implement_preview(project_id: str, task_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    task = await registry.get_agent_task(task_id)
+    if task is None or task.project != project_id:
+        raise HTTPException(status_code=404, detail="task not found")
+    preview = await _get_agent_runtime().preview_selection(task)
+    return selection_preview_to_dict(preview)
+
+
 @app.post("/api/projects/{project_id}/tasks/{task_id}/implement")
-async def implement_task(project_id: str, task_id: str):
+async def implement_task(project_id: str, task_id: str, payload: Optional[ImplementRequest] = Body(default=None)):
     project = await registry.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1091,15 +1158,37 @@ async def implement_task(project_id: str, task_id: str):
     def _spawn(updated):
         pass
 
+    def _worker_live(task_id: str) -> bool:
+        return supervisor is not None and supervisor.is_running(task_id)
+
     try:
-        updated = await _get_agent_runtime().implement(
-            project_id, task_id, spawn_worker=_spawn,
+        updated, manifest_path = await _get_agent_runtime().implement(
+            project_id, task_id, spawn_worker=_spawn, request=payload or ImplementRequest(),
+            worker_live=_worker_live,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SelectionConflict as e:
+        return JSONResponse(status_code=409, content=selection_preview_to_dict(e.preview))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if updated:
-        await _route_task_execution(project_id, updated)
+        await _route_task_execution(project_id, updated, manifest_path=manifest_path)
     return updated.model_dump() if updated else {}
+
+
+@app.post("/api/projects/{project_id}/runs/{run_id}/cancel")
+async def cancel_agent_run(project_id: str, run_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        run = await _get_agent_runtime().cancel_run(project_id, run_id, tail=_run_event_tail)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return run.model_dump(mode="json") if run else {}
 
 
 
@@ -1514,6 +1603,28 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
+
+
+_run_event_tail = JsonlEventTail()
+
+
+async def _tail_agent_run_events() -> None:
+    """Poll open-run JSONL sinks and emit ``agent:run_event`` on the bus."""
+    while True:
+        try:
+            if registry is not None and getattr(registry, "db", None):
+                runtime = _get_agent_runtime()
+                runs = []
+                for status in ("running", "cancelling"):
+                    runs.extend(await registry.list_agent_runs(status=status))
+                for run in runs:
+                    if not run.run_dir:
+                        continue
+                    await drain_run_jsonl(run, _run_event_tail, runtime.emit_event, registry)
+                await seal_exited_worker_runs(registry, supervisor, runtime.emit_event, _run_event_tail)
+        except Exception:
+            logger.exception("agent run JSONL tail failed")
+        await asyncio.sleep(0.5)
 
 
 async def _broadcast_events():

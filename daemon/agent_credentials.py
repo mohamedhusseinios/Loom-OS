@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,6 +34,10 @@ DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 DEFAULT_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+
+BUILTIN_PROVIDER_IDS: frozenset[str] = frozenset({DEEPSEEK_PROVIDER_ID, OPENAI_PROVIDER_ID, ANTHROPIC_PROVIDER_ID, TYPESAFE_PROVIDER_ID, OLLAMA_PROVIDER_ID, GLICLASS_PROVIDER_ID})
+PROVIDER_KIND_BUILTIN = "builtin"
+PROVIDER_KIND_OPENAI = "openai_compatible"
 
 DEFAULT_DEEPSEEK_PROVIDER: dict[str, Any] = {
     "id": DEEPSEEK_PROVIDER_ID,
@@ -156,6 +161,20 @@ def _as_provider_dict(provider: Any) -> dict[str, Any]:
     return parsed
 
 
+def normalize_provider_kind(provider: dict[str, Any]) -> dict[str, Any]:
+    """Set ``kind`` from the id when missing; built-in ids are always ``builtin``."""
+    row = dict(provider)
+    if (row.get("id") or "") in BUILTIN_PROVIDER_IDS:
+        row["kind"] = PROVIDER_KIND_BUILTIN
+    elif not row.get("kind"):
+        row["kind"] = PROVIDER_KIND_OPENAI
+    return row
+
+
+def is_valid_custom_provider_id(provider_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_-]{2,}", provider_id or "")) and provider_id not in BUILTIN_PROVIDER_IDS
+
+
 def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]]:
     """Keep existing providers and append built-in defaults if missing."""
     by_id: dict[str, dict[str, Any]] = {}
@@ -177,7 +196,7 @@ def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]
             current = by_id[default["id"]]
             if "api_style" not in current or not current.get("api_style"):
                 current["api_style"] = default["api_style"]
-    return [by_id[pid] for pid in order]
+    return [normalize_provider_kind(by_id[pid]) for pid in order]
 
 
 def merge_providers(current: list[Any] | None, incoming: list[Any] | None) -> list[dict[str, Any]]:
@@ -195,7 +214,7 @@ def merge_providers(current: list[Any] | None, incoming: list[Any] | None) -> li
         if pid not in by_id:
             order.append(pid)
         by_id[pid] = parsed
-    return [by_id[pid] for pid in order]
+    return [normalize_provider_kind(by_id[pid]) for pid in order]
 
 
 _DEFAULT_PROVIDER_IDS = frozenset(p["id"] for p in DEFAULT_AGENT_PROVIDERS)
@@ -252,13 +271,14 @@ def resolve_deepseek_key(settings_key: str | None) -> str:
 
 
 def resolve_chat_key(provider_id: str, settings_key: str | None) -> str:
-    """Settings key, then ``LOOM_AGENT_API_KEY``, then preset-specific env for known ids."""
+    """Settings key, then preset env. ``LOOM_AGENT_API_KEY`` only for built-in chat ids.
+
+    Custom endpoints must not inherit the daemon process key when their row has none.
+    """
     env_name = _PROVIDER_ENV_KEYS.get(provider_id)
-    return first_nonempty(
-        settings_key,
-        os.environ.get("LOOM_AGENT_API_KEY", ""),
-        os.environ.get(env_name, "") if env_name else "",
-    )
+    loom_key = "" if is_custom_chat_provider_id(provider_id) else os.environ.get("LOOM_AGENT_API_KEY", "")
+    preset_key = os.environ.get(env_name, "") if env_name else ""
+    return first_nonempty(settings_key, loom_key, preset_key)
 
 
 def resolve_typesafe_key(settings_key: str | None) -> str:

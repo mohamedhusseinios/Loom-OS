@@ -504,6 +504,7 @@ export interface AgentProvider {
   base_url: string;
   model_ids: string[];
   api_style?: "openai" | "anthropic";
+  kind?: string;
 }
 
 export interface AgentSettings {
@@ -514,6 +515,9 @@ export interface AgentSettings {
   has_keys: Record<string, boolean>;
   filter_provider?: string | null;
   judgment_provider?: string | null;
+  selection_autonomy_enabled?: boolean;
+  autonomy_min_fit?: string;
+  autonomy_require_margin?: boolean;
 }
 
 export interface TaskSuggestion {
@@ -562,8 +566,12 @@ export async function updateAgentSettings(payload: {
   chat_provider?: string;
   providers?: AgentSettings["providers"];
   api_keys?: Record<string, string>;
+  remove_provider_ids?: string[];
   filter_provider?: string;
   judgment_provider?: string;
+  selection_autonomy_enabled?: boolean;
+  autonomy_min_fit?: string;
+  autonomy_require_margin?: boolean;
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
@@ -650,11 +658,74 @@ export async function dismissSuggestion(projectId: string, suggestionId: string)
   return res.json();
 }
 
-export async function implementTask(projectId: string, taskId: string): Promise<AgentTask> {
-  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
+export type FitLevel = "High" | "Medium" | "Low";
+
+export interface RankedStrategy {
+  family_id: string;
+  modifier_ids: string[];
+  fit: FitLevel;
+  why: string[];
+  expected_cost_class: string | null;
+  name: string;
+}
+
+export interface SelectionPreview {
+  ranked: RankedStrategy[];
+  top3: RankedStrategy[];
+  auto_decidable: boolean;
+  fallback: boolean;
+  recommended: RankedStrategy | null;
+  scores: Record<string, number>;
+  skip_reason: string | null;
+  provider: string;
+  model: string;
+}
+
+export interface ImplementRequest {
+  choice: "user" | "auto" | "delegate";
+  family_id?: string;
+  recommended_family_id?: string;
+  modifier_ids?: string[];
+}
+
+/** Thrown by implementTask when the daemon answers 409 with a fresh selection preview. */
+export class ImplementConflictError extends Error {
+  preview: SelectionPreview;
+
+  constructor(preview: SelectionPreview) {
+    super("Implement selection conflict");
+    this.name = "ImplementConflictError";
+    this.preview = preview;
+  }
+}
+
+export function isSelectionPreview(payload: unknown): payload is SelectionPreview {
+  return !!payload && typeof payload === "object" && Array.isArray((payload as SelectionPreview).top3);
+}
+
+export async function previewImplement(projectId: string, taskId: string): Promise<SelectionPreview> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement/preview`, {
     method: "POST",
     headers: authHeaders(),
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function implementTask(projectId: string, taskId: string, body?: ImplementRequest): Promise<AgentTask> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement`, {
+    method: "POST",
+    headers: body ? authHeaders({ "Content-Type": "application/json" }) : authHeaders(),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 409) {
+    const payload: unknown = await res.json().catch(() => null);
+    if (isSelectionPreview(payload)) throw new ImplementConflictError(payload);
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+      ? payload.detail
+      : "API error: 409";
+    throw new Error(detail);
+  }
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

@@ -17,7 +17,8 @@ def test_loom_agent_always_detected():
     assert installed.get("loom-agent") == "builtin"
 
 
-def test_loom_agent_in_runners():
+def test_loom_agent_in_runners(monkeypatch):
+    monkeypatch.delenv("LOOM_AGENT_MANIFEST", raising=False)
     assert "loom-agent" in runnable_agents()
     spec = RUNNERS["loom-agent"]
     assert spec.mode == "stdout"
@@ -25,6 +26,13 @@ def test_loom_agent_in_runners():
     argv = spec.build_argv("do the thing")
     assert "-m" in argv and "daemon.agent_run" in argv
     assert "--prompt" in argv
+    assert argv[argv.index("--prompt") + 1] == "do the thing"
+
+
+def test_loom_agent_argv_uses_manifest_env(monkeypatch):
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", "/tmp/run/manifest.json")
+    argv = RUNNERS["loom-agent"].build_argv("do the thing")
+    assert argv == ["-m", "daemon.agent_run", "--manifest", "/tmp/run/manifest.json"]
 
 
 def _write_settings_db(db, *, model="deepseek-chat", providers=None, keys=None, chat_provider=None):
@@ -89,14 +97,71 @@ def test_llm_from_stored_uses_custom_deepseek_base_url_for_unlisted_model():
         keys={"deepseek": "sk-custom-endpoint"},
     )
     key, base, model, style = creds.llm_from_stored()
+    assert creds.active_chat_provider_id() == "deepseek"
     assert key == "sk-custom-endpoint"
     assert base == "https://proxy.example.com/v1"
     assert model == "gpt-4o-mini"
     assert style == "openai"
 
 
-def test_llm_from_stored_respects_chat_provider_and_anthropic_style():
+def test_llm_from_stored_resolves_openai_compatible_model():
     from daemon.agent_credentials import StoredAgentCredentials
+
+    creds = StoredAgentCredentials(
+        default_model="llama-3.1-8b",
+        chat_provider="openrouter",
+        providers=[
+            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"], "kind": "builtin"},
+            {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible"},
+        ],
+        keys={"deepseek": "sk-deep", "openrouter": "sk-or"},
+    )
+    assert creds.llm_from_stored() == ("sk-or", "https://openrouter.ai/api/v1", "llama-3.1-8b", "openai")
+    assert creds.active_chat_provider_id() == "openrouter"
+
+
+def test_merge_providers_preserves_custom_openai_compatible():
+    from daemon.agent_credentials import merge_providers
+
+    merged = merge_providers([], [{"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1", "model_ids": ["llama-3.1-70b"], "kind": "openai_compatible"}])
+    groq = next(p for p in merged if p["id"] == "groq")
+    assert groq["kind"] == "openai_compatible"
+    assert "deepseek" in {p["id"] for p in merged}
+
+
+def test_is_valid_custom_provider_id():
+    from daemon.agent_credentials import is_valid_custom_provider_id
+
+    assert is_valid_custom_provider_id("openrouter") is True
+    assert is_valid_custom_provider_id("ollama") is False
+    assert is_valid_custom_provider_id("A") is False
+
+
+def test_normalize_provider_kind_and_defaults():
+    from daemon.agent_credentials import ensure_default_providers, normalize_provider_kind
+
+    assert normalize_provider_kind({"id": "deepseek", "kind": "openai_compatible"})["kind"] == "builtin"
+    assert normalize_provider_kind({"id": "groq", "kind": None})["kind"] == "openai_compatible"
+    assert normalize_provider_kind({"id": "groq"})["kind"] == "openai_compatible"
+    kinds = {p["id"]: p["kind"] for p in ensure_default_providers([{"id": "groq", "name": "Groq", "base_url": "https://x", "model_ids": []}])}
+    assert kinds == {"groq": "openai_compatible", "deepseek": "builtin", "openai": "builtin", "anthropic": "builtin", "typesafe": "builtin", "ollama": "builtin", "gliclass": "builtin"}
+
+
+def test_llm_from_stored_ignores_builtin_non_deepseek_model_match():
+    from daemon.agent_credentials import StoredAgentCredentials
+
+    creds = StoredAgentCredentials(
+        default_model="jev-latest",
+        providers=[
+            {"id": "typesafe", "name": "TypeSafe", "base_url": "https://ts.example", "model_ids": ["jev-latest"], "kind": "builtin"},
+            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"], "kind": "builtin"},
+        ],
+        keys={"typesafe": "sk-ts", "deepseek": "sk-deep"},
+    )
+    assert creds.llm_from_stored() == ("sk-deep", "https://api.deepseek.com", "jev-latest", "openai")
+    assert creds.active_chat_provider_id() == "deepseek"
+
+
 
     creds = StoredAgentCredentials(
         default_model="claude-sonnet-4-5",
@@ -210,3 +275,171 @@ def test_resolve_llm_config_prefers_settings_over_deepseek_env(tmp_path, monkeyp
     key, _, _, style = resolve_llm_config()
     assert key == "sk-from-dashboard"
     assert style == "openai"
+
+
+def _write_keyless_custom_db(tmp_path):
+    db = tmp_path / "state.db"
+    _write_settings_db(
+        db,
+        model="llama-3.1-8b",
+        chat_provider="local-llm",
+        providers=[
+            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"]},
+            {"id": "local-llm", "name": "Local", "base_url": "http://localhost:9000/v1", "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible"},
+        ],
+        keys={"deepseek": "sk-stored-deepseek"},
+    )
+    return db
+
+
+def test_llm_from_stored_returns_provider_id():
+    from daemon.agent_credentials import StoredAgentCredentials
+
+    custom = StoredAgentCredentials(
+        default_model="llama-3.1-8b",
+        providers=[{"id": "groq", "name": "Groq", "base_url": "https://g.example/v1", "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible"}],
+        keys={},
+    )
+    assert custom.llm_from_stored() == ("", "https://g.example/v1", "llama-3.1-8b", "openai")
+    assert custom.active_chat_provider_id() == "groq"
+    fallback = StoredAgentCredentials(default_model="x", providers=[], keys={"deepseek": "sk-d"})
+    assert fallback.llm_from_stored() == ("sk-d", "https://api.deepseek.com", "x", "openai")
+    assert fallback.active_chat_provider_id() == "deepseek"
+
+
+def test_keyless_custom_provider_does_not_receive_deepseek_env_key_in_runtime(tmp_path, monkeypatch):
+    from daemon.agent_credentials import load_stored_credentials, resolve_deepseek_key
+
+    db = _write_keyless_custom_db(tmp_path)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    creds = load_stored_credentials(str(db))
+    stored_key, base, _, _ = creds.llm_from_stored()
+    provider_id = creds.active_chat_provider_id()
+    assert provider_id == "local-llm"
+    assert base == "http://localhost:9000/v1"
+    assert stored_key == ""
+    assert resolve_deepseek_key(stored_key) == "sk-process-env"  # helper alone still falls back; callers must gate
+
+    from daemon.agent_credentials import resolve_chat_key
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
+    assert resolve_chat_key(provider_id, stored_key) == ""
+    assert resolve_chat_key("deepseek", "") == "sk-loom-process"
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    assert resolve_chat_key("deepseek", "") == "sk-process-env"
+    assert resolve_chat_key("deepseek", "sk-stored") == "sk-stored"
+    assert resolve_chat_key("local-llm", "sk-custom") == "sk-custom"
+
+
+def test_supervisor_env_keyless_custom_provider_drops_deepseek_key(tmp_path, monkeypatch):
+    from daemon.supervisor import WorkerSupervisor
+
+    db = _write_keyless_custom_db(tmp_path)
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-leftover")
+    env = WorkerSupervisor._loom_agent_env()
+    assert env["LOOM_AGENT_PROVIDER"] == "local-llm"
+    assert env["LOOM_AGENT_BASE_URL"] == "http://localhost:9000/v1"
+    assert env["LOOM_AGENT_MODEL"] == "llama-3.1-8b"
+    assert "DEEPSEEK_API_KEY" not in env
+    assert env.get("LOOM_AGENT_API_KEY", "") == ""
+
+
+def test_supervisor_env_custom_provider_uses_own_stored_key(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from daemon.supervisor import WorkerSupervisor
+
+    db = _write_keyless_custom_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE agent_settings SET api_keys_json = ?", (json.dumps({"deepseek": "sk-d", "local-llm": "sk-local"}),))
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    env = WorkerSupervisor._loom_agent_env()
+    assert env["LOOM_AGENT_API_KEY"] == "sk-local"
+    assert "DEEPSEEK_API_KEY" not in env
+
+
+def test_resolve_llm_config_keyless_custom_ignores_deepseek_env(tmp_path, monkeypatch):
+    from daemon.agent_run import resolve_llm_config
+
+    db = _write_keyless_custom_db(tmp_path)
+    monkeypatch.setenv("LOOM_DB_PATH", str(db))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
+    monkeypatch.delenv("LOOM_AGENT_PROVIDER", raising=False)
+    key, base, model, _ = resolve_llm_config()
+    assert key == ""
+    assert base == "http://localhost:9000/v1"
+    assert model == "llama-3.1-8b"
+
+
+def test_resolve_llm_config_supervisor_provider_env_blocks_deepseek_fallback(tmp_path, monkeypatch):
+    from daemon.agent_run import resolve_llm_config
+
+    monkeypatch.setenv("LOOM_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.setenv("LOOM_AGENT_PROVIDER", "local-llm")
+    monkeypatch.setenv("LOOM_AGENT_BASE_URL", "http://localhost:9000/v1")
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
+    key, base, _, _ = resolve_llm_config()
+    assert key == ""
+    assert base == "http://localhost:9000/v1"
+
+
+def test_resolve_llm_config_deepseek_env_fallback_still_works(tmp_path, monkeypatch):
+    from daemon.agent_run import resolve_llm_config
+
+    monkeypatch.setenv("LOOM_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.delenv("LOOM_AGENT_PROVIDER", raising=False)
+    key, _, _, _ = resolve_llm_config()
+    assert key == "sk-process-env"
+
+
+def test_run_manifest_keyless_custom_posts_openai_v1_root(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import MagicMock, patch
+    from daemon.agent_run import run_manifest
+
+    manifest = {
+        "prompt": "say hi",
+        "model": "llama",
+        "run_dir": str(tmp_path / "run"),
+        "events_path": str(tmp_path / "run" / "events.jsonl"),
+        "worktree": str(tmp_path),
+        "step_limit": 2,
+        "token_limit": 1000,
+        "cost_limit_usd": 1,
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("LOOM_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setenv("LOOM_AGENT_PROVIDER", "local-llm")
+    monkeypatch.setenv("LOOM_AGENT_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("LOOM_AGENT_MODEL", "llama")
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-should-not-be-sent")
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        body = json.dumps({
+            "choices": [{"message": {"content": '{"thought":"ok","tool":null,"done":true}'}}],
+            "usage": {},
+        }).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    with patch("daemon.llm_client._open_http", side_effect=fake_urlopen):
+        code = run_manifest(str(path))
+    assert code == 0
+    assert captured["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert captured["auth"] is None

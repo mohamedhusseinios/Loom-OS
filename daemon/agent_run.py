@@ -1,21 +1,35 @@
 """CLI entry for loom-agent worker runs (stdout mode).
 
-Invoked as: ``python -m daemon.agent_run --prompt "..."``
+Invoked as:
+
+- ``python -m daemon.agent_run --prompt "..."`` — legacy single-shot chat
+- ``python -m daemon.agent_run --manifest PATH`` — coding_agent ReAct loop
+
+``--prompt`` is optional when ``--manifest`` is set. A manifest may include
+``run_dir``, ``events_path``, ``prompt``, budgets, and ``cancel_path``.
+Events are appended to ``events_path`` or ``run_dir/events.jsonl``.
 
 Resolves the LLM key from (in order):
 1. Dashboard Agent settings in ``~/.loom/state.db`` (BYOK)
 2. ``LOOM_AGENT_API_KEY`` / provider-specific env
 
-Prints the model response to stdout for the worker to capture.
+Prints the model response (single-shot) or ``status: stop_reason`` (loop)
+to stdout for the worker to capture.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from pathlib import Path
 
-from daemon.agent_credentials import resolve_chat_key
+from coding_agent.events import JsonlEventSink
+from coding_agent.runners.react import ReactRunner
+from coding_agent.session import RunSession
+from daemon.agent_credentials import is_custom_chat_provider_id, resolve_chat_key
+from daemon.coding_adapters import LlmClientAdapter, SimpleUsageMeter, StubContextSource, WorktreeSandbox
 from daemon.llm_client import LlmError, build_llm_client
 
 
@@ -31,26 +45,171 @@ def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str,
     return api_key, base_url, model, api_style, creds.active_chat_provider_id()
 
 
-def resolve_llm_config() -> tuple[str, str, str, str]:
-    """Match chat: dashboard settings first, then LOOM_AGENT_*/provider env."""
-    db_key, db_base, db_model, db_style, provider_id = load_llm_config_from_settings()
-    api_key = resolve_chat_key(provider_id, db_key)
+def _resolve_llm_settings() -> tuple[str, str, str, str, str]:
+    """Return ``(api_key, base_url, model, api_style, provider_id)`` for this process."""
+    db_key, db_base, db_model, db_style, db_provider = load_llm_config_from_settings()
+    provider_id = os.environ.get("LOOM_AGENT_PROVIDER") or db_provider
+    api_key = resolve_chat_key(provider_id, db_key if provider_id == db_provider else "")
     base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
     model = os.environ.get("LOOM_AGENT_MODEL") or db_model
     api_style = os.environ.get("LOOM_AGENT_API_STYLE") or db_style
+    return api_key, base_url, model, api_style, provider_id
+
+
+def resolve_llm_config() -> tuple[str, str, str, str]:
+    """Match chat: dashboard settings first, then LOOM_AGENT_*/provider env.
+
+    ``LOOM_AGENT_PROVIDER`` overrides the stored chat provider id; the stored key is only
+    used when the effective provider is the stored one. ``resolve_chat_key`` falls back to
+    ``LOOM_AGENT_API_KEY`` and preset env only for built-in chat ids, never a custom endpoint.
+    """
+    api_key, base_url, model, api_style, _provider_id = _resolve_llm_settings()
     return api_key, base_url, model, api_style
+
+
+def _llm_client_for_process(api_key: str, base_url: str, api_style: str, provider_id: str):
+    return build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style, allow_missing_key=is_custom_chat_provider_id(provider_id))
+
+
+def _events_path(manifest: dict, manifest_file: Path) -> Path:
+    explicit = manifest.get("events_path")
+    if isinstance(explicit, str) and explicit:
+        return Path(explicit)
+    run_dir = manifest.get("run_dir")
+    if isinstance(run_dir, str) and run_dir:
+        return Path(run_dir) / "events.jsonl"
+    return manifest_file.parent / "events.jsonl"
+
+
+_TERMINAL_TYPES = frozenset({"run.succeeded", "run.failed", "run.cancelled"})
+
+
+def events_have_terminal(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("type") in _TERMINAL_TYPES:
+            return True
+    return False
+
+
+def ensure_terminal_event(path: Path, event_type: str, stop_reason: str) -> bool:
+    """Append a terminal event when the JSONL sink does not already have one."""
+    if event_type not in _TERMINAL_TYPES or events_have_terminal(path):
+        return False
+    JsonlEventSink(path).emit({"type": event_type, "stop_reason": stop_reason})
+    return True
+
+
+def seal_manifest_run(manifest_path: str, *, stop_reason: str = "worker_exit") -> None:
+    """Close a manifest run that exited without a terminal JSONL event."""
+    manifest_file = Path(manifest_path)
+    try:
+        loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(loaded, dict):
+        return
+    events_path = _events_path(loaded, manifest_file)
+    cancel_path = loaded.get("cancel_path")
+    if isinstance(cancel_path, str) and cancel_path and Path(cancel_path).is_file():
+        ensure_terminal_event(events_path, "run.cancelled", "cancelled")
+        return
+    ensure_terminal_event(events_path, "run.failed", stop_reason)
+
+
+def _worktree_root(manifest: dict) -> Path:
+    for key in ("worktree", "worktree_path"):
+        value = manifest.get(key)
+        if isinstance(value, str) and value:
+            return Path(value)
+    return Path.cwd()
+
+
+def _manifest_family_id(manifest: dict) -> str:
+    raw = manifest.get("family_id", "react")
+    return raw if isinstance(raw, str) else "react"
+
+
+def _should_emit_runner_fallback(manifest: dict) -> bool:
+    family_id = _manifest_family_id(manifest)
+    return family_id != "react" or manifest.get("runner_fallback") is True
+
+
+def run_manifest(path: str, *, prompt: str | None = None, model: str | None = None) -> int:
+    """Load a JSON run manifest and execute the ReAct loop."""
+    manifest_file = Path(path)
+    try:
+        loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if not isinstance(loaded, dict):
+        print("manifest must be a JSON object", file=sys.stderr)
+        return 1
+
+    manifest = dict(loaded)
+    if prompt and not manifest.get("prompt"):
+        manifest["prompt"] = prompt
+    api_key, base_url, resolved_model, api_style, provider_id = _resolve_llm_settings()
+    if model:
+        resolved_model = model
+    if not manifest.get("model"):
+        manifest["model"] = resolved_model
+
+    events_path = _events_path(manifest, manifest_file)
+    event_sink = JsonlEventSink(events_path)
+    if _should_emit_runner_fallback(manifest):
+        event_sink.emit({
+            "type": "strategy.runner_fallback",
+            "family_id": _manifest_family_id(manifest),
+            "executed_runner": "react",
+        })
+    try:
+        client = _llm_client_for_process(api_key, base_url, api_style, provider_id)
+        session = RunSession(
+            manifest,
+            WorktreeSandbox(_worktree_root(manifest)),
+            event_sink,
+            LlmClientAdapter(client),
+            SimpleUsageMeter(),
+            StubContextSource(),
+        )
+        outcome = ReactRunner().run(session)
+    except Exception as exc:
+        reason = "llm_error" if isinstance(exc, LlmError) else "worker_exit"
+        ensure_terminal_event(events_path, "run.failed", reason)
+        print(str(exc), file=sys.stderr)
+        return 1
+    if outcome.error:
+        print(outcome.error, file=sys.stderr)
+    print(f"{outcome.status}: {outcome.stop_reason}")
+    # Cancel is not success: a zero exit makes the worker commit and mark the task done.
+    return 0 if outcome.status == "succeeded" else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Loom agent worktree runner")
-    parser.add_argument("--prompt", required=True)
+    parser.add_argument("--prompt", default=None)
+    parser.add_argument("--manifest", default=None)
     parser.add_argument("--model", default=None)
     args = parser.parse_args(argv)
+    if args.manifest:
+        return run_manifest(args.manifest, prompt=args.prompt, model=args.model)
+    if not args.prompt:
+        parser.error("--prompt is required unless --manifest is set")
 
-    api_key, base_url, model, api_style = resolve_llm_config()
+    api_key, base_url, model, api_style, provider_id = _resolve_llm_settings()
     if args.model:
         model = args.model
-    client = build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style)
+    client = _llm_client_for_process(api_key, base_url, api_style, provider_id)
     messages = [
         {
             "role": "system",

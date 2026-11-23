@@ -172,6 +172,84 @@ def test_ollama_defaults_base_url_and_allows_missing_key():
     assert "11434" in relevance.base_url
 
 
+def test_custom_openai_compatible_filter_and_judgment():
+    settings = _settings(
+        filter_provider="openrouter",
+        judgment_provider="openrouter",
+        providers=[{
+            "id": "openrouter",
+            "name": "OpenRouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "model_ids": ["llama-3.1-8b"],
+            "kind": "openai_compatible",
+        }],
+    )
+    config = resolve_decision_config(settings, {"openrouter": "sk-or"})
+    assert config.filter_provider == "openrouter"
+    assert config.judgment_provider == "openrouter"
+    assert config.filter_model == "llama-3.1-8b"
+    assert config.filter_base_url == "https://openrouter.ai/api/v1"
+    assert config.filter_api_key == "sk-or"
+    relevance, judgment = build_decision_clients(config)
+    assert isinstance(relevance, JevClient)
+    assert relevance is judgment
+    assert "openrouter.ai" in (relevance.base_url or "")
+    assert relevance.model == "llama-3.1-8b"
+
+
+def test_custom_provider_requires_model_like_ollama():
+    settings = _settings(
+        filter_provider="groq",
+        judgment_provider="none",
+        providers=[{"id": "groq", "base_url": "https://api.groq.com/openai/v1", "model_ids": [], "kind": "openai_compatible"}],
+    )
+    with pytest.raises(ValueError, match="model"):
+        resolve_decision_config(settings, {})
+
+
+def test_custom_provider_requires_base_url():
+    settings = _settings(
+        filter_provider="groq",
+        judgment_provider="none",
+        providers=[{"id": "groq", "base_url": "", "model_ids": ["m1"], "kind": "openai_compatible"}],
+    )
+    with pytest.raises(ValueError, match="base_url"):
+        resolve_decision_config(settings, {"groq": "k"})
+
+
+def test_custom_provider_without_kind_is_inferred_openai_compatible():
+    settings = _settings(
+        filter_provider="groq",
+        judgment_provider="none",
+        providers=[{"id": "groq", "base_url": "https://api.groq.com/openai/v1", "model_ids": ["m1"]}],
+    )
+    config = resolve_decision_config(settings, {})
+    assert config.filter_provider == "groq"
+    assert config.filter_model == "m1"
+
+
+def test_missing_custom_provider_falls_back_to_none(caplog):
+    settings = _settings(filter_provider="ghost", judgment_provider="ghost", providers=[])
+    with caplog.at_level(logging.WARNING, logger="loom.decision"):
+        config = resolve_decision_config(settings, {})
+    assert config.filter_provider == "none"
+    assert config.judgment_provider == "none"
+    assert "ghost" in caplog.text
+
+
+def test_custom_provider_uses_ollama_thresholds_and_overrides():
+    settings = _settings(
+        filter_provider="groq",
+        judgment_provider="none",
+        providers=[{"id": "groq", "base_url": "https://g.example/v1", "model_ids": ["m1"], "kind": "openai_compatible"}],
+        threshold_overrides={"groq": {"drop": 0.1, "mid": 0.4, "keep": 0.9}},
+    )
+    config = resolve_decision_config(settings, {})
+    assert config.filter_thresholds.as_dict() == {"drop": 0.1, "mid": 0.4, "keep": 0.9, "escalate": 0.9}
+    default = resolve_decision_config(_settings(filter_provider="groq", judgment_provider="none", providers=settings.providers), {})
+    assert default.filter_thresholds.as_dict() == effective_thresholds("ollama")
+
+
 def test_gliclass_filter_builds_http_client():
     config = resolve_decision_config(
         _settings(

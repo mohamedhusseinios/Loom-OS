@@ -224,16 +224,25 @@ async def test_settings_roles_and_default_decision_providers(reg):
     assert settings.filter_provider is None
     assert settings.judgment_provider is None
     assert settings.threshold_overrides is None
+    assert settings.selection_autonomy_enabled is True
+    assert settings.autonomy_min_fit == "High"
+    assert settings.autonomy_require_margin is True
 
     # Schema stores gliclass-as-judgment; API rejection is a later task.
     updated = await reg.update_agent_settings(AgentSettingsUpdate(
         filter_provider="gliclass",
         judgment_provider="gliclass",
         threshold_overrides={"ollama": {"drop": 0.2, "mid": 0.5, "keep": 0.8}},
+        selection_autonomy_enabled=False,
+        autonomy_min_fit="Low",
+        autonomy_require_margin=False,
     ))
     assert updated.filter_provider == "gliclass"
     assert updated.judgment_provider == "gliclass"
     assert updated.threshold_overrides["ollama"]["keep"] == 0.8
+    assert updated.selection_autonomy_enabled is False
+    assert updated.autonomy_min_fit == "Low"
+    assert updated.autonomy_require_margin is False
     again = await reg.get_agent_settings()
     assert again.filter_provider == "gliclass"
     assert again.judgment_provider == "gliclass"
@@ -243,6 +252,9 @@ async def test_settings_roles_and_default_decision_providers(reg):
     assert kept.filter_provider == "gliclass"
     assert kept.judgment_provider == "gliclass"
     assert kept.threshold_overrides["ollama"]["drop"] == 0.2
+    assert kept.selection_autonomy_enabled is False
+    assert kept.autonomy_min_fit == "Low"
+    assert kept.autonomy_require_margin is False
 
 
 @pytest.mark.asyncio
@@ -275,20 +287,30 @@ async def test_legacy_settings_gain_role_columns_without_forced_defaults(tmp_pat
     try:
         cursor = await reg.db.execute("PRAGMA table_info(agent_settings)")
         cols = {r[1] for r in await cursor.fetchall()}
-        assert {"filter_provider", "judgment_provider", "threshold_overrides_json", "chat_provider"} <= cols
+        assert {
+            "filter_provider", "judgment_provider", "threshold_overrides_json", "chat_provider",
+            "selection_autonomy_enabled", "autonomy_min_fit", "autonomy_require_margin",
+        } <= cols
         cursor = await reg.db.execute(
-            "SELECT filter_provider, judgment_provider, threshold_overrides_json"
+            "SELECT filter_provider, judgment_provider, threshold_overrides_json,"
+            " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
         )
         row = await cursor.fetchone()
         assert row["filter_provider"] is None
         assert row["judgment_provider"] is None
         assert row["threshold_overrides_json"] is None
+        assert row["selection_autonomy_enabled"] == 1
+        assert row["autonomy_min_fit"] == "High"
+        assert row["autonomy_require_margin"] == 1
         settings = await reg.get_agent_settings()
         ids = {p.id for p in settings.providers}
         assert {"deepseek", "openai", "anthropic", "typesafe", "ollama", "gliclass"} <= ids
         assert settings.filter_provider is None
         assert settings.judgment_provider is None
+        assert settings.selection_autonomy_enabled is True
+        assert settings.autonomy_min_fit == "High"
+        assert settings.autonomy_require_margin is True
     finally:
         await reg.close()
 

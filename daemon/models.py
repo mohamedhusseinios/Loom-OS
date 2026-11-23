@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -238,6 +238,7 @@ class AgentProviderConfig(BaseModel):
     base_url: str
     model_ids: list[str] = Field(default_factory=list)
     api_style: str = "openai"  # openai | anthropic
+    kind: Optional[str] = None  # builtin | openai_compatible (user-added chat/decision providers)
 
 
 class AgentSettings(BaseModel):
@@ -249,6 +250,9 @@ class AgentSettings(BaseModel):
     filter_provider: Optional[str] = None
     judgment_provider: Optional[str] = None
     threshold_overrides: Optional[dict] = None
+    selection_autonomy_enabled: bool = True
+    autonomy_min_fit: str = "High"
+    autonomy_require_margin: bool = True
 
 
 class AgentSettingsUpdate(BaseModel):
@@ -256,9 +260,13 @@ class AgentSettingsUpdate(BaseModel):
     chat_provider: Optional[str] = None
     providers: Optional[list[AgentProviderConfig]] = None
     api_keys: Optional[dict[str, str]] = None  # write-only raw keys
+    remove_provider_ids: Optional[list[str]] = None  # custom provider ids to delete
     filter_provider: Optional[str] = None
     judgment_provider: Optional[str] = None
     threshold_overrides: Optional[dict] = None
+    selection_autonomy_enabled: Optional[bool] = None
+    autonomy_min_fit: Optional[str] = None
+    autonomy_require_margin: Optional[bool] = None
 
 
 class ListModelsRequest(BaseModel):
@@ -286,6 +294,13 @@ class AgentMessageRecord(BaseModel):
     role: str  # user | assistant | system
     content: str
     created_at: str
+
+
+class ImplementRequest(BaseModel):
+    choice: Literal["user", "auto", "delegate"] = "auto"
+    family_id: Optional[str] = None
+    recommended_family_id: Optional[str] = None
+    modifier_ids: list[str] = Field(default_factory=list)
 
 
 class AgentChatRequest(BaseModel):
@@ -336,5 +351,38 @@ class TaskSuggestionRecord(BaseModel):
     judgment_latency_ms: Optional[float] = None
     effective_thresholds_json: Optional[str] = None
     legacy_decision_input_tokens: Optional[int] = None
+    created_at: str
+    updated_at: str
+
+
+class AgentRunRecord(BaseModel):
+    id: str
+    task_id: str
+    project: str
+    family_id: str = "react"
+    modifier_ids_json: str = "[]"
+    schema_version: int = 1
+    pattern_versions_json: str = "{}"
+    recommended_json: Optional[str] = None
+    chosen_source: Optional[str] = None
+    user_override: bool = False
+    stage1_profile_json: Optional[str] = None
+    fit_levels_json: Optional[str] = None
+    selection_scores_json: Optional[str] = None
+    selection_filter_provider: Optional[str] = None
+    selection_judgment_provider: Optional[str] = None
+    selection_filter_skipped: Optional[bool] = None
+    selection_judgment_skipped: Optional[bool] = None
+    selection_skip_reason: Optional[str] = None
+    status: str
+    worktree_path: Optional[str] = None
+    run_dir: str
+    step_limit: int = 40
+    token_limit: int = 100000
+    cost_limit: float = 1.0
+    steps_used: int = 0
+    tokens_used: int = 0
+    cost_used: float = 0.0
+    stop_reason: Optional[str] = None
     created_at: str
     updated_at: str

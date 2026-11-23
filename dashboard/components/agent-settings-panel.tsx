@@ -14,12 +14,18 @@ import {
 const FIELD_CLASS = "mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100";
 const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
 const DECISION_IDS = new Set(["typesafe", "ollama", "gliclass"]);
-const PRESET_CHAT_IDS = new Set(["deepseek", "openai", "anthropic"]);
 const ADD_CUSTOM_SENTINEL = "__add_custom__";
 
-type DecisionModel = "" | "typesafe" | "ollama" | "gliclass";
-type JudgmentBackend = "typesafe" | "ollama" | "none";
+const BUILTIN_PROVIDER_IDS = ["deepseek", "openai", "anthropic", "typesafe", "ollama", "gliclass"];
+const CUSTOM_KIND = "openai_compatible";
+const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]+$/;
+
+// Builtin ids or a custom openai_compatible provider id.
+type DecisionModel = string;
+type JudgmentBackend = string;
 type ApiStyle = "openai" | "anthropic";
+type CustomRow = { id: string; name: string; base_url: string; api_style: ApiStyle; model: string; key: string; isNew: boolean };
+type AutonomyMinFit = "High" | "Medium" | "Low";
 
 type ChatDraft = {
   id: string;
@@ -29,6 +35,24 @@ type ChatDraft = {
   model_ids: string[];
   api_key: string;
 };
+
+function customRowsFromSettings(s: AgentSettings | null): CustomRow[] {
+  return (s?.providers ?? [])
+    .filter((p) => p.kind === CUSTOM_KIND && !BUILTIN_PROVIDER_IDS.includes(p.id))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      base_url: p.base_url,
+      api_style: (p.api_style as ApiStyle | undefined) || "openai",
+      model: p.model_ids?.find((m) => m.trim())?.trim() ?? "",
+      key: "",
+      isNew: false,
+    }));
+}
+
+function isCustomId(rows: CustomRow[], value: string): boolean {
+  return rows.some((r) => r.id === value);
+}
 
 function providerBase(settings: AgentSettings | null, id: string): string {
   return settings?.providers?.find((p) => p.id === id)?.base_url || "";
@@ -51,20 +75,24 @@ function providerWithModel(settings: AgentSettings | null, id: string, fallbackN
   };
 }
 
-function isDecisionModel(value: string | null | undefined): value is Exclude<DecisionModel, ""> {
-  return value === "typesafe" || value === "ollama" || value === "gliclass";
+function isDecisionModel(value: string | null | undefined, customs: CustomRow[]): value is string {
+  return value === "typesafe" || value === "ollama" || value === "gliclass" || (Boolean(value) && isCustomId(customs, value as string));
 }
 
-function isJudgmentBackend(value: string | null | undefined): value is JudgmentBackend {
-  return value === "typesafe" || value === "ollama" || value === "none";
+function isJudgmentBackend(value: string | null | undefined, customs: CustomRow[]): value is string {
+  return value === "typesafe" || value === "ollama" || value === "none" || (Boolean(value) && isCustomId(customs, value as string));
 }
 
 function defaultJudgment(hasTypesafeKey: boolean): JudgmentBackend {
   return hasTypesafeKey ? "typesafe" : "none";
 }
 
+function isAutonomyMinFit(value: string | null | undefined): value is AutonomyMinFit {
+  return value === "High" || value === "Medium" || value === "Low";
+}
+
 function isChatProvider(p: AgentProvider): boolean {
-  return !DECISION_IDS.has(p.id);
+  return !DECISION_IDS.has(p.id) && p.kind !== CUSTOM_KIND;
 }
 
 function defaultBaseFor(id: string, style: ApiStyle): string {
@@ -96,13 +124,6 @@ function toChatDrafts(settings: AgentSettings | null): ChatDraft[] {
   }));
 }
 
-function newCustomId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return `custom-${crypto.randomUUID().slice(0, 8)}`;
-  }
-  return `custom-${Date.now().toString(36)}`;
-}
-
 export function AgentSettingsPanel() {
   const t = useTranslations("LoomAgent");
   const [settings, setSettings] = useState<AgentSettings | null>(null);
@@ -122,6 +143,11 @@ export function AgentSettingsPanel() {
   const [gliclassModel, setGliclassModel] = useState("");
   const [decisionModel, setDecisionModel] = useState<DecisionModel>("");
   const [judgmentProvider, setJudgmentProvider] = useState<JudgmentBackend>("none");
+  const [selectionAutonomyEnabled, setSelectionAutonomyEnabled] = useState(true);
+  const [autonomyMinFit, setAutonomyMinFit] = useState<AutonomyMinFit>("High");
+  const [autonomyRequireMargin, setAutonomyRequireMargin] = useState(true);
+  const [customRows, setCustomRows] = useState<CustomRow[]>([]);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -140,7 +166,8 @@ export function AgentSettingsPanel() {
     setSettings(s);
     const drafts = toChatDrafts(s);
     setChatDrafts(drafts);
-    const active = s.chat_provider && drafts.some((d) => d.id === s.chat_provider)
+    const customs = customRowsFromSettings(s);
+    const active = s.chat_provider && (drafts.some((d) => d.id === s.chat_provider) || isCustomId(customs, s.chat_provider))
       ? s.chat_provider
       : drafts[0]?.id || "deepseek";
     setChatProvider(active);
@@ -153,15 +180,20 @@ export function AgentSettingsPanel() {
     setOllamaModel(providerModel(s, "ollama", ""));
     setGliclassBase(providerBase(s, "gliclass"));
     setGliclassModel(providerModel(s, "gliclass", ""));
-    const decision = isDecisionModel(s.filter_provider) ? s.filter_provider : "";
+    // Keep unsaved new rows so clearing a key or deleting another row doesn't discard them.
+    setCustomRows((prev) => [...customs, ...prev.filter((r) => r.isNew && !customs.some((c) => c.id === r.id))]);
+    const decision = isDecisionModel(s.filter_provider, customs) ? s.filter_provider : "";
     setDecisionModel(decision);
-    if (decision === "typesafe" || decision === "ollama") {
+    if (decision === "typesafe" || decision === "ollama" || (decision !== "" && decision !== "gliclass")) {
       setJudgmentProvider(decision);
-    } else if (isJudgmentBackend(s.judgment_provider)) {
+    } else if (isJudgmentBackend(s.judgment_provider, customs)) {
       setJudgmentProvider(s.judgment_provider);
     } else {
       setJudgmentProvider(defaultJudgment(Boolean(s.has_keys?.typesafe)));
     }
+    setSelectionAutonomyEnabled(s.selection_autonomy_enabled ?? true);
+    setAutonomyMinFit(isAutonomyMinFit(s.autonomy_min_fit) ? s.autonomy_min_fit : "High");
+    setAutonomyRequireMargin(s.autonomy_require_margin ?? true);
   }
 
   useEffect(() => {
@@ -176,10 +208,16 @@ export function AgentSettingsPanel() {
 
   function onChatProviderChange(id: string) {
     if (id === ADD_CUSTOM_SENTINEL) {
-      addCustomProvider();
+      addCustomRow();
       return;
     }
     setChatProvider(id);
+    const customRow = customRows.find((r) => r.id.trim() === id);
+    if (customRow) {
+      setListedModels(customRow.model ? [customRow.model] : []);
+      if (customRow.model) setModel(customRow.model);
+      return;
+    }
     const row = chatDrafts.find((d) => d.id === id);
     if (row?.model_ids?.length) {
       setListedModels([...row.model_ids]);
@@ -192,56 +230,34 @@ export function AgentSettingsPanel() {
   }
 
   function onDecisionModelChange(value: string) {
-    if (!isDecisionModel(value)) {
+    if (!isDecisionModel(value, customRows)) {
       setDecisionModel("");
       return;
     }
     setDecisionModel(value);
-    if (value === "typesafe" || value === "ollama") {
+    if (value !== "gliclass") {
       setJudgmentProvider(value);
       return;
     }
     setJudgmentProvider(defaultJudgment(typesafeKeySet));
   }
 
-  function addCustomProvider() {
-    const id = newCustomId();
-    const draft: ChatDraft = {
-      id,
-      name: t("customProviderName"),
-      base_url: "https://api.openai.com",
-      api_style: "openai",
-      model_ids: [],
-      api_key: "",
-    };
-    setChatDrafts((prev) => [...prev, draft]);
-    setChatProvider(id);
-    setListedModels([]);
-  }
-
-  function removeCustomProvider() {
-    if (!activeDraft || PRESET_CHAT_IDS.has(activeDraft.id)) return;
-    const next = chatDrafts.filter((d) => d.id !== activeDraft.id);
-    setChatDrafts(next);
-    const fallback = next[0]?.id || "deepseek";
-    setChatProvider(fallback);
-    const row = next.find((d) => d.id === fallback);
-    setListedModels(row?.model_ids?.length ? [...row.model_ids] : []);
-  }
-
   async function fetchModels() {
-    if (!activeDraft) return;
+    const source = activeCustom
+      ? { id: activeCustom.id.trim(), base_url: activeCustom.base_url, api_style: activeCustom.api_style, api_key: activeCustom.key }
+      : activeDraft;
+    if (!source) return;
     setListing(true);
     setMsg("");
     try {
       const result = await listProviderModels({
-        provider_id: activeDraft.id,
-        base_url: activeDraft.base_url.trim() || undefined,
-        api_style: activeDraft.api_style,
-        api_key: activeDraft.api_key.trim() || undefined,
+        provider_id: source.id,
+        base_url: source.base_url.trim() || undefined,
+        api_style: source.api_style,
+        api_key: source.api_key.trim() || undefined,
       });
       setListedModels(result.models);
-      updateActiveDraft({ model_ids: result.models });
+      if (!activeCustom) updateActiveDraft({ model_ids: result.models });
       if (result.models.length && !result.models.includes(model)) {
         setModel(result.models[0]);
       }
@@ -254,7 +270,7 @@ export function AgentSettingsPanel() {
   }
 
   async function save() {
-    if (!activeDraft) return;
+    if (!activeDraft && !activeCustom) return;
     setSaving(true);
     setMsg("");
     try {
@@ -266,7 +282,8 @@ export function AgentSettingsPanel() {
       if (showOllama && ollamaKey.trim()) api_keys.ollama = ollamaKey.trim();
       if (showGliclass && gliclassKey.trim()) api_keys.gliclass = gliclassKey.trim();
 
-      const chatProviders = chatDrafts.map((d) => {
+      const activeCustomRow = customRows.find((r) => r.id.trim() === chatProvider);
+      const chatProviders: AgentSettings["providers"] = chatDrafts.map((d) => {
         const models = d.id === chatProvider
           ? (listedModels.length ? listedModels : (model.trim() ? [model.trim()] : d.model_ids))
           : d.model_ids;
@@ -282,7 +299,7 @@ export function AgentSettingsPanel() {
         };
       });
 
-      const providers = [...chatProviders];
+      const providers: AgentSettings["providers"] = [...chatProviders];
       if (showTypesafe) {
         providers.push(providerWithModel(settings, "typesafe", "TypeSafe (Jev)", jevBase.trim(), jevModel.trim() || "jev-latest"));
       }
@@ -292,18 +309,28 @@ export function AgentSettingsPanel() {
       if (showGliclass) {
         providers.push(providerWithModel(settings, "gliclass", "GLiClass", gliclassBase.trim(), gliclassModel));
       }
-      const roles = decisionModel === "typesafe" || decisionModel === "ollama"
-        ? { filter_provider: decisionModel, judgment_provider: decisionModel }
-        : decisionModel === "gliclass"
-          ? {
-              filter_provider: "gliclass" as const,
-              judgment_provider: isJudgmentBackend(judgmentProvider) ? judgmentProvider : defaultJudgment(typesafeKeySet),
-            }
+      for (const row of customRows) {
+        const id = row.id.trim();
+        if (!id) continue;
+        const rowModel = row.model.trim() || (row === activeCustomRow ? model.trim() : "");
+        providers.push({ id, name: row.name.trim() || id, base_url: row.base_url.trim(), model_ids: rowModel ? [rowModel] : [], api_style: row.api_style, kind: CUSTOM_KIND });
+        if (row.key.trim()) api_keys[id] = row.key.trim();
+      }
+      const roles = decisionModel === "gliclass"
+        ? {
+            filter_provider: "gliclass" as const,
+            judgment_provider: isJudgmentBackend(judgmentProvider, customRows) ? judgmentProvider : defaultJudgment(typesafeKeySet),
+          }
+        : decisionModel
+          ? { filter_provider: decisionModel, judgment_provider: decisionModel }
           : null;
       const next = await updateAgentSettings({
         default_model: model,
         chat_provider: chatProvider,
         providers,
+        selection_autonomy_enabled: selectionAutonomyEnabled,
+        autonomy_min_fit: autonomyMinFit,
+        autonomy_require_margin: autonomyRequireMargin,
         ...(Object.keys(api_keys).length ? { api_keys } : {}),
         ...(roles ?? {}),
       });
@@ -337,6 +364,40 @@ export function AgentSettingsPanel() {
     }
   }
 
+  function updateCustomRow(index: number, patch: Partial<CustomRow>) {
+    setCustomRows((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
+  function addCustomRow() {
+    setCustomRows((rows) => [...rows, { id: "", name: "", base_url: "", api_style: "openai", model: "", key: "", isNew: true }]);
+  }
+
+  async function deleteCustomRow(index: number) {
+    const row = customRows[index];
+    if (!row) return;
+    if (row.isNew) {
+      setCustomRows((rows) => rows.filter((_, i) => i !== index));
+      return;
+    }
+    setDeleting(row.id);
+    setMsg("");
+    try {
+      const next = await updateAgentSettings({ remove_provider_ids: [row.id] });
+      setCustomRows((rows) => rows.filter((r) => r.id !== row.id));
+      applySettings(next);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      setMsg(/in use/i.test(message) ? t("customProviderInUseError") : message || t("settingsSaveError"));
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  const customModelIds = customRows.map((r) => r.model.trim()).filter(Boolean);
+  const customDecisionRows = customRows.filter((r) => r.id.trim() && CUSTOM_ID_RE.test(r.id.trim()));
+  const activeCustom = customRows.find((r) => r.id.trim() === chatProvider) ?? null;
+  const busy = saving || clearing !== null || deleting !== null;
+
   const hasTypesafe = Boolean(settings?.has_keys?.typesafe);
   const hasOllama = Boolean(settings?.has_keys?.ollama);
   const hasGliclass = Boolean(settings?.has_keys?.gliclass);
@@ -351,10 +412,10 @@ export function AgentSettingsPanel() {
   }
 
   const modelOptions = useMemo(() => {
-    const set = new Set<string>([...listedModels, ...(activeDraft?.model_ids || [])]);
+    const set = new Set<string>([...listedModels, ...(activeDraft?.model_ids || []), ...customModelIds]);
     if (model.trim()) set.add(model.trim());
     return Array.from(set);
-  }, [listedModels, activeDraft, model]);
+  }, [listedModels, activeDraft, customModelIds, model]);
 
   return (
     <div className="rounded-lg border border-zinc-800 p-3 space-y-3">
@@ -372,26 +433,14 @@ export function AgentSettingsPanel() {
             {chatDrafts.map((d) => (
               <option key={d.id} value={d.id}>{d.name || d.id}</option>
             ))}
+            {customDecisionRows.map((r) => (
+              <option key={r.id} value={r.id}>{r.name.trim() || r.id}</option>
+            ))}
             <option value={ADD_CUSTOM_SENTINEL}>{t("addCustomProvider")}</option>
           </select>
         </label>
-        {activeDraft && !PRESET_CHAT_IDS.has(activeDraft.id) && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" onClick={removeCustomProvider} disabled={saving}>
-              {t("removeProvider")}
-            </Button>
-          </div>
-        )}
-        {activeDraft && !PRESET_CHAT_IDS.has(activeDraft.id) && (
-          <label className="block text-xs text-zinc-400">
-            {t("providerName")}
-            <input
-              className={FIELD_CLASS}
-              value={activeDraft.name}
-              onChange={(e) => updateActiveDraft({ name: e.target.value })}
-            />
-          </label>
-        )}
+        {activeCustom && <p className="text-[11px] text-zinc-500">{t("customProviderEditBelow")}</p>}
+        {!activeCustom && activeDraft && (<>
         <label className="block text-xs text-zinc-400">
           {t("apiStyle")}
           <select
@@ -429,6 +478,7 @@ export function AgentSettingsPanel() {
             {clearing === chatProvider ? t("clearing") : t("clearKey")}
           </Button>
         )}
+        </>)}
         <label className="block text-xs text-zinc-400">
           {t("defaultModel")}
           <input
@@ -459,9 +509,48 @@ export function AgentSettingsPanel() {
           <option value="typesafe">{t("decisionTypesafe")}</option>
           <option value="ollama">{t("decisionOllama")}</option>
           <option value="gliclass">{t("decisionGliclass")}</option>
+          {customDecisionRows.map((r) => (
+            <option key={r.id} value={r.id}>{r.name.trim() || r.id}</option>
+          ))}
         </select>
       </label>
       <p className="text-[11px] text-zinc-500">{t("decisionHint")}</p>
+      <div className="border-t border-zinc-800 pt-3 space-y-2">
+        <h4 className="text-xs font-medium text-zinc-300">{t("selectionAutonomyTitle")}</h4>
+        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selectionAutonomyEnabled}
+            onChange={(e) => setSelectionAutonomyEnabled(e.target.checked)}
+            className="accent-emerald-500 w-3 h-3"
+          />
+          {t("selectionAutonomyEnabled")}
+        </label>
+        <label className="block text-xs text-zinc-400">
+          {t("autonomyMinFit")}
+          <select
+            className={FIELD_CLASS}
+            value={autonomyMinFit}
+            onChange={(e) => {
+              if (isAutonomyMinFit(e.target.value)) setAutonomyMinFit(e.target.value);
+            }}
+          >
+            <option value="High">{t("autonomyFitHigh")}</option>
+            <option value="Medium">{t("autonomyFitMedium")}</option>
+            <option value="Low">{t("autonomyFitLow")}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autonomyRequireMargin}
+            onChange={(e) => setAutonomyRequireMargin(e.target.checked)}
+            className="accent-emerald-500 w-3 h-3"
+          />
+          {t("autonomyRequireMargin")}
+        </label>
+        <p className="text-[11px] text-zinc-500">{t("selectionAutonomyHint")}</p>
+      </div>
       {showGliclass && (
         <label className="block text-xs text-zinc-400">
           {t("judgmentBackend")}
@@ -469,12 +558,15 @@ export function AgentSettingsPanel() {
             className={FIELD_CLASS}
             value={judgmentProvider}
             onChange={(e) => {
-              if (isJudgmentBackend(e.target.value)) setJudgmentProvider(e.target.value);
+              if (isJudgmentBackend(e.target.value, customRows)) setJudgmentProvider(e.target.value);
             }}
           >
             <option value="typesafe">{t("judgmentTypesafe")}</option>
             <option value="ollama">{t("judgmentOllama")}</option>
             <option value="none">{t("judgmentNone")}</option>
+            {customDecisionRows.map((r) => (
+              <option key={r.id} value={r.id}>{r.name.trim() || r.id}</option>
+            ))}
           </select>
         </label>
       )}
@@ -593,9 +685,83 @@ export function AgentSettingsPanel() {
           </label>
         </>
       )}
+      <div className="border-t border-zinc-800 pt-3 space-y-3">
+        <h4 className="text-xs font-medium text-zinc-300">{t("customProvidersTitle")}</h4>
+        <p className="text-[11px] text-zinc-500">{t("customProvidersHint")}</p>
+        {customRows.map((row, index) => {
+          const hasKey = !row.isNew && Boolean(settings?.has_keys?.[row.id]);
+          return (
+            <div key={row.isNew ? `new-${index}` : row.id} className="rounded border border-zinc-800 p-2 space-y-2">
+              <label className="block text-xs text-zinc-400">
+                {t("customProviderName")}
+                <input className={FIELD_CLASS} value={row.name} onChange={(e) => updateCustomRow(index, { name: e.target.value })} />
+              </label>
+              <label className="block text-xs text-zinc-400">
+                {t("customProviderId")}
+                <input
+                  className={FIELD_CLASS}
+                  value={row.id}
+                  disabled={!row.isNew}
+                  autoComplete="off"
+                  onChange={(e) => updateCustomRow(index, { id: e.target.value.toLowerCase() })}
+                />
+              </label>
+              <label className="block text-xs text-zinc-400">
+                {t("customProviderBaseUrl")}
+                <input
+                  className={FIELD_CLASS}
+                  placeholder="https://api.example.com/v1"
+                  value={row.base_url}
+                  onChange={(e) => updateCustomRow(index, { base_url: e.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-zinc-400">
+                {t("apiStyle")}
+                <select
+                  className={FIELD_CLASS}
+                  value={row.api_style}
+                  onChange={(e) => updateCustomRow(index, { api_style: e.target.value as ApiStyle })}
+                >
+                  <option value="openai">{t("apiStyleOpenai")}</option>
+                  <option value="anthropic">{t("apiStyleAnthropic")}</option>
+                </select>
+              </label>
+              <label className="block text-xs text-zinc-400">
+                {t("customProviderModel")}
+                <input className={FIELD_CLASS} value={row.model} onChange={(e) => updateCustomRow(index, { model: e.target.value })} />
+              </label>
+              <label className="block text-xs text-zinc-400">
+                {t("customProviderKey")}
+                {!row.isNew && keyStatus(hasKey)}
+                <input
+                  type="password"
+                  autoComplete="off"
+                  className={FIELD_CLASS}
+                  placeholder={(!row.isNew && settings?.api_keys_masked?.[row.id]) || t("apiKeyPlaceholder")}
+                  value={row.key}
+                  onChange={(e) => updateCustomRow(index, { key: e.target.value })}
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                {hasKey && (
+                  <Button size="sm" variant="ghost" onClick={() => void clearKey(row.id)} disabled={busy}>
+                    {clearing === row.id ? t("clearing") : t("clearKey")}
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => void deleteCustomRow(index)} disabled={busy}>
+                  {t("customProviderDelete")}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+        <Button size="sm" variant="outline" onClick={addCustomRow} disabled={busy}>
+          {t("customProviderAdd")}
+        </Button>
+      </div>
       <p className="text-[11px] text-zinc-500">{t("byokHint")}</p>
       <p className="text-[11px] text-zinc-500">{t("envFallbackHint")}</p>
-      <Button size="sm" onClick={() => void save()} disabled={saving || clearing !== null}>
+      <Button size="sm" onClick={() => void save()} disabled={busy}>
         {saving ? t("saving") : t("saveSettings")}
       </Button>
       {msg && <p className="text-xs text-zinc-400">{msg}</p>}

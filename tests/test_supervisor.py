@@ -52,6 +52,19 @@ def test_spawn_idempotent_while_running(monkeypatch):
     assert s._procs["t1"] is first
 
 
+def test_spawn_after_exit_clears_exited(monkeypatch):
+    _patch_popen(monkeypatch)
+    s = WorkerSupervisor()
+    s.spawn("noor", "claude-code", "/tmp/noor", "t1")
+    s._procs["t1"]._returncode = 0
+    assert s.is_running("t1") is False
+    assert s.exited_task_ids() == {"t1"}
+    s.spawn("noor", "claude-code", "/tmp/noor", "t1")
+    assert s.is_running("t1") is True
+    assert "t1" not in s._exited
+    assert s.exited_task_ids() == set()
+
+
 def test_is_running_reaps_exited(monkeypatch):
     _patch_popen(monkeypatch)
     s = WorkerSupervisor()

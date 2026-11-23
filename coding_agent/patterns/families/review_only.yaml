@@ -1,0 +1,33 @@
+id: review_only
+name: Review-only
+kind: family
+schema_version: 1
+version: 1
+status: active
+description: >
+  Read and analyze without mutating the repo. Surfaces findings, risks, and
+  suggested diffs in prose; no file edits or writes through tools.
+when_to_use:
+  - Code review, audit, or security pass before someone else implements
+  - Explaining architecture or diff impact without applying changes
+  - Pre-merge checks when write access must stay disabled
+anti_criteria:
+  - The user expects the agent to land code changes directly
+  - Tests or formatters must be run and fixes committed in-repo
+  - The task is a spike that requires experimental edits
+steps:
+  - id: inspect
+    description: Read relevant files, history, and test signals.
+  - id: report
+    description: Summarize findings and concrete recommendations without editing.
+allowed_tools:
+  - read_file
+  - search
+  - shell
+  - git
+  - run_tests
+  - run_lint
+required_capabilities: []
+expected_cost_class: Low
+expected_steps: "1-20"
+runner: review_only

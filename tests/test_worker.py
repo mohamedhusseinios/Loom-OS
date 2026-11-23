@@ -51,6 +51,25 @@ def test_process_task_success_marks_done_and_writes_finding(monkeypatch):
     assert w.findings and w.findings[0][2] == "did the work"
 
 
+def test_process_task_cancel_does_not_commit_or_finish(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="loom-agent", project_path="/tmp/noor", base_url="http://x")
+    committed = []
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+    monkeypatch.setattr(worker_mod, "create_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(worker_mod, "commit_all", lambda *a, **k: committed.append(True))
+    monkeypatch.setattr(
+        worker_mod, "run_agent",
+        lambda *a, **k: ClaudeResult("cancelled: cancelled", None, True),
+    )
+
+    w.process_task({"id": "t-cancel", "title": "T", "instruction": "x",
+                    "acceptance_criteria": "", "result": None})
+
+    assert committed == []
+    assert w.findings == []
+    assert w.patches[-1][1]["status"] == "blocked"
+
+
 def test_process_task_claude_error_marks_blocked(monkeypatch):
     w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
     _patch_git_and_claude(monkeypatch, ClaudeResult("boom", "sess-2", True))
@@ -75,6 +94,33 @@ def test_process_task_worktree_failure_marks_blocked(monkeypatch):
     assert "not a git repo" in w.patches[-1][1]["result"]
     assert any(k == "error" for (_tid, k, _m) in w.progress)
     assert any("Worktree failed" in m for (_tid, _k, m) in w.progress)
+
+
+def test_loom_agent_early_exit_seals_terminal_event(monkeypatch, tmp_path):
+    import json
+    from pathlib import Path
+
+    events = tmp_path / "events.jsonl"
+    manifest = {
+        "prompt": "do the thing",
+        "events_path": str(events),
+        "run_dir": str(tmp_path),
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", str(manifest_path))
+    w = _CaptureWorker(project="noor", agent="loom-agent", project_path="/tmp/noor", base_url="http://x")
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+
+    def _boom(*a, **k):
+        raise RuntimeError("not a git repo")
+
+    monkeypatch.setattr(worker_mod, "create_worktree", _boom)
+    w.process_task({"id": "t9", "title": "T", "instruction": "x", "result": None})
+
+    last = json.loads(events.read_text(encoding="utf-8").splitlines()[-1])
+    assert last == {"type": "run.failed", "stop_reason": "worker_exit"}
+    assert w.patches[-1][1]["status"] == "blocked"
 
 
 def test_agent_id_matches_daemon_convention():

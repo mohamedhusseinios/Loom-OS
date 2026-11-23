@@ -1,0 +1,36 @@
+id: debug
+name: Debug
+kind: family
+schema_version: 1
+version: 1
+status: active
+description: >
+  Structured debugging. Reproduce the failure, narrow the blast radius, apply a
+  targeted fix, and verify with regression checks.
+when_to_use:
+  - Intermittent or unclear failures that need reproduction first
+  - Stack traces or logs pointing to a suspect area but not the root cause
+  - Production or CI regressions requiring isolate-then-fix discipline
+anti_criteria:
+  - Greenfield feature work with no failing signal
+  - The failure is already fully localized and needs only a one-line fix
+  - Task is review or explanation with no broken behavior
+steps:
+  - id: reproduce
+    description: Confirm the failure with logs, tests, or a minimal repro command.
+  - id: isolate
+    description: Narrow which component, commit, or input triggers the bug.
+  - id: fix
+    description: Apply a minimal corrective change and confirm the repro is gone.
+allowed_tools:
+  - read_file
+  - edit
+  - search
+  - shell
+  - git
+  - run_tests
+  - run_lint
+required_capabilities: []
+expected_cost_class: Med
+expected_steps: "4-40"
+runner: debug

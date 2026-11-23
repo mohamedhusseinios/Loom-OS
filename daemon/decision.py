@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from daemon.agent_credentials import DEFAULT_OLLAMA_BASE_URL, DEFAULT_TYPESAFE_BASE_URL
+from daemon.agent_credentials import BUILTIN_PROVIDER_IDS, DEFAULT_OLLAMA_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, PROVIDER_KIND_OPENAI, normalize_provider_kind
 from daemon.gliclass_client import GLiClassClient
 from daemon.jev_client import DEFAULT_MODEL as DEFAULT_TYPESAFE_MODEL
 from daemon.jev_client import JevClient
@@ -199,6 +199,7 @@ def _as_provider_row(item: Any) -> dict[str, Any]:
         "id": getattr(item, "id", "") or "",
         "base_url": getattr(item, "base_url", "") or "",
         "model_ids": list(getattr(item, "model_ids", []) or []),
+        "kind": getattr(item, "kind", "") or "",
     }
 
 
@@ -277,6 +278,14 @@ def _overrides_for(all_overrides: Mapping[str, Any], provider: str) -> dict[str,
     return None
 
 
+def _is_custom_provider(provider_id: str, rows: list[dict[str, Any]]) -> bool:
+    """True when ``provider_id`` is a non-builtin row whose kind is openai_compatible (kind inferred when missing)."""
+    if provider_id in BUILTIN_PROVIDER_IDS:
+        return False
+    row = _find_provider(rows, provider_id)
+    return bool(row) and normalize_provider_kind(row).get("kind") == PROVIDER_KIND_OPENAI
+
+
 def _lazy_provider(has_typesafe_key: bool) -> str:
     return "typesafe" if has_typesafe_key else "none"
 
@@ -293,10 +302,11 @@ def _resolve_roles(settings: Any, keys: Mapping[str, str]) -> tuple[str, str]:
         fallback = _lazy_provider(has_typesafe_key)
         logger.warning("judgment_provider=gliclass is rejected in Phase 1; falling back to %s", fallback)
         judg = fallback
-    if filt not in _FILTER_PROVIDERS:
+    rows = _provider_rows(settings)
+    if filt not in _FILTER_PROVIDERS and not _is_custom_provider(filt, rows):
         logger.warning("unknown filter_provider=%s; falling back to none", filt)
         filt = "none"
-    if judg not in _JUDGMENT_PROVIDERS:
+    if judg not in _JUDGMENT_PROVIDERS and not _is_custom_provider(judg, rows):
         logger.warning("unknown judgment_provider=%s; falling back to none", judg)
         judg = "none"
     return filt, judg
@@ -305,12 +315,14 @@ def _resolve_roles(settings: Any, keys: Mapping[str, str]) -> tuple[str, str]:
 def _role_endpoint(provider: str, rows: list[dict[str, Any]], keys: Mapping[str, str], overrides: Mapping[str, Any]) -> tuple[str, str, str, Thresholds]:
     row = _find_provider(rows, provider)
     thresholds = _thresholds_from(effective_thresholds(provider, _overrides_for(overrides, provider)))
-    if provider == "ollama":
+    if provider == "ollama" or _is_custom_provider(provider, rows):
         model = _first_model(row, "")
         if not model:
-            raise ValueError("Ollama decision provider requires a model")
-        base_url = _row_base_url(row) or DEFAULT_OLLAMA_BASE_URL
-        return model, base_url, _provider_key(keys, "ollama"), thresholds
+            raise ValueError(f"{'Ollama' if provider == 'ollama' else provider} decision provider requires a model")
+        base_url = _row_base_url(row) or (DEFAULT_OLLAMA_BASE_URL if provider == "ollama" else "")
+        if not base_url:
+            raise ValueError(f"{provider} decision provider requires a base_url")
+        return model, base_url, _provider_key(keys, provider), thresholds
     if provider == "gliclass":
         return _first_model(row, ""), _row_base_url(row), _provider_key(keys, "gliclass"), thresholds
     if provider == "typesafe":
@@ -363,6 +375,9 @@ def _build_one(provider: str, model: str, base_url: str, api_key: str) -> Decisi
     if provider in ("typesafe", "ollama"):
         timeout = 10.0 if provider == "typesafe" else 5.0
         return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout, provider=provider, model=model or DEFAULT_TYPESAFE_MODEL)
+    if provider not in BUILTIN_PROVIDER_IDS and provider != "none":
+        # Custom openai_compatible id: JevClient only knows typesafe|ollama, so use the ollama (keyless-ok, 5s) path.
+        return JevClient(api_key=api_key, base_url=base_url or None, timeout=5.0, provider="ollama", model=model)
     return NullDecisionClient()
 
 

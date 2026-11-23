@@ -1,10 +1,16 @@
 """API tests for Loom agent chat, suggest, accept, implement, settings."""
+import asyncio
+import json
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 import daemon.api as api_module
+import daemon.agent_runtime as agent_runtime_module
+from daemon.agent_runtime import JsonlEventTail, drain_run_jsonl, emit_new_run_events
 from daemon.graph_engine import GraphEngine
 from daemon.llm_client import LlmError
 from daemon.models import AgentInfo, AgentTaskCreatePayload, AgentTaskStatus
@@ -13,7 +19,7 @@ from daemon.registry import AgentRegistry
 
 
 @pytest.fixture
-async def client(tmp_path):
+async def client(tmp_path, monkeypatch):
     registry = AgentRegistry(str(tmp_path / "test.db"))
     await registry.initialize()
     await registry.upsert_project("noor", str(tmp_path / "noor"))
@@ -28,6 +34,12 @@ async def client(tmp_path):
     api_module.supervisor = None
     api_module.agent_runtime = None
     api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
+    monkeypatch.setattr(
+        agent_runtime_module, "loom_run_dir",
+        lambda run_id: tmp_path / ".loom" / "runs" / run_id,
+        raising=False,
+    )
+    monkeypatch.delenv("LOOM_AGENT_MANIFEST", raising=False)
     with TestClient(api_module.app) as c:
         yield c
     await registry.close()
@@ -53,6 +65,48 @@ def test_chat_without_key_returns_400(client):
     res = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
     assert res.status_code == 400
     assert "API key" in res.json()["detail"]
+
+
+def test_keyless_custom_chat_does_not_send_loom_env_key(client, monkeypatch):
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-secret")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-secret")
+    saved = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "chat_provider": "local-llm",
+        "providers": [{
+            "id": "local-llm",
+            "name": "Local",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "model_ids": ["llama-3.1-8b"],
+            "api_style": "openai",
+            "kind": "openai_compatible",
+        }],
+    })
+    assert saved.status_code == 200, saved.text
+    captured = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "hello local"}}], "usage": {}}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_open(req, timeout):
+        captured["auth"] = req.get_header("Authorization")
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setattr("daemon.llm_client._open_http", fake_open)
+    res = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
+    assert res.status_code == 200, res.text
+    assert res.json()["reply"] == "hello local"
+    assert captured["auth"] is None
+    assert "127.0.0.1:9000" in captured["url"]
+    assert "sk-loom-secret" not in res.text
 
 
 @pytest.mark.asyncio
@@ -94,6 +148,281 @@ async def test_implement_sets_running_loom_agent(client):
     body = res.json()
     assert body["status"] == "running"
     assert body["assignee"] == "loom-agent-noor"
+
+
+@pytest.mark.asyncio
+async def test_implement_creates_run_row_and_manifest(client, tmp_path):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Ship loop", instruction="add the cancel flag",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    runs = await reg.list_agent_runs(task_id=tid)
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.project == "noor"
+    assert run.family_id == "react"
+    assert run.modifier_ids_json == "[]"
+    assert run.status == "running"
+    assert run.step_limit == 40
+    assert run.token_limit == 100000
+    assert run.cost_limit == 1.0
+    assert run.steps_used == 0
+    run_dir = Path(run.run_dir)
+    assert run_dir == tmp_path / ".loom" / "runs" / run.id
+    manifest_path = run_dir / "manifest.json"
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["family_id"] == "react"
+    assert manifest["step_limit"] == 40
+    assert manifest["token_limit"] == 100000
+    assert manifest["cost_limit"] == 1.0
+    assert manifest["cost_limit_usd"] == 1.0
+    assert manifest["prompt"] == "add the cancel flag"
+    assert manifest["run_dir"] == str(run_dir)
+    assert manifest["cancel_path"] == str(run_dir / "cancel")
+    assert manifest["events_path"] == str(run_dir / "events.jsonl")
+    assert manifest["test_command"] == ["python", "-m", "pytest", "-q"]
+    assert manifest["lint_command"] == ["python", "-m", "ruff", "check", "."]
+    assert "LOOM_AGENT_MANIFEST" not in os.environ
+
+
+@pytest.mark.asyncio
+async def test_implement_manifest_includes_acceptance_criteria(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Ship loop", instruction="add the cancel flag",
+        acceptance_criteria="flag file exists",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["prompt"] == "add the cancel flag\n\nAcceptance criteria:\nflag file exists"
+
+
+@pytest.mark.asyncio
+async def test_exited_worker_seals_run_failed(client):
+    from daemon.supervisor import WorkerSupervisor
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Die early", instruction="never finishes",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    supervisor = WorkerSupervisor()
+    supervisor._exited.add(tid)
+    api_module.supervisor = supervisor
+    try:
+        sealed = await agent_runtime_module.seal_exited_worker_runs(
+            reg, supervisor, None, JsonlEventTail(),
+        )
+    finally:
+        api_module.supervisor = None
+    assert sealed == 1
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "failed"
+    assert updated.stop_reason == "worker_exit"
+    last = json.loads((Path(run.run_dir) / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last == {"type": "run.failed", "stop_reason": "worker_exit"}
+
+
+@pytest.mark.asyncio
+async def test_respawned_worker_is_not_sealed_failed(client, monkeypatch):
+    import daemon.supervisor as sup_mod
+    from daemon.supervisor import WorkerSupervisor
+
+    class _LiveProc:
+        def __init__(self, cmd, *args, **kwargs):
+            self._returncode = None
+        def poll(self):
+            return self._returncode
+
+    monkeypatch.setattr(sup_mod.subprocess, "Popen", _LiveProc)
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Retry me", instruction="try again",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    first = (await reg.list_agent_runs(task_id=tid))[0]
+    supervisor = WorkerSupervisor()
+    supervisor.spawn("noor", "loom-agent", "/tmp/noor", tid)
+    supervisor._procs[tid]._returncode = 1
+    assert tid in supervisor.exited_task_ids()
+    await reg.create_agent_run(
+        task_id=tid, project="noor", run_dir=first.run_dir + "-retry", status="running",
+    )
+    supervisor.spawn("noor", "loom-agent", "/tmp/noor", tid)
+    assert supervisor.is_running(tid) is True
+    sealed = await agent_runtime_module.seal_exited_worker_runs(
+        reg, supervisor, None, JsonlEventTail(),
+    )
+    assert sealed == 0
+    runs = await reg.list_agent_runs(task_id=tid)
+    assert {run.status for run in runs} == {"running"}
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_writes_cancel_file(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Stop me", instruction="loop until cancelled",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    res = client.post(f"/api/projects/noor/runs/{run.id}/cancel")
+    assert res.status_code == 200
+    assert (Path(run.run_dir) / "cancel").is_file()
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "cancelling"
+    missing = client.post("/api/projects/noor/runs/missing-run/cancel")
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_concurrent_implements_pass_distinct_manifest_env(client, monkeypatch):
+    import daemon.supervisor as sup_mod
+
+    captured = []
+
+    def _factory(cmd, *args, **kwargs):
+        captured.append(kwargs.get("env"))
+        proc = MagicMock()
+        proc.poll.return_value = None
+        return proc
+
+    monkeypatch.setattr(sup_mod.subprocess, "Popen", _factory)
+    monkeypatch.setenv("LOOM_AGENT_MANIFEST", "/tmp/stale-manifest.json")
+    api_module.supervisor = sup_mod.WorkerSupervisor()
+    try:
+        reg = api_module.registry
+        task_ids = []
+        for title in ("one", "two"):
+            task_ids.append(await reg.create_agent_task(AgentTaskCreatePayload(
+                project="noor", title=title, instruction=f"do {title}",
+            )))
+        runtime = api_module._get_agent_runtime()
+
+        async def go(task_id):
+            updated, manifest_path = await runtime.implement("noor", task_id)
+            await api_module._route_task_execution("noor", updated, manifest_path=manifest_path)
+            return manifest_path
+
+        paths = await asyncio.gather(go(task_ids[0]), go(task_ids[1]))
+    finally:
+        api_module.supervisor = None
+    assert "LOOM_AGENT_MANIFEST" not in os.environ
+    assert paths[0] != paths[1]
+    spawned = [env["LOOM_AGENT_MANIFEST"] for env in captured]
+    assert sorted(spawned) == sorted(paths)
+    assert "/tmp/stale-manifest.json" not in spawned
+    assert all(Path(path).is_file() for path in spawned)
+
+
+@pytest.mark.asyncio
+async def test_cancel_emits_pending_jsonl_and_later_terminal_event(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Stop late", instruction="loop until cancelled",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    events_path = Path(run.run_dir) / "events.jsonl"
+    events_path.write_text('{"type": "step", "n": 1}\n', encoding="utf-8")
+    seen = []
+
+    async def emit(event, project, data):
+        seen.append((event, project, data))
+
+    api_module._get_agent_runtime().emit_event = emit
+    res = client.post(f"/api/projects/noor/runs/{run.id}/cancel")
+    assert res.status_code == 200
+    assert res.json()["status"] == "cancelling"
+    assert seen == [(
+        "agent:run_event", "noor",
+        {"run_id": run.id, "task_id": tid, "payload": {"type": "step", "n": 1}},
+    )]
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"type": "run.cancelled", "stop_reason": "cancelled"}\n')
+    fresh = await reg.get_agent_run(run.id)
+    await drain_run_jsonl(fresh, api_module._run_event_tail, emit, reg)
+    assert seen[-1][2]["payload"]["type"] == "run.cancelled"
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "cancelled"
+    assert updated.stop_reason == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_drain_terminal_event_marks_run_succeeded(client):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Finish", instruction="finish the run",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    (Path(run.run_dir) / "events.jsonl").write_text(
+        '{"type": "run.succeeded", "stop_reason": "done"}\n', encoding="utf-8",
+    )
+    seen = []
+
+    async def emit(event, project, data):
+        seen.append(data["payload"]["type"])
+
+    await drain_run_jsonl(run, JsonlEventTail(), emit, reg)
+    assert seen == ["run.succeeded"]
+    updated = await reg.get_agent_run(run.id)
+    assert updated.status == "succeeded"
+    assert updated.stop_reason == "done"
+
+
+def test_jsonl_tail_reads_only_new_complete_lines(tmp_path):
+    path = tmp_path / "events.jsonl"
+    tail = JsonlEventTail()
+    assert tail.poll(path) == []
+    path.write_text('{"type": "step"}\n{"type": "partial"', encoding="utf-8")
+    assert tail.poll(path) == [{"type": "step"}]
+    assert tail.poll(path) == []
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write('}\n')
+    assert tail.poll(path) == [{"type": "partial"}]
+
+
+@pytest.mark.asyncio
+async def test_jsonl_tail_emits_agent_run_event(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text('{"type": "run.succeeded", "stop_reason": "done"}\n', encoding="utf-8")
+    seen = []
+
+    async def emit(event, project, data):
+        seen.append((event, project, data))
+
+    tail = JsonlEventTail()
+    count = await emit_new_run_events(path, tail, emit, "noor", "run-1", "task-1")
+    assert count == 1
+    assert seen == [(
+        "agent:run_event",
+        "noor",
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "payload": {"type": "run.succeeded", "stop_reason": "done"},
+        },
+    )]
+    assert await emit_new_run_events(path, tail, emit, "noor", "run-1", "task-1") == 0
 
 
 @pytest.mark.asyncio
@@ -300,6 +629,30 @@ def test_get_settings_includes_decision_providers(client):
     assert body["judgment_provider"] is None
 
 
+def test_autonomy_settings_defaults_update_and_validate(client):
+    initial = client.get("/api/agent/settings")
+    assert initial.status_code == 200
+    assert initial.json()["selection_autonomy_enabled"] is True
+    assert initial.json()["autonomy_min_fit"] == "High"
+    assert initial.json()["autonomy_require_margin"] is True
+
+    updated = client.put("/api/agent/settings", json={
+        "selection_autonomy_enabled": False,
+        "autonomy_min_fit": "Medium",
+        "autonomy_require_margin": False,
+    })
+    assert updated.status_code == 200
+    assert updated.json()["selection_autonomy_enabled"] is False
+    assert updated.json()["autonomy_min_fit"] == "Medium"
+    assert updated.json()["autonomy_require_margin"] is False
+
+    invalid = client.put("/api/agent/settings", json={"autonomy_min_fit": "medium"})
+    assert invalid.status_code == 400
+    assert "autonomy_min_fit" in invalid.json()["detail"]
+    kept = client.get("/api/agent/settings")
+    assert kept.json()["autonomy_min_fit"] == "Medium"
+
+
 def test_judgment_provider_gliclass_rejected(client):
     res = client.put("/api/agent/settings", json={
         "filter_provider": "gliclass",
@@ -396,6 +749,303 @@ def test_decision_fields_round_trip_keeps_masked_keys(client):
     assert kept.json()["judgment_provider"] == "typesafe"
 
 
+_SEL_STAGE1 = {"type:bugfix": 0.9, "size:small": 0.8, "risk:low": 0.7, "has_tests:yes": 0.9, "repo_familiarity:high": 0.6}
+_SEL_DECIDABLE = {"debug": 0.9, "tdd": 0.4, "react": 0.3, "plan_then_execute": 0.2, "review_only": 0.1}
+_SEL_AMBIGUOUS = {"debug": 0.9, "tdd": 0.85, "react": 0.3, "plan_then_execute": 0.2, "review_only": 0.1}
+
+
+class _SelClient:
+    def __init__(self, scores, skipped=False):
+        self.scores, self.skipped = scores, skipped
+
+    def filter_relevance(self, **kwargs):
+        raise AssertionError("unused")
+
+    def judge(self, *, pack, **kwargs):
+        from daemon.decision import DecisionResult
+        scores = _SEL_STAGE1 if pack == "pattern_stage1" else self.scores
+        return DecisionResult(scores=dict(scores), provider="fake", model="m", skipped=self.skipped, skip_reason="none" if self.skipped else None)
+
+
+def _patch_selection(scores=None, skipped=False):
+    stage1 = _SelClient(_SEL_STAGE1, skipped)
+    stage2 = _SelClient(scores or _SEL_DECIDABLE, skipped)
+    return patch.object(agent_runtime_module.AgentRuntime, "_selection_clients", lambda self, settings, raw_keys: (stage1, stage2))
+
+
+async def _new_task(reg):
+    return await reg.create_agent_task(AgentTaskCreatePayload(project="noor", title="Sel", instruction="fix login bug"))
+
+
+@pytest.mark.asyncio
+async def test_implement_preview_shape_and_stateless(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection():
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["recommended"]["family_id"] == "debug"
+    assert body["auto_decidable"] is True
+    assert [r["family_id"] for r in body["top3"]][0] == "debug"
+    assert len(body["top3"]) == 3
+    assert body["fallback"] is False
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_preview_unknown_task_404(client):
+    assert client.post("/api/projects/noor/tasks/nope/implement/preview").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_locks_family(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "modifier_ids": ["m1"], "recommended_family_id": "debug"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "tdd"
+    assert json.loads(run.modifier_ids_json) == ["m1"]
+    assert run.chosen_source == "user"
+    assert run.user_override is True
+    assert json.loads(run.recommended_json)["family_id"] == "debug"
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["family_id"] == "tdd"
+    assert manifest["modifier_ids"] == ["m1"]
+    assert manifest["runner_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_matching_recommendation_not_override(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "debug", "recommended_family_id": "debug"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.user_override is False
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_react_no_runner_fallback(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "react"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{"choice": "user"}, {"choice": "user", "family_id": "orchestrator_workers"}, {"choice": "user", "family_id": "nope"}])
+async def test_implement_user_pick_invalid_family_400(client, body):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection():
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json=body)
+    assert res.status_code == 400
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_409_when_not_decidable(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 409
+    assert res.json()["auto_decidable"] is False
+    assert res.json()["recommended"]["family_id"] == "debug"
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_not_decidable_autonomy_disabled_proceeds(client):
+    reg = api_module.registry
+    from daemon.models import AgentSettingsUpdate
+    await reg.update_agent_settings(AgentSettingsUpdate(selection_autonomy_enabled=False))
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    assert (await reg.list_agent_runs(task_id=tid))[0].family_id == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_auto_success_locks_recommended(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "debug"
+    assert run.chosen_source == "auto"
+    assert run.user_override is False
+    assert run.selection_filter_provider == "fake"
+    assert json.loads(run.selection_scores_json)["debug"] == 0.9
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_implement_empty_body_compat(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert res.status_code == 200
+    assert (await reg.list_agent_runs(task_id=tid))[0].family_id == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_fallback_default_when_clients_skip(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(skipped=True), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+    assert run.selection_skip_reason
+    manifest = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runner_fallback"] is False
+
+
+@pytest.mark.asyncio
+async def test_implement_cross_project_task_404(client):
+    reg = api_module.registry
+    await reg.upsert_project("other", "/tmp/other-project")
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(project="other", title="Theirs", instruction="not yours"))
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+    assert res.status_code == 404
+    assert prev.status_code == 404
+    assert await reg.list_agent_runs(task_id=tid) == []
+    assert (await reg.get_agent_task(tid)).status == AgentTaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_implement_settings_failure_falls_back_to_react(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+
+    async def boom(self):
+        raise RuntimeError("settings unavailable")
+
+    with patch.object(agent_runtime_module.AgentRuntime, "_decision_settings", boom), patch.object(api_module, "_route_task_execution", return_value=True):
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "auto"})
+    assert prev.status_code == 200
+    assert prev.json()["fallback"] is True
+    assert prev.json()["recommended"]["family_id"] == "react"
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+
+
+@pytest.mark.asyncio
+async def test_implement_pattern_load_failure_falls_back_to_react(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+
+    def boom(directory):
+        raise RuntimeError("bad families dir")
+
+    with patch.object(agent_runtime_module, "load_patterns", boom), patch.object(api_module, "_route_task_execution", return_value=True):
+        prev = client.post(f"/api/projects/noor/tasks/{tid}/implement/preview")
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd"})
+    assert prev.status_code == 200
+    assert prev.json()["fallback"] is True
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "react"
+    assert run.chosen_source == "fallback_default"
+
+
+@pytest.mark.asyncio
+async def test_implement_runner_fallback_derives_from_runner_key(client, tmp_path):
+    import coding_agent.patterns as patterns_pkg
+    src = (Path(patterns_pkg.__file__).parent / "families" / "react.yaml").read_text(encoding="utf-8")
+    fam_dir = tmp_path / "families"
+    fam_dir.mkdir()
+    (fam_dir / "react.yaml").write_text(src, encoding="utf-8")
+    alias = src.replace("id: react\n", "id: react_alias\n", 1)
+    assert "id: react_alias" in alias and "runner: react" in alias
+    (fam_dir / "react_alias.yaml").write_text(alias, encoding="utf-8")
+    norunner = src.replace("id: react\n", "id: norunner\n", 1).replace("runner: react\n", "")
+    assert "runner:" not in norunner
+    (fam_dir / "norunner.yaml").write_text(norunner, encoding="utf-8")
+    reg = api_module.registry
+    results = {}
+    for fam in ("react_alias", "norunner"):
+        tid = await _new_task(reg)
+        with _patch_selection(), patch.object(agent_runtime_module, "FAMILIES_DIR", fam_dir), patch.object(api_module, "_route_task_execution", return_value=True):
+            res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": fam})
+        assert res.status_code == 200
+        run = (await reg.list_agent_runs(task_id=tid))[0]
+        assert run.family_id == fam
+        results[fam] = json.loads((Path(run.run_dir) / "manifest.json").read_text(encoding="utf-8"))["runner_fallback"]
+    assert results == {"react_alias": False, "norunner": True}
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_does_not_rescore(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    stage1 = _SelClient(_SEL_STAGE1, False)
+    stage2 = _SelClient(_SEL_DECIDABLE, False)
+    calls = []
+    orig = _SelClient.judge
+
+    def counting(self, *, pack, **kwargs):
+        calls.append(pack)
+        return orig(self, pack=pack, **kwargs)
+
+    with patch.object(_SelClient, "judge", counting), patch.object(agent_runtime_module.AgentRuntime, "_selection_clients", lambda self, settings, raw_keys: (stage1, stage2)), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd", "recommended_family_id": "debug"})
+    assert res.status_code == 200
+    assert calls == []
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "tdd" and run.user_override is True
+    assert json.loads(run.recommended_json)["family_id"] == "debug"
+
+
+@pytest.mark.asyncio
+async def test_implement_user_pick_without_recommended_not_override(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "user", "family_id": "tdd"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.user_override is False
+    assert run.recommended_json is None
+
+
+@pytest.mark.asyncio
+async def test_implement_delegate_never_409_when_not_decidable(client):
+    reg = api_module.registry
+    tid = await _new_task(reg)
+    with _patch_selection(_SEL_AMBIGUOUS), patch.object(api_module, "_route_task_execution", return_value=True):
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement", json={"choice": "delegate"})
+    assert res.status_code == 200
+    run = (await reg.list_agent_runs(task_id=tid))[0]
+    assert run.family_id == "debug"
+    assert run.chosen_source == "auto"
+    assert run.user_override is False
+
+
 @pytest.mark.asyncio
 async def test_dismiss_emits_suggestion_event(client):
     from daemon.agent_runtime import AgentRuntime
@@ -444,6 +1094,179 @@ async def test_implement_emits_dismissed_suggestion_event(client):
     assert suggestion_events[0][2]["id"] == sug.id
     assert suggestion_events[0][2]["status"] == SuggestionStatus.DISMISSED.value
     assert any(e[0] == "task:updated" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_implement_open_run_failure_keeps_prior_status(client, monkeypatch):
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Fail open", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    runtime = api_module._get_agent_runtime()
+    with patch.object(runtime, "_open_coding_run", side_effect=OSError("disk full")):
+        with pytest.raises(OSError):
+            await runtime.implement("noor", tid, spawn_worker=None)
+    task = await reg.get_agent_task(tid)
+    assert task.status == AgentTaskStatus.READY
+    assert await reg.list_agent_runs(task_id=tid) == []
+
+
+@pytest.mark.asyncio
+async def test_implement_rejects_live_worker(client):
+    import daemon.supervisor as sup_mod
+    from daemon.agent_runtime import ConflictError
+
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Busy", instruction="do it",
+    ))
+    await reg.update_agent_task(tid, status=AgentTaskStatus.READY)
+    api_module.supervisor = sup_mod.WorkerSupervisor()
+    proc = MagicMock()
+    proc.poll.return_value = None
+    api_module.supervisor._procs[tid] = proc
+    try:
+        res = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+        assert res.status_code == 409
+        assert "worker" in res.json()["detail"].lower()
+        task = await reg.get_agent_task(tid)
+        assert task.status == AgentTaskStatus.READY
+        assert await reg.list_agent_runs(task_id=tid) == []
+        runtime = api_module._get_agent_runtime()
+        with pytest.raises(ConflictError):
+            await runtime.implement("noor", tid, worker_live=lambda _tid: True)
+    finally:
+        api_module.supervisor = None
+
+
+_OPENROUTER = {
+    "id": "openrouter", "name": "OpenRouter",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible",
+}
+
+
+def test_keyless_custom_chat_posts_single_v1(client, monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-secret")
+    saved = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "chat_provider": "openrouter",
+        "providers": [_OPENROUTER],
+    })
+    assert saved.status_code == 200
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "hello local"}}], "usage": {}}
+        ).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    with patch("daemon.llm_client._open_http", side_effect=fake_urlopen):
+        chat = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
+    assert chat.status_code == 200
+    assert chat.json()["reply"] == "hello local"
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert captured["auth"] is None
+
+
+def test_put_settings_accepts_custom_openai_compatible_provider(client):
+    resp = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "filter_provider": "openrouter",
+        "judgment_provider": "openrouter",
+        "providers": [_OPENROUTER],
+        "api_keys": {"openrouter": "sk-or"},
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filter_provider"] == "openrouter"
+    assert body["judgment_provider"] == "openrouter"
+    assert body["has_keys"]["openrouter"] is True
+    custom = next(p for p in body["providers"] if p["id"] == "openrouter")
+    assert custom["base_url"].startswith("https://openrouter.ai")
+
+
+def test_put_settings_rejects_custom_id_colliding_with_builtin(client):
+    resp = client.put("/api/agent/settings", json={
+        "providers": [{
+            "id": "ollama", "name": "Fake", "base_url": "http://x", "model_ids": ["m"],
+            "kind": "openai_compatible",
+        }],
+    })
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("bad_id", ["none", "Bad Id", "x", "has.dot"])
+def test_put_settings_rejects_invalid_custom_provider_id(client, bad_id):
+    resp = client.put("/api/agent/settings", json={
+        "providers": [{**_OPENROUTER, "id": bad_id}],
+    })
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("override", [{"base_url": "  "}, {"model_ids": []}, {"model_ids": ["  "]}])
+def test_put_settings_rejects_custom_provider_missing_base_url_or_model(client, override):
+    resp = client.put("/api/agent/settings", json={"providers": [{**_OPENROUTER, **override}]})
+    assert resp.status_code == 400
+
+
+def test_put_settings_custom_judgment_gliclass_still_rejected(client):
+    resp = client.put("/api/agent/settings", json={
+        "judgment_provider": "gliclass", "providers": [_OPENROUTER],
+    })
+    assert resp.status_code == 400
+    assert "gliclass" in resp.json()["detail"]
+
+
+def test_put_settings_rejects_unknown_custom_role(client):
+    resp = client.put("/api/agent/settings", json={"filter_provider": "openrouter"})
+    assert resp.status_code == 400
+
+
+def test_put_settings_remove_provider_ids_blocked_when_in_use(client):
+    seeded = client.put("/api/agent/settings", json={
+        "filter_provider": "openrouter",
+        "judgment_provider": "none",
+        "providers": [_OPENROUTER],
+    })
+    assert seeded.status_code == 200
+    blocked = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert blocked.status_code == 400
+    assert "openrouter" in blocked.json()["detail"]
+    still = client.get("/api/agent/settings").json()
+    assert any(p["id"] == "openrouter" for p in still["providers"])
+    assert still["filter_provider"] == "openrouter"
+    client.put("/api/agent/settings", json={"filter_provider": "none", "judgment_provider": "none", "default_model": "deepseek-chat"})
+    ok = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert ok.status_code == 200
+    assert all(p["id"] != "openrouter" for p in ok.json()["providers"])
+
+
+def test_put_settings_remove_provider_blocked_when_default_model_uses_it(client):
+    client.put("/api/agent/settings", json={"default_model": "llama-3.1-8b", "providers": [_OPENROUTER]})
+    blocked = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert blocked.status_code == 400
+    assert "openrouter" in blocked.json()["detail"]
+
+
+def test_put_settings_remove_builtin_provider_rejected(client):
+    resp = client.put("/api/agent/settings", json={"remove_provider_ids": ["deepseek"]})
+    assert resp.status_code == 400
+
+
+def test_put_settings_remove_provider_drops_its_api_key(client):
+    client.put("/api/agent/settings", json={"providers": [_OPENROUTER], "api_keys": {"openrouter": "sk-or"}})
+    ok = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert ok.status_code == 200
+    assert not ok.json()["has_keys"].get("openrouter")
 
 
 def test_chat_provider_round_trip(client):
