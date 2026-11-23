@@ -1068,6 +1068,28 @@ async def list_provider_models(payload: ListModelsRequest, _=Depends(require_tok
     return ListModelsResponse(models=models).model_dump()
 
 
+
+@app.get("/api/projects/{project_id}/agent/chats")
+async def list_agent_chats(project_id: str, task_id: Optional[str] = None):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    chats = await registry.list_agent_chats(project_id, task_id=task_id)
+    return {"chats": [c.model_dump() for c in chats]}
+
+
+@app.get("/api/projects/{project_id}/agent/chats/{chat_id}/messages")
+async def list_agent_chat_messages(project_id: str, chat_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    chat = await registry.get_agent_chat(chat_id)
+    if chat is None or chat.project != project_id:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    messages = await registry.list_agent_messages(chat_id)
+    return {"messages": [m.model_dump() for m in messages]}
+
+
 @app.post("/api/projects/{project_id}/agent/chat")
 async def agent_chat(project_id: str, payload: AgentChatRequest):
     project = await registry.get_project(project_id)

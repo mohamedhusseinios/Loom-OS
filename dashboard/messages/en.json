@@ -421,7 +421,15 @@
     "getModels": "Get models",
     "gettingModels": "Fetching models…",
     "modelsLoaded": "Loaded {count} models.",
-    "modelsLoadError": "Could not list models."
+    "modelsLoadError": "Could not list models.",
+    "sessions": "Sessions",
+    "newChat": "New chat",
+    "noSessions": "No sessions yet",
+    "loadingSessions": "Loading sessions…",
+    "loadingMessages": "Loading messages…",
+    "untitledSession": "Untitled session",
+    "thinking": "Thinking…",
+    "emptyReply": "The model returned an empty reply. Try again or check Agent settings."
   },
   "AgentApp": {
     "title": "Loom Agent",

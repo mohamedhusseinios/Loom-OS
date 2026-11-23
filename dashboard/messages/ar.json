@@ -421,7 +421,15 @@
     "getModels": "جلب النماذج",
     "gettingModels": "جارٍ جلب النماذج…",
     "modelsLoaded": "تم تحميل {count} نموذجًا.",
-    "modelsLoadError": "تعذر جلب قائمة النماذج."
+    "modelsLoadError": "تعذر جلب قائمة النماذج.",
+    "sessions": "الجلسات",
+    "newChat": "دردشة جديدة",
+    "noSessions": "لا جلسات بعد",
+    "loadingSessions": "جارٍ تحميل الجلسات…",
+    "loadingMessages": "جارٍ تحميل الرسائل…",
+    "untitledSession": "جلسة بلا عنوان",
+    "thinking": "يفكر…",
+    "emptyReply": "أعاد النموذج رداً فارغاً. أعد المحاولة أو راجع إعدادات الوكيل."
   },
   "AgentApp": {
     "title": "وكيل Loom",

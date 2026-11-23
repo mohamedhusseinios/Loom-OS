@@ -10,7 +10,7 @@ from daemon.models import (
     AgentTaskCreatePayload, AgentTaskRecord, AgentTaskStatus,
     AgentTaskUpdatePayload, TaskProgressRecord,
     AgentSettings, AgentSettingsUpdate, AgentProviderConfig,
-    AgentChatRecord, AgentMessageRecord,
+    AgentChatRecord, AgentChatSummary, AgentMessageRecord,
     TaskSuggestionRecord, SuggestionStatus,
     AgentRunRecord,
 )
@@ -1082,6 +1082,40 @@ class AgentRegistry:
         )
         await self.db.commit()
         return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now)
+
+
+    async def list_agent_chats(self, project: str, task_id: str | None = None, limit: int = 50) -> list[AgentChatSummary]:
+        """List chats for a project, newest first, with last-message preview.
+
+        When ``task_id`` is None, only project-scoped chats (task_id IS NULL) are returned.
+        When set, only chats for that task are returned.
+        """
+        if task_id is None:
+            where = "c.project = ? AND c.task_id IS NULL"
+            params: list = [project, limit]
+        else:
+            where = "c.project = ? AND c.task_id = ?"
+            params = [project, task_id, limit]
+        cursor = await self.db.execute(
+            "SELECT c.id, c.project, c.task_id, c.created_at, c.updated_at, "
+            "  COALESCE(("
+            "    SELECT m.content FROM agent_messages m"
+            "    WHERE m.chat_id = c.id"
+            "    ORDER BY m.created_at DESC LIMIT 1"
+            "  ), '') AS preview "
+            f"FROM agent_chats c WHERE {where} "
+            "ORDER BY c.updated_at DESC LIMIT ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [
+            AgentChatSummary(
+                id=r["id"], project=r["project"], task_id=r["task_id"],
+                created_at=r["created_at"], updated_at=r["updated_at"],
+                preview=(r["preview"] or "")[:120],
+            )
+            for r in rows
+        ]
 
     async def list_agent_messages(self, chat_id: str, limit: int = 50) -> list[AgentMessageRecord]:
         """Return the latest ``limit`` messages in chronological order."""

@@ -72,7 +72,27 @@ async def test_single_pending_suggestion_per_task(reg):
 
 
 @pytest.mark.asyncio
+async def test_list_agent_chats_filters_by_task_and_preview(reg):
+    c1 = await reg.create_agent_chat("proj", task_id="t1")
+    await reg.add_agent_message(c1.id, "user", "task one question")
+    await reg.add_agent_message(c1.id, "assistant", "task one answer")
+    c2 = await reg.create_agent_chat("proj", task_id=None)
+    await reg.add_agent_message(c2.id, "user", "project question")
+    c3 = await reg.create_agent_chat("other")
+    await reg.add_agent_message(c3.id, "user", "other project")
+
+    task_chats = await reg.list_agent_chats("proj", task_id="t1")
+    assert [c.id for c in task_chats] == [c1.id]
+    assert task_chats[0].preview == "task one answer"
+
+    project_chats = await reg.list_agent_chats("proj", task_id=None)
+    assert [c.id for c in project_chats] == [c2.id]
+    assert project_chats[0].preview == "project question"
+
+
+@pytest.mark.asyncio
 async def test_list_agent_messages_returns_latest(reg):
+
     chat = await reg.create_agent_chat("proj")
     for i in range(5):
         await reg.add_agent_message(chat.id, "user", f"m{i}")

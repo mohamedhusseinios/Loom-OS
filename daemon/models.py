@@ -288,6 +288,15 @@ class AgentChatRecord(BaseModel):
     updated_at: str
 
 
+class AgentChatSummary(BaseModel):
+    id: str
+    project: str
+    task_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+    preview: str = ""
+
+
 class AgentMessageRecord(BaseModel):
     id: str
     chat_id: str

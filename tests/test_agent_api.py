@@ -61,7 +61,39 @@ def test_settings_put_and_masked_get(client):
     assert "sk-abcdef1234" not in get.text
 
 
+async def test_list_agent_chats_and_messages(client):
+    """Sessions persist; list + transcript endpoints expose history."""
+    import daemon.api as api_module
+
+    c1 = await api_module.registry.create_agent_chat("noor", task_id=None)
+    await api_module.registry.add_agent_message(c1.id, "user", "hello history")
+    await api_module.registry.add_agent_message(c1.id, "assistant", "hi back")
+    c2 = await api_module.registry.create_agent_chat("noor", task_id="task-1")
+    await api_module.registry.add_agent_message(c2.id, "user", "task only")
+
+    listed = client.get("/api/projects/noor/agent/chats")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert [c["id"] for c in body["chats"]] == [c1.id]
+    assert body["chats"][0]["preview"] == "hi back"
+
+    task_listed = client.get("/api/projects/noor/agent/chats", params={"task_id": "task-1"})
+    assert [c["id"] for c in task_listed.json()["chats"]] == [c2.id]
+
+    msgs = client.get(f"/api/projects/noor/agent/chats/{c1.id}/messages")
+    assert msgs.status_code == 200
+    contents = [m["content"] for m in msgs.json()["messages"]]
+    assert contents == ["hello history", "hi back"]
+
+    wrong_project = client.get(f"/api/projects/missing/agent/chats/{c1.id}/messages")
+    assert wrong_project.status_code == 404
+
+    missing_project = client.get("/api/projects/missing/agent/chats")
+    assert missing_project.status_code == 404
+
+
 def test_chat_without_key_returns_400(client):
+
     res = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
     assert res.status_code == 400
     assert "API key" in res.json()["detail"]

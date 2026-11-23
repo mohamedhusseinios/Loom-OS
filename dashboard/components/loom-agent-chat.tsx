@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Send, Loader2, Settings } from "lucide-react";
+import { Loader2, MessageSquarePlus, Send, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
-import { agentChat } from "@/lib/api";
+import {
+  agentChat,
+  listAgentChatMessages,
+  listAgentChats,
+  type AgentChatSummary,
+} from "@/lib/api";
 
 interface Msg {
   role: "user" | "assistant";
@@ -18,20 +23,78 @@ interface LoomAgentChatProps {
   onSuggestion?: (suggestionId: string) => void;
 }
 
+function previewLabel(chat: AgentChatSummary, fallback: string): string {
+  const preview = chat.preview.trim();
+  if (!preview) return fallback;
+  return preview.length > 48 ? `${preview.slice(0, 48)}…` : preview;
+}
+
 export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChatProps) {
   const t = useTranslations("LoomAgent");
+  const [sessions, setSessions] = useState<AgentChatSummary[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [chatId, setChatId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    setMessages([]);
+  const refreshSessions = useCallback(async () => {
+    setLoadingSessions(true);
+    try {
+      const chats = await listAgentChats(projectId, taskId || undefined);
+      setSessions(chats);
+      return chats;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("chatError"));
+      return [] as AgentChatSummary[];
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [projectId, taskId, t]);
+
+  const loadSession = useCallback(async (id: string) => {
+    setLoadingMessages(true);
+    setError("");
+    setChatId(id);
+    try {
+      const rows = await listAgentChatMessages(projectId, id);
+      setMessages(
+        rows
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("chatError"));
+      setMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [projectId, t]);
+
+  function startNewChat() {
     setChatId(undefined);
+    setMessages([]);
     setInput("");
     setError("");
-  }, [taskId, projectId]);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setInput("");
+    setError("");
+    setChatId(undefined);
+    setMessages([]);
+    (async () => {
+      const chats = await refreshSessions();
+      if (cancelled || chats.length === 0) return;
+      await loadSession(chats[0].id);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, taskId, refreshSessions, loadSession]);
 
   async function send() {
     const text = input.trim();
@@ -47,8 +110,14 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
         chat_id: chatId,
       });
       setChatId(res.chat_id);
-      setMessages((m) => [...m, { role: "assistant", content: res.reply }]);
+      const reply = (res.reply ?? "").trim();
+      if (!reply) {
+        setError(t("emptyReply"));
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      }
       if (res.suggestion_id && onSuggestion) onSuggestion(res.suggestion_id);
+      await refreshSessions();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("chatError"));
     } finally {
@@ -57,57 +126,112 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   return (
-    <div className="flex flex-col h-full min-h-[280px] rounded-lg border border-zinc-800 bg-zinc-950/60">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-100">{t("title")}</h3>
-          <p className="text-[11px] text-zinc-500">
-            {taskId ? t("taskScoped") : t("projectScoped")}
-          </p>
-        </div>
-        <Link
-          href="/agent-settings"
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[0.8rem] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          {t("settings")}
-        </Link>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.length === 0 && (
-          <p className="text-xs text-zinc-500">{t("emptyHint")}</p>
-        )}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`text-sm rounded-md px-2.5 py-2 whitespace-pre-wrap ${
-              m.role === "user"
-                ? "bg-zinc-800 text-zinc-100 ms-8"
-                : "bg-zinc-900 text-zinc-300 me-8"
-            }`}
+    <div className="flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+      <aside className="flex w-[11.5rem] shrink-0 flex-col border-e border-zinc-800">
+        <div className="flex items-center justify-between gap-1 border-b border-zinc-800 px-2 py-2">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+            {t("sessions")}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-100"
+            onClick={startNewChat}
+            title={t("newChat")}
+            aria-label={t("newChat")}
           >
-            {m.content}
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+          {loadingSessions && sessions.length === 0 && (
+            <p className="px-1.5 py-1 text-[11px] text-zinc-500">{t("loadingSessions")}</p>
+          )}
+          {!loadingSessions && sessions.length === 0 && (
+            <p className="px-1.5 py-1 text-[11px] text-zinc-500">{t("noSessions")}</p>
+          )}
+          {sessions.map((s) => {
+            const active = s.id === chatId;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => void loadSession(s.id)}
+                className={`w-full rounded-md px-2 py-1.5 text-start text-[11px] leading-snug transition-colors ${
+                  active
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                }`}
+              >
+                <span className="line-clamp-2">{previewLabel(s, t("untitledSession"))}</span>
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">{t("title")}</h3>
+            <p className="text-[11px] text-zinc-500">
+              {taskId ? t("taskScoped") : t("projectScoped")}
+            </p>
           </div>
-        ))}
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-      <div className="flex gap-2 border-t border-zinc-800 p-2">
-        <input
-          className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
-          placeholder={t("placeholder")}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          disabled={busy}
-        />
-        <Button size="sm" onClick={() => void send()} disabled={busy || !input.trim()}>
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        </Button>
+          <Link
+            href="/agent-settings"
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[0.8rem] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            {t("settings")}
+          </Link>
+        </div>
+        <div className="flex-1 space-y-2 overflow-y-auto p-3">
+          {loadingMessages && (
+            <p className="text-xs text-zinc-500">{t("loadingMessages")}</p>
+          )}
+          {!loadingMessages && messages.length === 0 && !busy && (
+            <p className="text-xs text-zinc-500">{t("emptyHint")}</p>
+          )}
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={`whitespace-pre-wrap rounded-md px-2.5 py-2 text-sm ${
+                m.role === "user"
+                  ? "ms-8 bg-zinc-800 text-zinc-100"
+                  : "me-8 bg-zinc-900 text-zinc-300"
+              }`}
+            >
+              {m.content}
+            </div>
+          ))}
+          {busy && (
+            <div className="me-8 flex items-center gap-2 rounded-md bg-zinc-900 px-2.5 py-2 text-sm text-zinc-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t("thinking")}
+            </div>
+          )}
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+        <div className="flex gap-2 border-t border-zinc-800 p-2">
+          <input
+            className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
+            placeholder={t("placeholder")}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            disabled={busy}
+          />
+          <Button size="sm" onClick={() => void send()} disabled={busy || !input.trim()}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
       </div>
     </div>
   );

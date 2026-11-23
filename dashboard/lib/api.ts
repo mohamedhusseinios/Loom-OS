@@ -605,6 +605,23 @@ export async function listProviderModels(payload: {
   return res.json();
 }
 
+export interface AgentChatSummary {
+  id: string;
+  project: string;
+  task_id: string | null;
+  created_at: string;
+  updated_at: string;
+  preview: string;
+}
+
+export interface AgentChatMessage {
+  id: string;
+  chat_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
 export async function agentChat(
   projectId: string,
   payload: { message: string; task_id?: string; chat_id?: string },
@@ -619,6 +636,27 @@ export async function agentChat(
     throw new Error(detail.detail || `API error: ${res.status}`);
   }
   return res.json();
+}
+
+export async function listAgentChats(
+  projectId: string,
+  taskId?: string | null,
+): Promise<AgentChatSummary[]> {
+  const qs = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
+  const data = await fetchApi<{ chats: AgentChatSummary[] }>(
+    `/api/projects/${projectId}/agent/chats${qs}`,
+  );
+  return data.chats;
+}
+
+export async function listAgentChatMessages(
+  projectId: string,
+  chatId: string,
+): Promise<AgentChatMessage[]> {
+  const data = await fetchApi<{ messages: AgentChatMessage[] }>(
+    `/api/projects/${projectId}/agent/chats/${chatId}/messages`,
+  );
+  return data.messages;
 }
 
 export async function suggestTask(projectId: string, taskId: string): Promise<TaskSuggestion> {
