@@ -178,3 +178,21 @@ def test_llm_deepseek_without_key_stays_unavailable():
     assert client.available is False
     with pytest.raises(LlmError, match="API key"):
         client.chat([{"role": "user", "content": "hi"}])
+
+
+def test_llm_chat_captures_reasoning_content(monkeypatch):
+    class FakeResp:
+        def read(self):
+            return (
+                b'{"choices":[{"message":{"role":"assistant","content":"hi",'
+                b'"reasoning_content":"step-a"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+            )
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda *a, **k: FakeResp())
+    client = LlmClient(api_key="sk")
+    assert client.chat([{"role": "user", "content": "hi"}]) == "hi"
+    assert client.last_reasoning_content == "step-a"

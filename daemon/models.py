@@ -303,6 +303,7 @@ class AgentMessageRecord(BaseModel):
     role: str  # user | assistant | system
     content: str
     created_at: str
+    reasoning_content: Optional[str] = None
 
 
 class ImplementRequest(BaseModel):

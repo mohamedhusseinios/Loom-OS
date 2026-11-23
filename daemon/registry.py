@@ -206,6 +206,12 @@ class AgentRegistry:
             "CREATE INDEX IF NOT EXISTS idx_agent_messages_chat"
             " ON agent_messages(chat_id, created_at)"
         )
+        cursor = await self.db.execute("PRAGMA table_info(agent_messages)")
+        msg_cols = [r[1] for r in await cursor.fetchall()]
+        if "reasoning_content" not in msg_cols:
+            await self.db.execute(
+                "ALTER TABLE agent_messages ADD COLUMN reasoning_content TEXT"
+            )
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS task_suggestions (
                 id TEXT PRIMARY KEY,
@@ -1069,19 +1075,19 @@ class AgentRegistry:
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
-    async def add_agent_message(self, chat_id: str, role: str, content: str) -> AgentMessageRecord:
+    async def add_agent_message(self, chat_id: str, role: str, content: str, reasoning_content: str | None = None) -> AgentMessageRecord:
         import uuid
         now = datetime.now(timezone.utc).isoformat()
         msg_id = str(uuid.uuid4())
         await self.db.execute(
-            "INSERT INTO agent_messages (id, chat_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            (msg_id, chat_id, role, content, now),
+            "INSERT INTO agent_messages (id, chat_id, role, content, created_at, reasoning_content) VALUES (?, ?, ?, ?, ?, ?)",
+            (msg_id, chat_id, role, content, now, reasoning_content),
         )
         await self.db.execute(
             "UPDATE agent_chats SET updated_at = ? WHERE id = ?", (now, chat_id),
         )
         await self.db.commit()
-        return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now)
+        return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now, reasoning_content=reasoning_content)
 
 
     async def list_agent_chats(self, project: str, task_id: str | None = None, limit: int = 50) -> list[AgentChatSummary]:
@@ -1131,6 +1137,7 @@ class AgentRegistry:
             AgentMessageRecord(
                 id=r["id"], chat_id=r["chat_id"], role=r["role"],
                 content=r["content"], created_at=r["created_at"],
+                reasoning_content=r["reasoning_content"] if "reasoning_content" in r.keys() else None,
             )
             for r in rows
         ]

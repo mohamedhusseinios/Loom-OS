@@ -68,9 +68,22 @@ class LlmClientProtocol(Protocol):
     @property
     def available(self) -> bool: ...
 
-    def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str: ...
+    def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str: ...
 
-    def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]: ...
+    def chat_json(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> dict[str, Any]: ...
+
+
+def history_with_reasoning(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy chat turns for the provider, preserving assistant ``reasoning_content`` when present."""
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role") or "user"
+        item: dict[str, Any] = {"role": role, "content": msg.get("content") or ""}
+        reasoning = msg.get("reasoning_content")
+        if role == "assistant" and isinstance(reasoning, str) and reasoning:
+            item["reasoning_content"] = reasoning
+        out.append(item)
+    return out
 
 
 def _safe_http_error_detail(exc: urllib.error.HTTPError, limit: int = 240) -> str:
@@ -192,13 +205,14 @@ class LlmClient:
         self.timeout = timeout
         self.allow_missing_key = allow_missing_key
         self.last_usage: dict[str, Any] | None = None
+        self.last_reasoning_content: str | None = None
         self.api_style = API_STYLE_OPENAI
 
     @property
     def available(self) -> bool:
         return bool(self.api_key) or self.allow_missing_key
 
-    def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str:
+    def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str:
         """Return assistant content for a chat completion request."""
         if not self.api_key and not self.allow_missing_key:
             raise LlmError("API key not configured — add it in Agent settings")
@@ -224,6 +238,8 @@ class LlmClient:
         if not choices:
             raise LlmError("LLM returned no choices")
         msg = choices[0].get("message") or {}
+        reasoning = msg.get("reasoning_content")
+        self.last_reasoning_content = reasoning if isinstance(reasoning, str) and reasoning else None
         return (msg.get("content") or "").strip()
 
     def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
@@ -239,15 +255,17 @@ class AnthropicLlmClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.last_usage: dict[str, Any] | None = None
+        self.last_reasoning_content: str | None = None
         self.api_style = API_STYLE_ANTHROPIC
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
 
-    def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str:
+    def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str:
         if not self.api_key:
             raise LlmError("API key not configured — add it in Agent settings")
+        self.last_reasoning_content = None
         system, converted = _split_system_messages(messages)
         if not converted:
             converted = [{"role": "user", "content": ""}]

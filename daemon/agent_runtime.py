@@ -18,7 +18,7 @@ from coding_agent.selection import RankedStrategy
 from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
 from daemon.agent_credentials import is_custom_chat_provider_id, resolve_chat_key
 from daemon.decision import NullDecisionClient, DecisionClient, build_decision_clients, resolve_decision_config
-from daemon.llm_client import LlmError, build_llm_client
+from daemon.llm_client import LlmError, build_llm_client, history_with_reasoning
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, ImplementRequest, SuggestionStatus,
 )
@@ -219,7 +219,7 @@ class AgentRuntime:
             logger.warning("hybrid_query failed while retrieving context", exc_info=True)
             return []
 
-    async def _project_chat_reply(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict[str, str]], llm, model: str | None) -> str:
+    async def _project_chat_reply(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict], llm, model: str | None) -> str:
         """Ground project-level chat in SHARED_CONTEXT + hybrid graph hits (no task orchestrator)."""
         hits = await self._hybrid_hits(project_path, project_id, message)
         graph_path = Path(project_path) / "graphify-out" / "graph.json"
@@ -240,11 +240,25 @@ class AgentRuntime:
         context_parts.append(f"Graph memory:\n{pack}")
         system_with_context = system + "\n\n" + "\n\n".join(context_parts)
 
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_with_context}]
-        prior = [m for m in chat_msgs[:-1] if m.get("role") in ("user", "assistant")]
-        messages.extend(prior[-CHAT_HISTORY_LIMIT:])
+        prior = history_with_reasoning(
+            [m for m in chat_msgs[:-1] if m.get("role") in ("user", "assistant")]
+        )[-CHAT_HISTORY_LIMIT:]
+        messages: list[dict] = [{"role": "system", "content": system_with_context}]
+        messages.extend(prior)
         messages.append({"role": "user", "content": message})
-        return await asyncio.to_thread(llm.chat, messages, model)
+        try:
+            return await asyncio.to_thread(llm.chat, messages, model)
+        except LlmError as exc:
+            # Reasoning models (Reflection Beam, DeepSeek-R1, …) require prior
+            # assistant reasoning_content. Old sessions lack it — retry without history.
+            if "reasoning_content" not in str(exc) or not prior:
+                raise
+            logger.warning("provider requires reasoning_content; retrying without prior turns")
+            return await asyncio.to_thread(
+                llm.chat,
+                [{"role": "system", "content": system_with_context}, {"role": "user", "content": message}],
+                model,
+            )
 
     async def _stored_credentials(self):
         cursor = await self.registry.db.execute(
@@ -278,7 +292,14 @@ class AgentRuntime:
 
         await self.registry.add_agent_message(chat.id, "user", payload.message)
         history = await self.registry.list_agent_messages(chat.id)
-        chat_msgs = [{"role": m.role, "content": m.content} for m in history if m.role in ("user", "assistant")]
+        chat_msgs: list[dict] = []
+        for m in history:
+            if m.role not in ("user", "assistant"):
+                continue
+            item: dict = {"role": m.role, "content": m.content}
+            if m.role == "assistant" and m.reasoning_content:
+                item["reasoning_content"] = m.reasoning_content
+            chat_msgs.append(item)
 
         suggestion_id = None
         reply = ""
@@ -290,7 +311,7 @@ class AgentRuntime:
             orch = Orchestrator(self.graph_engine, llm=llm)
             result = await orch.run_suggest_cycle(
                 project_path, project_id, task,
-                chat_messages=chat_msgs[:-1],
+                chat_messages=history_with_reasoning(chat_msgs[:-1]),
                 user_message=payload.message,
                 model=model,
                 settings=settings,
@@ -309,7 +330,8 @@ class AgentRuntime:
                 project_id, project_path, payload.message, chat_msgs, llm, model,
             )
 
-        await self.registry.add_agent_message(chat.id, "assistant", reply)
+        reasoning = getattr(llm, "last_reasoning_content", None)
+        await self.registry.add_agent_message(chat.id, "assistant", reply, reasoning_content=reasoning)
         if self.emit_event:
             await self.emit_event("agent:message", project_id, {
                 "chat_id": chat.id, "role": "assistant", "content": reply,
