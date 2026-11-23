@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Loader2, Square, Wand2 } from "lucide-react";
+import { Loader2, Plus, Square, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePathname, useRouter } from "@/i18n/navigation";
+import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { useWebSocket } from "@/lib/use-websocket";
 import {
   listProjects,
@@ -25,8 +25,32 @@ import {
   ImplementPickerModal,
   type ImplementPickerNotice,
 } from "@/components/implement-picker-modal";
+import { AddProjectModal } from "@/components/add-project-modal";
 
 type Project = ProjectSummary["project"];
+
+function AppChrome({ active }: { active: "agent" | "dashboard" }) {
+  const t = useTranslations("AgentApp");
+  const tabClass = (id: "agent" | "dashboard") =>
+    `px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+      active === id
+        ? "bg-zinc-800 text-zinc-100 border-zinc-600"
+        : "bg-transparent text-zinc-400 border-transparent hover:text-zinc-200 hover:bg-zinc-900"
+    }`;
+  return (
+    <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-950/95">
+      <span className="text-sm font-semibold text-zinc-100 tracking-tight">Loom Coding Agent</span>
+      <nav className="flex items-center gap-1" role="tablist" aria-label="App sections">
+        <Link href="/agent-app" role="tab" aria-selected={active === "agent"} className={tabClass("agent")}>
+          {t("tabAgent")}
+        </Link>
+        <Link href="/" role="tab" aria-selected={active === "dashboard"} className={tabClass("dashboard")}>
+          {t("tabDashboard")}
+        </Link>
+      </nav>
+    </div>
+  );
+}
 
 export function AgentAppShell() {
   const t = useTranslations("AgentApp");
@@ -41,6 +65,7 @@ export function AgentAppShell() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [workerIds, setWorkerIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [picker, setPicker] = useState<{ preview: SelectionPreview; notice: ImplementPickerNotice } | null>(null);
 
   const setQuery = useCallback(
@@ -48,7 +73,12 @@ export function AgentAppShell() {
     [router, pathname],
   );
 
-  // Project list (only needed for the picker).
+  const refreshProjects = useCallback(() => {
+    listProjects()
+      .then((d) => setProjects(d.projects || []))
+      .catch(() => setProjects([]));
+  }, []);
+
   useEffect(() => {
     if (projectId) return;
     let cancelled = false;
@@ -74,7 +104,6 @@ export function AgentAppShell() {
     void loadTasks();
   }, [loadTasks]);
 
-  // Live task / worker updates.
   useEffect(() => {
     if (!projectId) return;
     return subscribe(`project:${projectId}`, (event) => {
@@ -146,34 +175,49 @@ export function AgentAppShell() {
 
   if (!projectId) {
     return (
-      <div className={`${shellClass} items-center justify-center p-6`}>
-        <div className="w-full max-w-md">
-          <h1 className="text-xl font-bold mb-1">{t("title")}</h1>
-          <p className="text-xs text-zinc-500 mb-4">{t("pickProject")}</p>
-          {projects === null ? (
-            <p className="flex items-center gap-2 text-sm text-zinc-500">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t("loading")}
-            </p>
-          ) : projects.length === 0 ? (
-            <p className="text-sm text-zinc-500">{t("noProjects")}</p>
-          ) : (
-            <ul className="space-y-2">
-              {projects.map((p) => (
-                <li key={p.project_id}>
-                  <button
-                    onClick={() => setQuery({ project: p.project_id })}
-                    className="w-full text-start rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 hover:border-zinc-600"
-                  >
-                    <span className="block text-sm font-medium text-zinc-100">{p.project_name}</span>
-                    <span className="block text-[11px] text-zinc-500 truncate">{p.project_path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="text-[10px] text-zinc-600 mt-6">{t("stackHint")}</p>
+      <div className={shellClass}>
+        <AppChrome active="agent" />
+        <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
+          <div className="w-full max-w-md">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h1 className="text-xl font-bold">{t("title")}</h1>
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <Plus className="w-3.5 h-3.5 me-1" />
+                {t("addProject")}
+              </Button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-4">{t("pickProject")}</p>
+            {projects === null ? (
+              <p className="flex items-center gap-2 text-sm text-zinc-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t("loading")}
+              </p>
+            ) : projects.length === 0 ? (
+              <p className="text-sm text-zinc-500 mb-4">{t("noProjects")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {projects.map((p) => (
+                  <li key={p.project_id}>
+                    <button
+                      type="button"
+                      onClick={() => setQuery({ project: p.project_id })}
+                      className="w-full text-start rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 hover:border-zinc-600"
+                    >
+                      <span className="block text-sm font-medium text-zinc-100">{p.project_name}</span>
+                      <span className="block text-[11px] text-zinc-500 truncate">{p.project_path}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-[10px] text-zinc-600 mt-6">{t("stackHint")}</p>
+          </div>
         </div>
+        <AddProjectModal
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          onCreated={() => { refreshProjects(); setAddOpen(false); }}
+        />
       </div>
     );
   }
@@ -182,9 +226,11 @@ export function AgentAppShell() {
 
   return (
     <div className={shellClass}>
+      <AppChrome active="agent" />
       <header className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800">
         <h1 className="text-sm font-bold me-2">{t("title")}</h1>
         <button
+          type="button"
           onClick={() => router.replace(pathname)}
           className="text-[11px] text-zinc-500 hover:text-zinc-300 underline"
         >

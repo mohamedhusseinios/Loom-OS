@@ -9,10 +9,10 @@ use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{LogicalPosition, LogicalSize, Manager, RunEvent, WebviewUrl, WindowEvent};
 
-pub const CHROME_LABEL: &str = "chrome";
 pub const CONTENT_LABEL: &str = "content";
-const CHROME_HEIGHT: f64 = 48.0;
 const MENU_OPEN_BROWSER: &str = "open_dashboard_in_browser";
+const MENU_GO_AGENT: &str = "go_agent";
+const MENU_GO_DASHBOARD: &str = "go_dashboard";
 
 pub struct StackState(pub stack::StackManager);
 
@@ -24,10 +24,19 @@ pub fn run() {
         .manage(commands::NavState::default())
         .invoke_handler(tauri::generate_handler![commands::stack_status, commands::restart_stack, commands::open_external_dashboard, commands::get_paths, commands::navigate_tab, commands::content_url])
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == MENU_OPEN_BROWSER {
-                if let Err(e) = commands::open_dashboard_in_browser(app) {
-                    eprintln!("loom: open dashboard in browser failed: {e}");
+            match event.id().as_ref() {
+                MENU_OPEN_BROWSER => {
+                    if let Err(e) = commands::open_dashboard_in_browser(app) {
+                        eprintln!("loom: open dashboard in browser failed: {e}");
+                    }
                 }
+                MENU_GO_AGENT => {
+                    let _ = commands::navigate_content(app, &commands::agent_app_url(stack::DASHBOARD_URL, None, None));
+                }
+                MENU_GO_DASHBOARD => {
+                    let _ = commands::navigate_content(app, &commands::dashboard_home_url(stack::DASHBOARD_URL));
+                }
+                _ => {}
             }
         })
         .setup(|app| {
@@ -51,7 +60,17 @@ pub fn run() {
             let window = build_main_window(app.handle())?;
             let handle = app.handle().clone();
             let menu = Menu::default(&handle)?;
-            let loom_menu = Submenu::with_items(&handle, "Loom", true, &[&MenuItem::with_id(&handle, MENU_OPEN_BROWSER, "Open Dashboard in Browser", true, None::<&str>)?, &PredefinedMenuItem::separator(&handle)?])?;
+            let loom_menu = Submenu::with_items(
+                &handle,
+                "Loom",
+                true,
+                &[
+                    &MenuItem::with_id(&handle, MENU_GO_AGENT, "Agent", true, None::<&str>)?,
+                    &MenuItem::with_id(&handle, MENU_GO_DASHBOARD, "Dashboard", true, None::<&str>)?,
+                    &PredefinedMenuItem::separator(&handle)?,
+                    &MenuItem::with_id(&handle, MENU_OPEN_BROWSER, "Open Dashboard in Browser", true, None::<&str>)?,
+                ],
+            )?;
             menu.append(&loom_menu)?;
             app.set_menu(menu)?;
 
@@ -91,24 +110,21 @@ pub fn run() {
     });
 }
 
-/// One window, two webviews: a local chrome strip (tabs) on top and a single content webview below (starts blank).
+/// One window, one content webview (fills the client area). Agent | Dashboard chrome lives in the Next UI —
+/// a separate 48px child webview was invisible/covered on packaged macOS.
 fn build_main_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::Window> {
     let window = WindowBuilder::new(handle, "main").title("Loom Coding Agent").inner_size(1280.0, 800.0).visible(false).build()?;
     let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
-    window.add_child(WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into())), LogicalPosition::new(0.0, 0.0), LogicalSize::new(size.width, CHROME_HEIGHT))?;
-    window.add_child(WebviewBuilder::new(CONTENT_LABEL, WebviewUrl::External("about:blank".parse().expect("static url"))), LogicalPosition::new(0.0, CHROME_HEIGHT), LogicalSize::new(size.width, (size.height - CHROME_HEIGHT).max(0.0)))?;
+    window.add_child(WebviewBuilder::new(CONTENT_LABEL, WebviewUrl::External("about:blank".parse().expect("static url"))), LogicalPosition::new(0.0, 0.0), LogicalSize::new(size.width, size.height.max(1.0)))?;
     let handle = handle.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Resized(physical) = event {
             let Some(win) = handle.get_window("main") else { return };
             let Ok(scale) = win.scale_factor() else { return };
             let size = physical.to_logical::<f64>(scale);
-            if let Some(w) = handle.get_webview(CHROME_LABEL) {
-                let _ = w.set_size(LogicalSize::new(size.width, CHROME_HEIGHT));
-            }
             if let Some(w) = handle.get_webview(CONTENT_LABEL) {
-                let _ = w.set_position(LogicalPosition::new(0.0, CHROME_HEIGHT));
-                let _ = w.set_size(LogicalSize::new(size.width, (size.height - CHROME_HEIGHT).max(0.0)));
+                let _ = w.set_position(LogicalPosition::new(0.0, 0.0));
+                let _ = w.set_size(LogicalSize::new(size.width, size.height.max(1.0)));
             }
         }
     });
