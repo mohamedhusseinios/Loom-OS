@@ -240,7 +240,14 @@ class LlmClient:
         msg = choices[0].get("message") or {}
         reasoning = msg.get("reasoning_content")
         self.last_reasoning_content = reasoning if isinstance(reasoning, str) and reasoning else None
-        return (msg.get("content") or "").strip()
+        content = (msg.get("content") or "").strip()
+        # Reasoning models (Reflection Beam, DeepSeek-R1, …) sometimes return the
+        # visible answer only in reasoning_content with an empty content field.
+        if content:
+            return content
+        if self.last_reasoning_content:
+            return self.last_reasoning_content.strip()
+        return ""
 
     def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
         """Chat and parse the assistant reply as JSON (fenced blocks stripped)."""

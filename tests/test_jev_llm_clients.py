@@ -196,3 +196,21 @@ def test_llm_chat_captures_reasoning_content(monkeypatch):
     client = LlmClient(api_key="sk")
     assert client.chat([{"role": "user", "content": "hi"}]) == "hi"
     assert client.last_reasoning_content == "step-a"
+
+
+def test_llm_chat_falls_back_to_reasoning_when_content_empty(monkeypatch):
+    class FakeResp:
+        def read(self):
+            return (
+                b'{"choices":[{"message":{"role":"assistant","content":"",'
+                b'"reasoning_content":"only reasoning answer"}}],"usage":{}}'
+            )
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda *a, **k: FakeResp())
+    client = LlmClient(api_key="sk")
+    assert client.chat([{"role": "user", "content": "hi"}]) == "only reasoning answer"
+    assert client.last_reasoning_content == "only reasoning answer"
