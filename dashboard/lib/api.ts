@@ -500,7 +500,7 @@ export async function fetchFederatedReferences(
 
 export interface AgentSettings {
   default_model: string;
-  providers: { id: string; name: string; base_url: string; model_ids: string[] }[];
+  providers: { id: string; name: string; base_url: string; model_ids: string[]; kind?: string }[];
   api_keys_masked: Record<string, string | null>;
   has_keys: Record<string, boolean>;
   filter_provider?: string | null;
@@ -555,6 +555,7 @@ export async function updateAgentSettings(payload: {
   default_model?: string;
   providers?: AgentSettings["providers"];
   api_keys?: Record<string, string>;
+  remove_provider_ids?: string[];
   filter_provider?: string;
   judgment_provider?: string;
   selection_autonomy_enabled?: boolean;
