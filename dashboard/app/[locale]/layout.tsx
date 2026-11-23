@@ -5,7 +5,7 @@ import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import "../globals.css";
-import { Sidebar } from "@/components/sidebar";
+import { DesktopShell } from "@/components/desktop-shell";
 import { WebSocketProvider } from "@/lib/use-websocket";
 import { routing, isRtl, type Locale } from "@/i18n/routing";
 
@@ -79,10 +79,7 @@ export default async function LocaleLayout({
       >
         <NextIntlClientProvider>
           <WebSocketProvider>
-            <div className="flex">
-              <Sidebar />
-              <main className="flex-1 p-6">{children}</main>
-            </div>
+            <DesktopShell>{children}</DesktopShell>
           </WebSocketProvider>
         </NextIntlClientProvider>
       </body>

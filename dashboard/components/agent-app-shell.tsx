@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2, Plus, Square, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link, usePathname, useRouter } from "@/i18n/navigation";
+import { usePathname, useRouter } from "@/i18n/navigation";
 import { useWebSocket } from "@/lib/use-websocket";
 import {
   listProjects,
@@ -28,29 +28,6 @@ import {
 import { AddProjectModal } from "@/components/add-project-modal";
 
 type Project = ProjectSummary["project"];
-
-function AppChrome({ active }: { active: "agent" | "dashboard" }) {
-  const t = useTranslations("AgentApp");
-  const tabClass = (id: "agent" | "dashboard") =>
-    `px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-      active === id
-        ? "bg-zinc-800 text-zinc-100 border-zinc-600"
-        : "bg-transparent text-zinc-400 border-transparent hover:text-zinc-200 hover:bg-zinc-900"
-    }`;
-  return (
-    <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-950/95">
-      <span className="text-sm font-semibold text-zinc-100 tracking-tight">Loom Coding Agent</span>
-      <nav className="flex items-center gap-1" role="tablist" aria-label="App sections">
-        <Link href="/agent-app" role="tab" aria-selected={active === "agent"} className={tabClass("agent")}>
-          {t("tabAgent")}
-        </Link>
-        <Link href="/" role="tab" aria-selected={active === "dashboard"} className={tabClass("dashboard")}>
-          {t("tabDashboard")}
-        </Link>
-      </nav>
-    </div>
-  );
-}
 
 export function AgentAppShell() {
   const t = useTranslations("AgentApp");
@@ -171,12 +148,11 @@ export function AgentAppShell() {
     }
   }
 
-  const shellClass = "fixed inset-0 z-40 flex flex-col bg-zinc-950 text-zinc-100";
+  const shellClass = "flex flex-col flex-1 min-h-0 bg-zinc-950 text-zinc-100";
 
   if (!projectId) {
     return (
       <div className={shellClass}>
-        <AppChrome active="agent" />
         <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
           <div className="w-full max-w-md">
             <div className="flex items-center justify-between gap-3 mb-1">
@@ -226,7 +202,6 @@ export function AgentAppShell() {
 
   return (
     <div className={shellClass}>
-      <AppChrome active="agent" />
       <header className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800">
         <h1 className="text-sm font-bold me-2">{t("title")}</h1>
         <button
