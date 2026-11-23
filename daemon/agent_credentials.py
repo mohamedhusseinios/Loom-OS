@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,10 @@ DEFAULT_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_PROVIDER_ID = "ollama"
 GLICLASS_PROVIDER_ID = "gliclass"
+
+BUILTIN_PROVIDER_IDS: frozenset[str] = frozenset({DEEPSEEK_PROVIDER_ID, TYPESAFE_PROVIDER_ID, OLLAMA_PROVIDER_ID, GLICLASS_PROVIDER_ID})
+PROVIDER_KIND_BUILTIN = "builtin"
+PROVIDER_KIND_OPENAI = "openai_compatible"
 
 DEFAULT_DEEPSEEK_PROVIDER: dict[str, Any] = {
     "id": DEEPSEEK_PROVIDER_ID,
@@ -87,6 +92,20 @@ def _as_provider_dict(provider: Any) -> dict[str, Any]:
     raise TypeError(f"unsupported provider value: {type(provider)!r}")
 
 
+def normalize_provider_kind(provider: dict[str, Any]) -> dict[str, Any]:
+    """Set ``kind`` from the id when missing; built-in ids are always ``builtin``."""
+    row = dict(provider)
+    if (row.get("id") or "") in BUILTIN_PROVIDER_IDS:
+        row["kind"] = PROVIDER_KIND_BUILTIN
+    elif not row.get("kind"):
+        row["kind"] = PROVIDER_KIND_OPENAI
+    return row
+
+
+def is_valid_custom_provider_id(provider_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_-]{2,}", provider_id or "")) and provider_id not in BUILTIN_PROVIDER_IDS
+
+
 def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]]:
     """Keep existing providers and append built-in defaults if missing."""
     by_id: dict[str, dict[str, Any]] = {}
@@ -103,7 +122,7 @@ def ensure_default_providers(providers: list[Any] | None) -> list[dict[str, Any]
         if default["id"] not in by_id:
             by_id[default["id"]] = dict(default)
             order.append(default["id"])
-    return [by_id[pid] for pid in order]
+    return [normalize_provider_kind(by_id[pid]) for pid in order]
 
 
 def merge_providers(current: list[Any] | None, incoming: list[Any] | None) -> list[dict[str, Any]]:
@@ -121,7 +140,7 @@ def merge_providers(current: list[Any] | None, incoming: list[Any] | None) -> li
         if pid not in by_id:
             order.append(pid)
         by_id[pid] = parsed
-    return [by_id[pid] for pid in order]
+    return [normalize_provider_kind(by_id[pid]) for pid in order]
 
 
 def provider_base_url(providers: list[dict[str, Any]], provider_id: str, default: str = "") -> str:
@@ -174,17 +193,18 @@ class StoredAgentCredentials:
         ``model_ids`` (the settings UI keeps ``model_ids`` as ``deepseek-chat``).
         """
         model = self.default_model or DEFAULT_DEEPSEEK_MODEL
-        base_url = DEFAULT_DEEPSEEK_BASE_URL
-        api_key = self.deepseek_key
         for provider in self.providers:
             pid = provider.get("id") or ""
-            models = provider.get("model_ids") or []
-            if model in models or pid == DEEPSEEK_PROVIDER_ID:
+            if model not in (provider.get("model_ids") or []):
+                continue
+            if pid == DEEPSEEK_PROVIDER_ID or normalize_provider_kind(provider)["kind"] == PROVIDER_KIND_OPENAI:
+                base_url = (provider.get("base_url") or "").strip() or DEFAULT_DEEPSEEK_BASE_URL
+                return self.keys.get(pid) or "", base_url, model
+        base_url = DEFAULT_DEEPSEEK_BASE_URL
+        for provider in self.providers:
+            if provider.get("id") == DEEPSEEK_PROVIDER_ID:
                 base_url = (provider.get("base_url") or "").strip() or base_url
-                api_key = self.keys.get(pid) or api_key
-                if model in models:
-                    break
-        return api_key or "", base_url, model
+        return self.deepseek_key or "", base_url, model
 
     def has_keys(self) -> dict[str, bool]:
         """Stored keys. TypeSafe also counts ``TYPESAFE_API_KEY`` so the panel can default judgment."""

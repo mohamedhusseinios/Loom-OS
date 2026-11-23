@@ -237,6 +237,7 @@ class AgentProviderConfig(BaseModel):
     name: str
     base_url: str
     model_ids: list[str] = Field(default_factory=list)
+    kind: Optional[str] = None
 
 
 class AgentSettings(BaseModel):

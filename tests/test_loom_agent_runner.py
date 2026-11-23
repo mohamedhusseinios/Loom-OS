@@ -91,6 +91,62 @@ def test_llm_from_stored_uses_custom_deepseek_base_url_for_unlisted_model():
     assert model == "gpt-4o-mini"
 
 
+def test_llm_from_stored_resolves_openai_compatible_model():
+    from daemon.agent_credentials import StoredAgentCredentials
+
+    creds = StoredAgentCredentials(
+        default_model="llama-3.1-8b",
+        providers=[
+            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"], "kind": "builtin"},
+            {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible"},
+        ],
+        keys={"deepseek": "sk-deep", "openrouter": "sk-or"},
+    )
+    key, base, model = creds.llm_from_stored()
+    assert (key, base, model) == ("sk-or", "https://openrouter.ai/api/v1", "llama-3.1-8b")
+
+
+def test_merge_providers_preserves_custom_openai_compatible():
+    from daemon.agent_credentials import merge_providers
+
+    merged = merge_providers([], [{"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1", "model_ids": ["llama-3.1-70b"], "kind": "openai_compatible"}])
+    groq = next(p for p in merged if p["id"] == "groq")
+    assert groq["kind"] == "openai_compatible"
+    assert "deepseek" in {p["id"] for p in merged}
+
+
+def test_is_valid_custom_provider_id():
+    from daemon.agent_credentials import is_valid_custom_provider_id
+
+    assert is_valid_custom_provider_id("openrouter") is True
+    assert is_valid_custom_provider_id("ollama") is False
+    assert is_valid_custom_provider_id("A") is False
+
+
+def test_normalize_provider_kind_and_defaults():
+    from daemon.agent_credentials import ensure_default_providers, normalize_provider_kind
+
+    assert normalize_provider_kind({"id": "deepseek", "kind": "openai_compatible"})["kind"] == "builtin"
+    assert normalize_provider_kind({"id": "groq", "kind": None})["kind"] == "openai_compatible"
+    assert normalize_provider_kind({"id": "groq"})["kind"] == "openai_compatible"
+    kinds = {p["id"]: p["kind"] for p in ensure_default_providers([{"id": "groq", "name": "Groq", "base_url": "https://x", "model_ids": []}])}
+    assert kinds == {"groq": "openai_compatible", "deepseek": "builtin", "typesafe": "builtin", "ollama": "builtin", "gliclass": "builtin"}
+
+
+def test_llm_from_stored_ignores_builtin_non_deepseek_model_match():
+    from daemon.agent_credentials import StoredAgentCredentials
+
+    creds = StoredAgentCredentials(
+        default_model="jev-latest",
+        providers=[
+            {"id": "typesafe", "name": "TypeSafe", "base_url": "https://ts.example", "model_ids": ["jev-latest"], "kind": "builtin"},
+            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "model_ids": ["deepseek-chat"], "kind": "builtin"},
+        ],
+        keys={"typesafe": "sk-ts", "deepseek": "sk-deep"},
+    )
+    assert creds.llm_from_stored() == ("sk-deep", "https://api.deepseek.com", "jev-latest")
+
+
 def test_supervisor_loom_agent_env_injects_settings_key(tmp_path, monkeypatch):
     import json
     import sqlite3
