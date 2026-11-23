@@ -106,8 +106,8 @@ def _sorted_reasons(counts: Mapping[str, int]) -> dict[str, int]:
 
 
 def _provider_is_priced(provider: str) -> bool:
-    """Only TypeSafe cloud tokens map to ``jev_cost_usd``. Local Ollama/GLiClass are not billed as Jev."""
-    return (provider or "").strip().lower() == "typesafe"
+    """Cloud Jev tokens (TypeSafe or OpenRouter) map to ``jev_cost_usd``. Local Ollama/GLiClass are not billed as Jev."""
+    return (provider or "").strip().lower() in {"typesafe", "openrouter_jev"}
 
 
 def _empty_bucket(role: str, provider: str, model: str) -> dict[str, Any]:

@@ -144,7 +144,7 @@ def test_normalize_provider_kind_and_defaults():
     assert normalize_provider_kind({"id": "groq", "kind": None})["kind"] == "openai_compatible"
     assert normalize_provider_kind({"id": "groq"})["kind"] == "openai_compatible"
     kinds = {p["id"]: p["kind"] for p in ensure_default_providers([{"id": "groq", "name": "Groq", "base_url": "https://x", "model_ids": []}])}
-    assert kinds == {"groq": "openai_compatible", "deepseek": "builtin", "openai": "builtin", "anthropic": "builtin", "typesafe": "builtin", "ollama": "builtin", "gliclass": "builtin"}
+    assert kinds == {"groq": "openai_compatible", "deepseek": "builtin", "openai": "builtin", "anthropic": "builtin", "typesafe": "builtin", "openrouter_jev": "builtin", "ollama": "builtin", "gliclass": "builtin"}
 
 
 def test_llm_from_stored_ignores_builtin_non_deepseek_model_match():

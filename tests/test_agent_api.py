@@ -653,6 +653,33 @@ def test_autonomy_settings_defaults_update_and_validate(client):
     assert kept.json()["autonomy_min_fit"] == "Medium"
 
 
+
+def test_openrouter_jev_decision_provider_accepted(client):
+    res = client.put(
+        "/api/agent/settings",
+        json={
+            "filter_provider": "openrouter_jev",
+            "judgment_provider": "openrouter_jev",
+            "api_keys": {"openrouter_jev": "sk-or-test9999"},
+            "providers": [{
+                "id": "openrouter_jev",
+                "name": "Jev (OpenRouter)",
+                "base_url": "https://openrouter.ai/api",
+                "model_ids": ["~typesafe/jev-latest"],
+            }],
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["filter_provider"] == "openrouter_jev"
+    assert body["judgment_provider"] == "openrouter_jev"
+    assert body["has_keys"]["openrouter_jev"] is True
+    assert body["api_keys_masked"]["openrouter_jev"] == "••••9999"
+    row = next(p for p in body["providers"] if p["id"] == "openrouter_jev")
+    assert row["base_url"] == "https://openrouter.ai/api"
+    assert row["model_ids"] == ["~typesafe/jev-latest"]
+
+
 def test_judgment_provider_gliclass_rejected(client):
     res = client.put("/api/agent/settings", json={
         "filter_provider": "gliclass",

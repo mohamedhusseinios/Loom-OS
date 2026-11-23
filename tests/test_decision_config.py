@@ -197,6 +197,30 @@ def test_custom_openai_compatible_filter_and_judgment():
     assert relevance.model == "llama-3.1-8b"
 
 
+def test_openrouter_jev_builtin_resolves_systemone_defaults():
+    settings = _settings(
+        filter_provider="openrouter_jev",
+        judgment_provider="openrouter_jev",
+        providers=[],
+    )
+    config = resolve_decision_config(settings, {"openrouter_jev": "sk-or-jev"})
+    assert config.filter_provider == "openrouter_jev"
+    assert config.judgment_provider == "openrouter_jev"
+    assert config.filter_model == "~typesafe/jev-latest"
+    assert config.filter_base_url.rstrip("/") == "https://openrouter.ai/api"
+    assert config.filter_api_key == "sk-or-jev"
+    assert config.filter_thresholds.as_dict() == effective_thresholds("typesafe")
+    relevance, judgment = build_decision_clients(config)
+    assert isinstance(relevance, JevClient)
+    assert relevance is judgment
+    assert relevance.provider == "openrouter_jev"
+    assert relevance.timeout == 10.0
+    assert relevance.available is True
+    assert "openrouter.ai" in (relevance.base_url or "")
+    assert relevance.base_url.endswith("/v1/systemone")
+    assert relevance.model == "~typesafe/jev-latest"
+
+
 def test_custom_provider_requires_model_like_ollama():
     settings = _settings(
         filter_provider="groq",

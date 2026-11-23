@@ -13,10 +13,12 @@ import {
 
 const FIELD_CLASS = "mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100";
 const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
-const DECISION_IDS = new Set(["typesafe", "ollama", "gliclass"]);
+const OPENROUTER_JEV_DEFAULT_BASE = "https://openrouter.ai/api";
+const OPENROUTER_JEV_DEFAULT_MODEL = "~typesafe/jev-latest";
+const DECISION_IDS = new Set(["typesafe", "openrouter_jev", "ollama", "gliclass"]);
 const ADD_CUSTOM_SENTINEL = "__add_custom__";
 
-const BUILTIN_PROVIDER_IDS = ["deepseek", "openai", "anthropic", "typesafe", "ollama", "gliclass"];
+const BUILTIN_PROVIDER_IDS = ["deepseek", "openai", "anthropic", "typesafe", "openrouter_jev", "ollama", "gliclass"];
 const CUSTOM_KIND = "openai_compatible";
 const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]+$/;
 
@@ -76,11 +78,11 @@ function providerWithModel(settings: AgentSettings | null, id: string, fallbackN
 }
 
 function isDecisionModel(value: string | null | undefined, customs: CustomRow[]): value is string {
-  return value === "typesafe" || value === "ollama" || value === "gliclass" || (Boolean(value) && isCustomId(customs, value as string));
+  return value === "typesafe" || value === "openrouter_jev" || value === "ollama" || value === "gliclass" || (Boolean(value) && isCustomId(customs, value as string));
 }
 
 function isJudgmentBackend(value: string | null | undefined, customs: CustomRow[]): value is string {
-  return value === "typesafe" || value === "ollama" || value === "none" || (Boolean(value) && isCustomId(customs, value as string));
+  return value === "typesafe" || value === "openrouter_jev" || value === "ollama" || value === "none" || (Boolean(value) && isCustomId(customs, value as string));
 }
 
 function defaultJudgment(hasTypesafeKey: boolean): JudgmentBackend {
@@ -135,6 +137,9 @@ export function AgentSettingsPanel() {
   const [jevKey, setJevKey] = useState("");
   const [jevBase, setJevBase] = useState("");
   const [jevModel, setJevModel] = useState("jev-latest");
+  const [openrouterJevKey, setOpenrouterJevKey] = useState("");
+  const [openrouterJevBase, setOpenrouterJevBase] = useState(OPENROUTER_JEV_DEFAULT_BASE);
+  const [openrouterJevModel, setOpenrouterJevModel] = useState(OPENROUTER_JEV_DEFAULT_MODEL);
   const [ollamaKey, setOllamaKey] = useState("");
   const [ollamaBase, setOllamaBase] = useState(OLLAMA_DEFAULT_BASE);
   const [ollamaModel, setOllamaModel] = useState("");
@@ -154,8 +159,10 @@ export function AgentSettingsPanel() {
 
   const typesafeKeySet = Boolean(settings?.has_keys?.typesafe) || Boolean(jevKey.trim());
   const showTypesafe = decisionModel === "" || decisionModel === "typesafe" || (decisionModel === "gliclass" && judgmentProvider === "typesafe");
+  const showOpenrouterJev = decisionModel === "openrouter_jev" || (decisionModel === "gliclass" && judgmentProvider === "openrouter_jev");
   const showOllama = decisionModel === "ollama" || (decisionModel === "gliclass" && judgmentProvider === "ollama");
   const showGliclass = decisionModel === "gliclass";
+  const hasOpenrouterJev = Boolean(settings?.has_keys?.openrouter_jev);
 
   const activeDraft = useMemo(
     () => chatDrafts.find((d) => d.id === chatProvider) || chatDrafts[0] || null,
@@ -176,6 +183,8 @@ export function AgentSettingsPanel() {
     setListedModels(activeRow?.model_ids?.length ? [...activeRow.model_ids] : []);
     setJevBase(providerBase(s, "typesafe"));
     setJevModel(providerModel(s, "typesafe", "jev-latest"));
+    setOpenrouterJevBase(providerBase(s, "openrouter_jev") || OPENROUTER_JEV_DEFAULT_BASE);
+    setOpenrouterJevModel(providerModel(s, "openrouter_jev", OPENROUTER_JEV_DEFAULT_MODEL));
     setOllamaBase(providerBase(s, "ollama") || OLLAMA_DEFAULT_BASE);
     setOllamaModel(providerModel(s, "ollama", ""));
     setGliclassBase(providerBase(s, "gliclass"));
@@ -184,7 +193,7 @@ export function AgentSettingsPanel() {
     setCustomRows((prev) => [...customs, ...prev.filter((r) => r.isNew && !customs.some((c) => c.id === r.id))]);
     const decision = isDecisionModel(s.filter_provider, customs) ? s.filter_provider : "";
     setDecisionModel(decision);
-    if (decision === "typesafe" || decision === "ollama" || (decision !== "" && decision !== "gliclass")) {
+    if (decision === "typesafe" || decision === "openrouter_jev" || decision === "ollama" || (decision !== "" && decision !== "gliclass")) {
       setJudgmentProvider(decision);
     } else if (isJudgmentBackend(s.judgment_provider, customs)) {
       setJudgmentProvider(s.judgment_provider);
@@ -279,6 +288,7 @@ export function AgentSettingsPanel() {
         if (draft.api_key.trim()) api_keys[draft.id] = draft.api_key.trim();
       }
       if (showTypesafe && jevKey.trim()) api_keys.typesafe = jevKey.trim();
+      if (showOpenrouterJev && openrouterJevKey.trim()) api_keys.openrouter_jev = openrouterJevKey.trim();
       if (showOllama && ollamaKey.trim()) api_keys.ollama = ollamaKey.trim();
       if (showGliclass && gliclassKey.trim()) api_keys.gliclass = gliclassKey.trim();
 
@@ -302,6 +312,9 @@ export function AgentSettingsPanel() {
       const providers: AgentSettings["providers"] = [...chatProviders];
       if (showTypesafe) {
         providers.push(providerWithModel(settings, "typesafe", "TypeSafe (Jev)", jevBase.trim(), jevModel.trim() || "jev-latest"));
+      }
+      if (showOpenrouterJev) {
+        providers.push(providerWithModel(settings, "openrouter_jev", "Jev (OpenRouter)", openrouterJevBase.trim() || OPENROUTER_JEV_DEFAULT_BASE, openrouterJevModel.trim() || OPENROUTER_JEV_DEFAULT_MODEL));
       }
       if (showOllama) {
         providers.push(providerWithModel(settings, "ollama", "Ollama", ollamaBase.trim() || OLLAMA_DEFAULT_BASE, ollamaModel));
@@ -336,6 +349,7 @@ export function AgentSettingsPanel() {
       });
       applySettings(next);
       setJevKey("");
+      setOpenrouterJevKey("");
       setOllamaKey("");
       setGliclassKey("");
       setMsg(t("settingsSaved"));
@@ -353,6 +367,7 @@ export function AgentSettingsPanel() {
       const next = await updateAgentSettings({ api_keys: { [providerId]: "" } });
       applySettings(next);
       if (providerId === "typesafe") setJevKey("");
+      if (providerId === "openrouter_jev") setOpenrouterJevKey("");
       if (providerId === "ollama") setOllamaKey("");
       if (providerId === "gliclass") setGliclassKey("");
       setChatDrafts((prev) => prev.map((d) => (d.id === providerId ? { ...d, api_key: "" } : d)));
@@ -507,6 +522,7 @@ export function AgentSettingsPanel() {
         >
           <option value="" disabled={decisionModel !== ""}>{t("decisionModelPlaceholder")}</option>
           <option value="typesafe">{t("decisionTypesafe")}</option>
+          <option value="openrouter_jev">{t("decisionOpenrouterJev")}</option>
           <option value="ollama">{t("decisionOllama")}</option>
           <option value="gliclass">{t("decisionGliclass")}</option>
           {customDecisionRows.map((r) => (
@@ -562,6 +578,7 @@ export function AgentSettingsPanel() {
             }}
           >
             <option value="typesafe">{t("judgmentTypesafe")}</option>
+            <option value="openrouter_jev">{t("judgmentOpenrouterJev")}</option>
             <option value="ollama">{t("judgmentOllama")}</option>
             <option value="none">{t("judgmentNone")}</option>
             {customDecisionRows.map((r) => (
@@ -604,6 +621,44 @@ export function AgentSettingsPanel() {
               className={FIELD_CLASS}
               value={jevModel}
               onChange={(e) => setJevModel(e.target.value)}
+            />
+          </label>
+        </>
+      )}
+      {showOpenrouterJev && (
+        <>
+          <label className="block text-xs text-zinc-400">
+            {t("openrouterJevApiKey")}
+            {keyStatus(hasOpenrouterJev)}
+            <input
+              type="password"
+              autoComplete="off"
+              className={FIELD_CLASS}
+              placeholder={settings?.api_keys_masked?.openrouter_jev || t("openrouterJevApiKeyPlaceholder")}
+              value={openrouterJevKey}
+              onChange={(e) => setOpenrouterJevKey(e.target.value)}
+            />
+          </label>
+          {hasOpenrouterJev && (
+            <Button size="sm" variant="ghost" onClick={() => void clearKey("openrouter_jev")} disabled={clearing !== null || saving}>
+              {clearing === "openrouter_jev" ? t("clearing") : t("clearKey")}
+            </Button>
+          )}
+          <label className="block text-xs text-zinc-400">
+            {t("openrouterJevBaseUrl")}
+            <input
+              className={FIELD_CLASS}
+              placeholder={t("openrouterJevBaseUrlPlaceholder")}
+              value={openrouterJevBase}
+              onChange={(e) => setOpenrouterJevBase(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-zinc-400">
+            {t("openrouterJevModel")}
+            <input
+              className={FIELD_CLASS}
+              value={openrouterJevModel}
+              onChange={(e) => setOpenrouterJevModel(e.target.value)}
             />
           </label>
         </>

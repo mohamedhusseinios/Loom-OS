@@ -897,8 +897,8 @@ async def get_agent_settings(_=Depends(require_token)):
     return (await registry.get_agent_settings(mask_keys=True)).model_dump()
 
 
-_FILTER_PROVIDERS = frozenset({"typesafe", "ollama", "gliclass", "none"})
-_JUDGMENT_PROVIDERS = frozenset({"typesafe", "ollama", "none"})
+_FILTER_PROVIDERS = frozenset({"typesafe", "openrouter_jev", "ollama", "gliclass", "none"})
+_JUDGMENT_PROVIDERS = frozenset({"typesafe", "openrouter_jev", "ollama", "none"})
 
 
 def _normalize_decision_provider(value: str | None) -> str | None:
@@ -963,11 +963,11 @@ def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
     removed = set(payload.remove_provider_ids or [])
     custom_ids = {p["id"] for p in merged if p["id"] not in BUILTIN_PROVIDER_IDS and p["id"] not in removed and p.get("kind") == PROVIDER_KIND_OPENAI}
     if filt_in is not None and filt not in _FILTER_PROVIDERS and filt not in custom_ids:
-        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, none, or a custom openai_compatible provider id")
+        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, openrouter_jev, ollama, gliclass, none, or a custom openai_compatible provider id")
     if judg_in is not None and judg == "gliclass":
         raise HTTPException(status_code=400, detail="judgment_provider=gliclass is not supported")
     if judg_in is not None and judg not in _JUDGMENT_PROVIDERS and judg not in custom_ids:
-        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, none, or a custom openai_compatible provider id")
+        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, openrouter_jev, ollama, none, or a custom openai_compatible provider id")
     if filt_in is not None:
         payload.filter_provider = filt
     if judg_in is not None:

@@ -1,8 +1,9 @@
 """TypeSafe Jev (System One) client — typed decisions, not chat.
 
-One client serves ``typesafe`` (cloud, API key required) and ``ollama`` (local,
-API key optional). ``ask`` still returns the raw payload. ``filter_relevance``
-and ``judge`` normalize that payload to ``DecisionResult`` and never raise.
+One client serves ``typesafe`` / ``openrouter_jev`` (cloud, API key required) and
+``ollama`` (local, API key optional). ``ask`` still returns the raw payload.
+``filter_relevance`` and ``judge`` normalize that payload to ``DecisionResult``
+and never raise.
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ class JevClient:
     """SystemOne HTTP client for TypeSafe cloud and local Ollama."""
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, timeout: float | None = None, sleep: Callable[[float], None] | None = None, max_attempts: int = MAX_ATTEMPTS, provider: str = "typesafe", model: str = DEFAULT_MODEL):
-        self.provider = provider if provider in ("typesafe", "ollama") else "typesafe"
+        self.provider = provider if provider in ("typesafe", "openrouter_jev", "ollama") else "typesafe"
         self.api_key = api_key if api_key is not None else os.environ.get("TYPESAFE_API_KEY", "")
         self.base_url = resolve_systemone_url(base_url)
         self.model = model or ("" if self.provider == "ollama" else DEFAULT_MODEL)
@@ -156,7 +157,7 @@ class JevClient:
         Cloud calls require an API key. Local Ollama does not.
         """
         if self.provider != "ollama" and not self.api_key:
-            raise JevError("TYPESAFE_API_KEY not configured")
+            raise JevError("API key not configured for SystemOne provider")
         body = json.dumps({"model": model, "state": state, "questions": questions}).encode()
         headers = {"Content-Type": "application/json"}
         if self.api_key:

@@ -410,7 +410,7 @@ def filter_cache_key(provider: str, model: str, ctx_hash: str, thresholds: Mappi
 
 
 def _provider_id(value: str) -> ProviderId:
-    if value in ("typesafe", "ollama", "gliclass", "none"):
+    if value in ("typesafe", "openrouter_jev", "ollama", "gliclass", "none"):
         return cast(ProviderId, value)
     return "none"
 

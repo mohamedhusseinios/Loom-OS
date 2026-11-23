@@ -305,7 +305,7 @@ async def test_legacy_settings_gain_role_columns_without_forced_defaults(tmp_pat
         assert row["autonomy_require_margin"] == 1
         settings = await reg.get_agent_settings()
         ids = {p.id for p in settings.providers}
-        assert {"deepseek", "openai", "anthropic", "typesafe", "ollama", "gliclass"} <= ids
+        assert {"deepseek", "openai", "anthropic", "typesafe", "openrouter_jev", "ollama", "gliclass"} <= ids
         assert settings.filter_provider is None
         assert settings.judgment_provider is None
         assert settings.selection_autonomy_enabled is True

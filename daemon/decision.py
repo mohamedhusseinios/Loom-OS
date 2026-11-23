@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from daemon.agent_credentials import BUILTIN_PROVIDER_IDS, DEFAULT_OLLAMA_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, PROVIDER_KIND_OPENAI, normalize_provider_kind
+from daemon.agent_credentials import BUILTIN_PROVIDER_IDS, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENROUTER_JEV_BASE_URL, DEFAULT_OPENROUTER_JEV_MODEL, DEFAULT_TYPESAFE_BASE_URL, PROVIDER_KIND_OPENAI, normalize_provider_kind
 from daemon.gliclass_client import GLiClassClient
 from daemon.jev_client import DEFAULT_MODEL as DEFAULT_TYPESAFE_MODEL
 from daemon.jev_client import JevClient
@@ -23,7 +23,7 @@ from daemon.jev_client import JevClient
 logger = logging.getLogger("loom.decision")
 
 SkipReason = Literal["none", "error", "timeout", "bad_payload", "unsupported"]
-ProviderId = Literal["typesafe", "ollama", "gliclass", "none"]
+ProviderId = Literal["typesafe", "openrouter_jev", "ollama", "gliclass", "none"]
 
 
 @dataclass
@@ -80,12 +80,13 @@ class NullDecisionClient:
 # ``confidence < 0.7`` rule. GLiClass keep is 0.5 (usual serve threshold).
 _DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
     "typesafe": {"drop": 0.3, "mid": 0.5, "keep": 0.7, "escalate": 0.7},
+    "openrouter_jev": {"drop": 0.3, "mid": 0.5, "keep": 0.7, "escalate": 0.7},
     "ollama": {"drop": 0.3, "mid": 0.5, "keep": 0.7, "escalate": 0.7},
     "gliclass": {"drop": 0.2, "mid": 0.35, "keep": 0.5, "escalate": 0.5},
     "none": {"drop": 0.3, "mid": 0.5, "keep": 0.7, "escalate": 0.7},
 }
-_FILTER_PROVIDERS = frozenset({"typesafe", "ollama", "gliclass", "none"})
-_JUDGMENT_PROVIDERS = frozenset({"typesafe", "ollama", "none"})
+_FILTER_PROVIDERS = frozenset({"typesafe", "openrouter_jev", "ollama", "gliclass", "none"})
+_JUDGMENT_PROVIDERS = frozenset({"typesafe", "openrouter_jev", "ollama", "none"})
 
 
 @dataclass(frozen=True)
@@ -312,6 +313,13 @@ def _resolve_roles(settings: Any, keys: Mapping[str, str]) -> tuple[str, str]:
     return filt, judg
 
 
+def _openrouter_jev_base_url(row: Mapping[str, Any]) -> str:
+    configured = _row_base_url(row)
+    if configured:
+        return configured
+    return DEFAULT_OPENROUTER_JEV_BASE_URL.rstrip("/")
+
+
 def _role_endpoint(provider: str, rows: list[dict[str, Any]], keys: Mapping[str, str], overrides: Mapping[str, Any]) -> tuple[str, str, str, Thresholds]:
     row = _find_provider(rows, provider)
     thresholds = _thresholds_from(effective_thresholds(provider, _overrides_for(overrides, provider)))
@@ -328,6 +336,9 @@ def _role_endpoint(provider: str, rows: list[dict[str, Any]], keys: Mapping[str,
     if provider == "typesafe":
         model = _first_model(row, DEFAULT_TYPESAFE_MODEL)
         return model, _typesafe_base_url(row), _provider_key(keys, "typesafe"), thresholds
+    if provider == "openrouter_jev":
+        model = _first_model(row, DEFAULT_OPENROUTER_JEV_MODEL)
+        return model, _openrouter_jev_base_url(row), _provider_key(keys, "openrouter_jev"), thresholds
     return "", "", "", thresholds
 
 
@@ -372,9 +383,10 @@ def _same_endpoint(config: DecisionConfig) -> bool:
 def _build_one(provider: str, model: str, base_url: str, api_key: str) -> DecisionClient:
     if provider == "gliclass":
         return GLiClassClient(base_url=base_url, model=model, api_key=api_key, timeout=5.0)
-    if provider in ("typesafe", "ollama"):
-        timeout = 10.0 if provider == "typesafe" else 5.0
-        return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout, provider=provider, model=model or DEFAULT_TYPESAFE_MODEL)
+    if provider in ("typesafe", "openrouter_jev", "ollama"):
+        timeout = 5.0 if provider == "ollama" else 10.0
+        default_model = DEFAULT_OPENROUTER_JEV_MODEL if provider == "openrouter_jev" else DEFAULT_TYPESAFE_MODEL
+        return JevClient(api_key=api_key, base_url=base_url or None, timeout=timeout, provider=provider, model=model or default_model)
     if provider not in BUILTIN_PROVIDER_IDS and provider != "none":
         # Custom openai_compatible id: JevClient only knows typesafe|ollama, so use the ollama (keyless-ok, 5s) path.
         return JevClient(api_key=api_key, base_url=base_url or None, timeout=5.0, provider="ollama", model=model)
