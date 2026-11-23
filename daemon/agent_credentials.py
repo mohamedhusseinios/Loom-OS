@@ -185,8 +185,10 @@ class StoredAgentCredentials:
     def typesafe_base_url(self) -> str:
         return provider_base_url(self.providers, TYPESAFE_PROVIDER_ID, "")
 
-    def llm_from_stored(self) -> tuple[str, str, str]:
-        """Return ``(api_key, base_url, model)`` from stored settings only (no env).
+    def llm_from_stored(self) -> tuple[str, str, str, str]:
+        """Return ``(api_key, base_url, model, provider_id)`` from stored settings only (no env).
+
+        Callers must only fall back to ``DEEPSEEK_API_KEY`` when ``provider_id`` is ``deepseek``.
 
         The DeepSeek provider row is the BYOK chat endpoint: its ``base_url``
         always applies even when ``default_model`` is a custom id not listed in
@@ -199,12 +201,12 @@ class StoredAgentCredentials:
                 continue
             if pid == DEEPSEEK_PROVIDER_ID or normalize_provider_kind(provider)["kind"] == PROVIDER_KIND_OPENAI:
                 base_url = (provider.get("base_url") or "").strip() or DEFAULT_DEEPSEEK_BASE_URL
-                return self.keys.get(pid) or "", base_url, model
+                return self.keys.get(pid) or "", base_url, model, pid
         base_url = DEFAULT_DEEPSEEK_BASE_URL
         for provider in self.providers:
             if provider.get("id") == DEEPSEEK_PROVIDER_ID:
                 base_url = (provider.get("base_url") or "").strip() or base_url
-        return self.deepseek_key or "", base_url, model
+        return self.deepseek_key or "", base_url, model, DEEPSEEK_PROVIDER_ID
 
     def has_keys(self) -> dict[str, bool]:
         """Stored keys. TypeSafe also counts ``TYPESAFE_API_KEY`` so the panel can default judgment."""

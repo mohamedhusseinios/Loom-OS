@@ -16,7 +16,7 @@ import coding_agent.patterns as patterns_pkg
 from coding_agent.patterns import load_patterns
 from coding_agent.selection import RankedStrategy
 from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
-from daemon.agent_credentials import resolve_deepseek_key
+from daemon.agent_credentials import DEEPSEEK_PROVIDER_ID, resolve_deepseek_key
 from daemon.decision import NullDecisionClient, DecisionClient, build_decision_clients, resolve_decision_config
 from daemon.llm_client import LlmClient, LlmError
 from daemon.models import (
@@ -202,9 +202,16 @@ class AgentRuntime:
 
     async def _llm_from_settings(self) -> tuple[LlmClient, str]:
         creds = await self._stored_credentials()
-        stored_key, base_url, model = creds.llm_from_stored()
-        api_key = resolve_deepseek_key(stored_key)
+        stored_key, base_url, model, provider_id = creds.llm_from_stored()
+        api_key = self._resolve_chat_key(stored_key, provider_id)
         return LlmClient(api_key=api_key, base_url=base_url), model
+
+    @staticmethod
+    def _resolve_chat_key(stored_key: str, provider_id: str) -> str:
+        """Env fallback is DeepSeek-only; custom providers never inherit ``DEEPSEEK_API_KEY``."""
+        if provider_id == DEEPSEEK_PROVIDER_ID:
+            return resolve_deepseek_key(stored_key)
+        return stored_key
 
     async def _decision_settings(self) -> tuple[object, dict[str, str]]:
         settings = await self.registry.get_agent_settings(mask_keys=True)

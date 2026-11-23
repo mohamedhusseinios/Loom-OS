@@ -107,8 +107,8 @@ def resolve_benchmark_credentials(db_path: str | None = None):
         resolve_typesafe_key,
     )
     creds = load_stored_credentials(db_path)
-    stored_llm_key, deepseek_base, model = creds.llm_from_stored()
-    deepseek_key = resolve_deepseek_key(stored_llm_key)
+    stored_llm_key, deepseek_base, model, provider_id = creds.llm_from_stored()
+    deepseek_key = resolve_deepseek_key(stored_llm_key) if provider_id == "deepseek" else stored_llm_key
     if not deepseek_key:
         deepseek_key = os.environ.get("LOOM_AGENT_API_KEY", "")
     typesafe_key = resolve_typesafe_key(creds.typesafe_key)

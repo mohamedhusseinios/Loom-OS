@@ -28,6 +28,7 @@ from pathlib import Path
 from coding_agent.events import JsonlEventSink
 from coding_agent.runners.react import ReactRunner
 from coding_agent.session import RunSession
+from daemon.agent_credentials import DEEPSEEK_PROVIDER_ID
 from daemon.coding_adapters import LlmClientAdapter, SimpleUsageMeter, StubContextSource, WorktreeSandbox
 from daemon.llm_client import LlmClient, LlmError
 
@@ -36,8 +37,8 @@ def _settings_db_path() -> str:
     return os.path.expanduser(os.environ.get("LOOM_DB_PATH", "~/.loom/state.db"))
 
 
-def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str, str]:
-    """Return ``(api_key, base_url, model)`` from agent_settings, or empty key."""
+def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str, str, str]:
+    """Return ``(api_key, base_url, model, provider_id)`` from agent_settings, or empty key."""
     from daemon.agent_credentials import load_stored_credentials
     creds = load_stored_credentials(db_path or _settings_db_path())
     return creds.llm_from_stored()
@@ -45,13 +46,12 @@ def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str,
 
 def resolve_llm_config() -> tuple[str, str, str]:
     """Match chat: dashboard settings first, then LOOM_AGENT_*/DEEPSEEK_* env."""
-    db_key, db_base, db_model = load_llm_config_from_settings()
-    api_key = (
-        db_key
-        or os.environ.get("LOOM_AGENT_API_KEY")
-        or os.environ.get("DEEPSEEK_API_KEY")
-        or ""
-    )
+    db_key, db_base, db_model, db_provider = load_llm_config_from_settings()
+    provider_id = os.environ.get("LOOM_AGENT_PROVIDER") or db_provider
+    api_key = db_key or os.environ.get("LOOM_AGENT_API_KEY") or ""
+    # DeepSeek env creds are only valid for DeepSeek; never send them to a custom endpoint.
+    if not api_key and provider_id == DEEPSEEK_PROVIDER_ID:
+        api_key = os.environ.get("DEEPSEEK_API_KEY") or ""
     base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
     model = os.environ.get("LOOM_AGENT_MODEL") or db_model
     return api_key, base_url, model
