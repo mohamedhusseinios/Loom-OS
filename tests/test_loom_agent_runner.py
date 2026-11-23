@@ -321,8 +321,10 @@ def test_keyless_custom_provider_does_not_receive_deepseek_env_key_in_runtime(tm
     assert resolve_deepseek_key(stored_key) == "sk-process-env"  # helper alone still falls back; callers must gate
 
     from daemon.agent_credentials import resolve_chat_key
-    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
     assert resolve_chat_key(provider_id, stored_key) == ""
+    assert resolve_chat_key("deepseek", "") == "sk-loom-process"
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
     assert resolve_chat_key("deepseek", "") == "sk-process-env"
     assert resolve_chat_key("deepseek", "sk-stored") == "sk-stored"
     assert resolve_chat_key("local-llm", "sk-custom") == "sk-custom"
@@ -366,7 +368,7 @@ def test_resolve_llm_config_keyless_custom_ignores_deepseek_env(tmp_path, monkey
     db = _write_keyless_custom_db(tmp_path)
     monkeypatch.setenv("LOOM_DB_PATH", str(db))
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
-    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
     monkeypatch.delenv("LOOM_AGENT_PROVIDER", raising=False)
     key, base, model, _ = resolve_llm_config()
     assert key == ""
@@ -381,7 +383,7 @@ def test_resolve_llm_config_supervisor_provider_env_blocks_deepseek_fallback(tmp
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-process-env")
     monkeypatch.setenv("LOOM_AGENT_PROVIDER", "local-llm")
     monkeypatch.setenv("LOOM_AGENT_BASE_URL", "http://localhost:9000/v1")
-    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
     key, base, _, _ = resolve_llm_config()
     assert key == ""
     assert base == "http://localhost:9000/v1"
@@ -419,7 +421,7 @@ def test_run_manifest_keyless_custom_posts_openai_v1_root(tmp_path, monkeypatch)
     monkeypatch.setenv("LOOM_AGENT_PROVIDER", "local-llm")
     monkeypatch.setenv("LOOM_AGENT_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.setenv("LOOM_AGENT_MODEL", "llama")
-    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-process")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-should-not-be-sent")
     captured: dict = {}
 

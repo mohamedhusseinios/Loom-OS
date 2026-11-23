@@ -699,6 +699,10 @@ export class ImplementConflictError extends Error {
   }
 }
 
+export function isSelectionPreview(payload: unknown): payload is SelectionPreview {
+  return !!payload && typeof payload === "object" && Array.isArray((payload as SelectionPreview).top3);
+}
+
 export async function previewImplement(projectId: string, taskId: string): Promise<SelectionPreview> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/tasks/${taskId}/implement/preview`, {
     method: "POST",
@@ -714,7 +718,14 @@ export async function implementTask(projectId: string, taskId: string, body?: Im
     headers: body ? authHeaders({ "Content-Type": "application/json" }) : authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 409) throw new ImplementConflictError(await res.json());
+  if (res.status === 409) {
+    const payload: unknown = await res.json().catch(() => null);
+    if (isSelectionPreview(payload)) throw new ImplementConflictError(payload);
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+      ? payload.detail
+      : "API error: 409";
+    throw new Error(detail);
+  }
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

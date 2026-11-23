@@ -271,13 +271,14 @@ def resolve_deepseek_key(settings_key: str | None) -> str:
 
 
 def resolve_chat_key(provider_id: str, settings_key: str | None) -> str:
-    """Settings key, then ``LOOM_AGENT_API_KEY``, then preset-specific env for known ids."""
+    """Settings key, then preset env. ``LOOM_AGENT_API_KEY`` only for built-in chat ids.
+
+    Custom endpoints must not inherit the daemon process key when their row has none.
+    """
     env_name = _PROVIDER_ENV_KEYS.get(provider_id)
-    return first_nonempty(
-        settings_key,
-        os.environ.get("LOOM_AGENT_API_KEY", ""),
-        os.environ.get(env_name, "") if env_name else "",
-    )
+    loom_key = "" if is_custom_chat_provider_id(provider_id) else os.environ.get("LOOM_AGENT_API_KEY", "")
+    preset_key = os.environ.get(env_name, "") if env_name else ""
+    return first_nonempty(settings_key, loom_key, preset_key)
 
 
 def resolve_typesafe_key(settings_key: str | None) -> str:

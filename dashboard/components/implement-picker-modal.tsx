@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   implementTask,
   ImplementConflictError,
+  isSelectionPreview,
   type FitLevel,
   type ImplementRequest,
   type RankedStrategy,
@@ -67,7 +68,7 @@ export function ImplementPickerModal(props: ImplementPickerModalProps) {
       onImplemented();
       onClose();
     } catch (e) {
-      if (e instanceof ImplementConflictError) {
+      if (e instanceof ImplementConflictError && isSelectionPreview(e.preview)) {
         setPreview(e.preview);
         setNotice("blocked");
       } else {
@@ -95,7 +96,7 @@ export function ImplementPickerModal(props: ImplementPickerModalProps) {
     return key ? t(`costBand.${key}`) : t("costUnknown");
   }
 
-  const candidates = preview.top3;
+  const candidates = isSelectionPreview(preview) ? preview.top3 : [];
 
   return (
     <dialog

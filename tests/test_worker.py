@@ -51,6 +51,25 @@ def test_process_task_success_marks_done_and_writes_finding(monkeypatch):
     assert w.findings and w.findings[0][2] == "did the work"
 
 
+def test_process_task_cancel_does_not_commit_or_finish(monkeypatch):
+    w = _CaptureWorker(project="noor", agent="loom-agent", project_path="/tmp/noor", base_url="http://x")
+    committed = []
+    monkeypatch.setattr(worker_mod, "current_branch", lambda repo: "main")
+    monkeypatch.setattr(worker_mod, "create_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(worker_mod, "commit_all", lambda *a, **k: committed.append(True))
+    monkeypatch.setattr(
+        worker_mod, "run_agent",
+        lambda *a, **k: ClaudeResult("cancelled: cancelled", None, True),
+    )
+
+    w.process_task({"id": "t-cancel", "title": "T", "instruction": "x",
+                    "acceptance_criteria": "", "result": None})
+
+    assert committed == []
+    assert w.findings == []
+    assert w.patches[-1][1]["status"] == "blocked"
+
+
 def test_process_task_claude_error_marks_blocked(monkeypatch):
     w = _CaptureWorker(project="noor", agent="claude-code", project_path="/tmp/noor", base_url="http://x")
     _patch_git_and_claude(monkeypatch, ClaudeResult("boom", "sess-2", True))

@@ -21,6 +21,7 @@ import {
   previewImplement,
   getAgentSettings,
   ImplementConflictError,
+  isSelectionPreview,
   type SelectionPreview,
   type AgentTask,
   type AgentInfo,
@@ -218,7 +219,7 @@ export function TaskDetailDrawer({
           onChanged();
           return;
         } catch (e) {
-          if (!(e instanceof ImplementConflictError)) throw e;
+          if (!(e instanceof ImplementConflictError) || !isSelectionPreview(e.preview)) throw e;
           setPicker({ preview: e.preview, notice: "blocked" });
           return;
         }

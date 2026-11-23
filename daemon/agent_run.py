@@ -60,8 +60,8 @@ def resolve_llm_config() -> tuple[str, str, str, str]:
     """Match chat: dashboard settings first, then LOOM_AGENT_*/provider env.
 
     ``LOOM_AGENT_PROVIDER`` overrides the stored chat provider id; the stored key is only
-    used when the effective provider is the stored one, and ``resolve_chat_key`` only
-    falls back to ``DEEPSEEK_API_KEY`` for the deepseek preset (never a custom endpoint).
+    used when the effective provider is the stored one. ``resolve_chat_key`` falls back to
+    ``LOOM_AGENT_API_KEY`` and preset env only for built-in chat ids, never a custom endpoint.
     """
     api_key, base_url, model, api_style, _provider_id = _resolve_llm_settings()
     return api_key, base_url, model, api_style
@@ -191,7 +191,8 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
     if outcome.error:
         print(outcome.error, file=sys.stderr)
     print(f"{outcome.status}: {outcome.stop_reason}")
-    return 0 if outcome.status in ("succeeded", "cancelled") else 1
+    # Cancel is not success: a zero exit makes the worker commit and mark the task done.
+    return 0 if outcome.status == "succeeded" else 1
 
 
 def main(argv: list[str] | None = None) -> int:

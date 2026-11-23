@@ -158,7 +158,7 @@ def test_llm_error_emits_run_failed(tmp_path: Path, monkeypatch) -> None:
     assert last["stop_reason"] == "llm_error"
 
 
-def test_manifest_cancelled_exits_0(tmp_path: Path, monkeypatch) -> None:
+def test_manifest_cancelled_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
     manifest_path, run_dir, _worktree = _write_manifest(
         tmp_path, cancel_path=str(tmp_path / "run" / "cancel"),
     )
@@ -167,7 +167,7 @@ def test_manifest_cancelled_exits_0(tmp_path: Path, monkeypatch) -> None:
 
     code = main(["--manifest", str(manifest_path)])
 
-    assert code == 0
+    assert code == 1
     last = json.loads((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert last["type"] == "run.cancelled"
 

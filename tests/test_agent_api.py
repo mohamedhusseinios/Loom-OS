@@ -67,6 +67,48 @@ def test_chat_without_key_returns_400(client):
     assert "API key" in res.json()["detail"]
 
 
+def test_keyless_custom_chat_does_not_send_loom_env_key(client, monkeypatch):
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-secret")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-secret")
+    saved = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "chat_provider": "local-llm",
+        "providers": [{
+            "id": "local-llm",
+            "name": "Local",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "model_ids": ["llama-3.1-8b"],
+            "api_style": "openai",
+            "kind": "openai_compatible",
+        }],
+    })
+    assert saved.status_code == 200, saved.text
+    captured = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "hello local"}}], "usage": {}}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_open(req, timeout):
+        captured["auth"] = req.get_header("Authorization")
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setattr("daemon.llm_client._open_http", fake_open)
+    res = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
+    assert res.status_code == 200, res.text
+    assert res.json()["reply"] == "hello local"
+    assert captured["auth"] is None
+    assert "127.0.0.1:9000" in captured["url"]
+    assert "sk-loom-secret" not in res.text
+
+
 @pytest.mark.asyncio
 async def test_suggest_accept_loom_action(client, tmp_path):
     reg = api_module.registry
@@ -1107,7 +1149,7 @@ _OPENROUTER = {
 
 def test_keyless_custom_chat_posts_single_v1(client, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-secret")
     saved = client.put("/api/agent/settings", json={
         "default_model": "llama-3.1-8b",
         "chat_provider": "openrouter",
