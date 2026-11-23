@@ -323,6 +323,7 @@ class AgentChatResponse(BaseModel):
     chat_id: str
     reply: str
     suggestion_id: Optional[str] = None
+    reasoning: Optional[str] = None
 
 
 class SuggestionStatus(str, Enum):

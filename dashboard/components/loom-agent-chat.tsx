@@ -15,6 +15,7 @@ import {
 interface Msg {
   role: "user" | "assistant";
   content: string;
+  reasoning?: string | null;
 }
 
 interface LoomAgentChatProps {
@@ -63,7 +64,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       setMessages(
         rows
           .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+          .map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            reasoning: m.reasoning_content || null,
+          })),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : t("chatError"));
@@ -111,10 +116,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       });
       setChatId(res.chat_id);
       const reply = (res.reply ?? "").trim();
-      if (!reply) {
+      const reasoning = (res.reasoning ?? "").trim() || null;
+      if (!reply && !reasoning) {
         setError(t("emptyReply"));
       } else {
-        setMessages((m) => [...m, { role: "assistant", content: reply }]);
+        setMessages((m) => [...m, { role: "assistant", content: reply, reasoning }]);
       }
       if (res.suggestion_id && onSuggestion) onSuggestion(res.suggestion_id);
       await refreshSessions();
@@ -197,13 +203,30 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           {messages.map((m, i) => (
             <div
               key={i}
-              className={`whitespace-pre-wrap rounded-md px-2.5 py-2 text-sm ${
+              className={`rounded-md px-2.5 py-2 text-sm ${
                 m.role === "user"
                   ? "ms-8 bg-zinc-800 text-zinc-100"
                   : "me-8 bg-zinc-900 text-zinc-300"
               }`}
             >
-              {m.content}
+              {m.role === "assistant" && m.reasoning ? (
+                <details className="group/think mb-2 rounded border border-zinc-800 bg-zinc-950/70 open:bg-zinc-950/90">
+                  <summary className="cursor-pointer select-none list-none px-2 py-1.5 text-[11px] font-medium text-zinc-400 marker:content-none [&::-webkit-details-marker]:hidden">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="inline-block text-zinc-500 transition-transform group-open/think:rotate-90">▸</span>
+                      {t("thinkingLabel")}
+                    </span>
+                  </summary>
+                  <div className="whitespace-pre-wrap border-t border-zinc-800 px-2.5 py-2 text-xs leading-relaxed text-zinc-500">
+                    {m.reasoning}
+                  </div>
+                </details>
+              ) : null}
+              {m.content ? (
+                <div className="whitespace-pre-wrap">{m.content}</div>
+              ) : m.reasoning ? (
+                <p className="text-xs text-zinc-500">{t("reasoningOnlyHint")}</p>
+              ) : null}
             </div>
           ))}
           {busy && (

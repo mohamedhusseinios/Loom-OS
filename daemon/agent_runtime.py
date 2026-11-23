@@ -232,7 +232,9 @@ class AgentRuntime:
             "You are the Loom agent for this project. Use ONLY the provided shared context "
             "and graph memory. You already have project knowledge — never claim you lack "
             "access to files or context when that memory is present. Cite concrete entities "
-            "from the graph when relevant. If the memory is thin, say what is missing."
+            "from the graph when relevant. If the memory is thin, say what is missing. "
+            "Put the user-facing answer in the content field as a finished reply — not a "
+            "plan of what you will do next, and not an internal monologue."
         )
         context_parts: list[str] = []
         if shared:
@@ -335,8 +337,9 @@ class AgentRuntime:
         if self.emit_event:
             await self.emit_event("agent:message", project_id, {
                 "chat_id": chat.id, "role": "assistant", "content": reply,
+                "reasoning": reasoning,
             })
-        return AgentChatResponse(chat_id=chat.id, reply=reply, suggestion_id=suggestion_id)
+        return AgentChatResponse(chat_id=chat.id, reply=reply, suggestion_id=suggestion_id, reasoning=reasoning)
 
     async def suggest(self, project_id: str, project_path: str, task_id: str, force: bool = True):
         task = await self.registry.get_agent_task(task_id)

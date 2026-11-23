@@ -620,12 +620,13 @@ export interface AgentChatMessage {
   role: string;
   content: string;
   created_at: string;
+  reasoning_content?: string | null;
 }
 
 export async function agentChat(
   projectId: string,
   payload: { message: string; task_id?: string; chat_id?: string },
-): Promise<{ chat_id: string; reply: string; suggestion_id: string | null }> {
+): Promise<{ chat_id: string; reply: string; suggestion_id: string | null; reasoning?: string | null }> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chat`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),

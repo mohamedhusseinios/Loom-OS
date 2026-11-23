@@ -198,19 +198,35 @@ def test_llm_chat_captures_reasoning_content(monkeypatch):
     assert client.last_reasoning_content == "step-a"
 
 
-def test_llm_chat_falls_back_to_reasoning_when_content_empty(monkeypatch):
+def test_llm_chat_distills_when_content_empty(monkeypatch):
+    bodies = [
+        b'{"choices":[{"message":{"role":"assistant","content":"",'
+        b'"reasoning_content":"only reasoning answer"}}],"usage":{}}',
+        b'{"choices":[{"message":{"role":"assistant","content":"Final answer."}}],'
+        b'"usage":{}}',
+    ]
+    calls = {"n": 0}
+
     class FakeResp:
+        def __init__(self, body: bytes):
+            self._body = body
+
         def read(self):
-            return (
-                b'{"choices":[{"message":{"role":"assistant","content":"",'
-                b'"reasoning_content":"only reasoning answer"}}],"usage":{}}'
-            )
+            return self._body
+
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr("daemon.llm_client._open_http", lambda *a, **k: FakeResp())
+    def fake_open(*a, **k):
+        i = calls["n"]
+        calls["n"] += 1
+        return FakeResp(bodies[min(i, len(bodies) - 1)])
+
+    monkeypatch.setattr("daemon.llm_client._open_http", fake_open)
     client = LlmClient(api_key="sk")
-    assert client.chat([{"role": "user", "content": "hi"}]) == "only reasoning answer"
+    assert client.chat([{"role": "user", "content": "hi"}]) == "Final answer."
     assert client.last_reasoning_content == "only reasoning answer"
+    assert calls["n"] == 2

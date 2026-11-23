@@ -429,6 +429,8 @@
     "loadingMessages": "Loading messages…",
     "untitledSession": "Untitled session",
     "thinking": "Thinking…",
+    "thinkingLabel": "Thinking",
+    "reasoningOnlyHint": "The model shared its thinking but no final answer yet. Expand Thinking above, or try again.",
     "emptyReply": "The model returned an empty reply. Try again or check Agent settings."
   },
   "AgentApp": {

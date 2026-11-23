@@ -86,6 +86,40 @@ def history_with_reasoning(messages: list[dict[str, Any]]) -> list[dict[str, Any
     return out
 
 
+_THINKING_STARTS = (
+    "the user wants",
+    "the user said",
+    "the user is asking",
+    "the user asked",
+    "let me ",
+    "i need to ",
+    "i should ",
+    "actually, i",
+    "looking at the",
+    "based on the shared context",
+)
+
+
+def looks_like_chain_of_thought(text: str) -> bool:
+    """True when text reads as internal planning monologue, not a user-facing answer."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    head = t[:280]
+    if any(head.startswith(p) for p in _THINKING_STARTS):
+        return True
+    if "let me " in head and any(w in head for w in ("read ", "explore", "check ", "find ", "look at", "gather")):
+        return True
+    return False
+
+
+_DISTILL_PROMPT = (
+    "Write ONLY the final answer for the user based on that reasoning. "
+    "Do not narrate your process, do not say what you will do next, "
+    "and do not mention tools or reading files. Be direct and useful."
+)
+
+
 def _safe_http_error_detail(exc: urllib.error.HTTPError, limit: int = 240) -> str:
     """Return a short provider error body with credential-looking substrings stripped."""
     try:
@@ -212,8 +246,8 @@ class LlmClient:
     def available(self) -> bool:
         return bool(self.api_key) or self.allow_missing_key
 
-    def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str:
-        """Return assistant content for a chat completion request."""
+    def _chat_once(self, messages: list[dict[str, Any]], model: str) -> tuple[str, str | None]:
+        """One completion call. Returns ``(content, reasoning_content)``."""
         if not self.api_key and not self.allow_missing_key:
             raise LlmError("API key not configured — add it in Agent settings")
         url = resolve_chat_completions_url(self.base_url)
@@ -239,17 +273,42 @@ class LlmClient:
             raise LlmError("LLM returned no choices")
         msg = choices[0].get("message") or {}
         reasoning = msg.get("reasoning_content")
-        self.last_reasoning_content = reasoning if isinstance(reasoning, str) and reasoning else None
+        reasoning_s = reasoning if isinstance(reasoning, str) and reasoning.strip() else None
         content = (msg.get("content") or "").strip()
-        # Reasoning models (Reflection Beam, DeepSeek-R1, …) sometimes return the
-        # visible answer only in reasoning_content with an empty content field.
-        if content:
+        return content, reasoning_s
+
+    def _distill_final_reply(self, messages: list[dict[str, Any]], reasoning: str, model: str) -> str:
+        """Ask the model for a user-facing answer after a reasoning-only (or CoT) turn."""
+        follow = history_with_reasoning(messages) + [
+            {"role": "assistant", "content": "", "reasoning_content": reasoning},
+            {"role": "user", "content": _DISTILL_PROMPT},
+        ]
+        content, _extra = self._chat_once(follow, model)
+        self.last_reasoning_content = reasoning
+        if content and not looks_like_chain_of_thought(content):
             return content
-        if self.last_reasoning_content:
-            return self.last_reasoning_content.strip()
+        logger.warning("distill pass still returned empty or chain-of-thought")
         return ""
 
-    def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
+    def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str:
+        """Return a user-facing assistant reply (never dumps chain-of-thought)."""
+        content, reasoning = self._chat_once(messages, model)
+        self.last_reasoning_content = reasoning
+        # Some providers put the monologue in content and leave reasoning empty.
+        if content and looks_like_chain_of_thought(content) and not reasoning:
+            reasoning = content
+            self.last_reasoning_content = content
+            content = ""
+        elif content and looks_like_chain_of_thought(content) and reasoning:
+            # Prefer stored reasoning; content is also CoT — distill.
+            content = ""
+        if content:
+            return content
+        if reasoning:
+            return self._distill_final_reply(messages, reasoning, model)
+        return ""
+
+    def chat_json(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
         """Chat and parse the assistant reply as JSON (fenced blocks stripped)."""
         return _parse_chat_json(self.chat(messages, model=model))
 
