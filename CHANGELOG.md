@@ -2,6 +2,26 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.3] — 2026-11-23
+
+Third public alpha after `v0.3.0-alpha.2`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** interim DMG with OpenRouter Jev.
+
+### Highlights
+
+- **Jev via OpenRouter** — Agent settings decision filter/judgment can use TypeSafe Jev through OpenRouter SystemOne (`openrouter_jev`) with an OpenRouter API key; no separate TypeSafe account required
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.3
+./run.sh --open
+# or: pip install -e ".[dev,llm]" && loom start
+```
+
+**macOS app:** download `Loom-Coding-Agent-0.3.0a3.dmg` from this release, open it, and run **Loom Coding Agent** (first launch installs under `~/Library/Application Support/LoomCodingAgent`).
+
 ## [0.3.0-alpha.2] — 2026-11-23
 
 Second public alpha after `v0.3.0-alpha.1`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** interim DMG.
