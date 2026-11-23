@@ -5,13 +5,7 @@ type TabId = "agent" | "dashboard";
 let selected: TabId = "agent";
 
 function tabFromUrl(url: string): TabId {
-  try {
-    const path = new URL(url).pathname.replace(/\/+$/, "") || "/";
-    if (/^\/(en|ar)$/.test(path) || /\/agent-app(?:\/|$)/.test(path)) return "agent";
-  } catch {
-    /* ignore bad urls */
-  }
-  return "dashboard";
+  return /\/agent-app(?:[/?#]|$)/.test(url) ? "agent" : "dashboard";
 }
 
 function render(url: string): void {

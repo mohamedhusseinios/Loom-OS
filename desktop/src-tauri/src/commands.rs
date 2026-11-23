@@ -42,12 +42,9 @@ fn encode_component(s: &str) -> String {
     out
 }
 
-/// Generic in-app home: `<base>/{locale}[?project=..&task=..]`.
-///
-/// Uses the locale dashboard root (always present) so every ship payload works for
-/// all users — not the desktop-only `/agent-app` route.
+/// `<base>/{locale}/agent-app[?project=..&task=..]`; empty values are omitted.
 pub fn agent_app_url(base: &str, project: Option<&str>, task: Option<&str>) -> String {
-    let mut url = dashboard_home_url(base);
+    let mut url = format!("{}/{LOCALE}/agent-app", base.trim_end_matches('/'));
     let params: Vec<String> = [("project", project), ("task", task)].into_iter().filter_map(|(k, v)| v.filter(|v| !v.is_empty()).map(|v| format!("{k}={}", encode_component(v)))).collect();
     if !params.is_empty() {
         url.push('?');
@@ -60,18 +57,10 @@ pub fn dashboard_home_url(base: &str) -> String {
     format!("{}/{LOCALE}", base.trim_end_matches('/'))
 }
 
-/// True when `url` is the generic agent home or the legacy `/agent-app` route.
+/// True when `url` is the agent-app route (any query/fragment) under `base`.
 pub fn is_agent_url(base: &str, url: &str) -> bool {
-    let root = base.trim_end_matches('/');
-    let home = format!("{root}/{LOCALE}");
-    let legacy = format!("{home}/agent-app");
-    for prefix in [&home, &legacy] {
-        if url.strip_prefix(prefix).is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#'])) {
-            return true;
-        }
-    }
-    // Legacy path may continue with `/` only for exact agent-app segment (already covered).
-    url.strip_prefix(&legacy).is_some_and(|rest| rest.starts_with('/'))
+    let agent = format!("{}/{LOCALE}/agent-app", base.trim_end_matches('/'));
+    url.strip_prefix(&agent).is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#', '/']))
 }
 
 /// Pure tab decision: returns the URL to show and the dashboard page to remember (if leaving one).
@@ -206,15 +195,15 @@ mod tests {
 
     #[test]
     fn agent_url_bare() {
-        assert_eq!(agent_app_url(BASE, None, None), "http://127.0.0.1:3000/en");
-        assert_eq!(agent_app_url("http://127.0.0.1:3000/", None, None), "http://127.0.0.1:3000/en");
+        assert_eq!(agent_app_url(BASE, None, None), "http://127.0.0.1:3000/en/agent-app");
+        assert_eq!(agent_app_url("http://127.0.0.1:3000/", None, None), "http://127.0.0.1:3000/en/agent-app");
     }
 
     #[test]
     fn agent_url_query_passthrough_and_encoding() {
-        assert_eq!(agent_app_url(BASE, Some("p1"), Some("t9")), "http://127.0.0.1:3000/en?project=p1&task=t9");
-        assert_eq!(agent_app_url(BASE, Some("my proj"), None), "http://127.0.0.1:3000/en?project=my%20proj");
-        assert_eq!(agent_app_url(BASE, Some(""), Some("t")), "http://127.0.0.1:3000/en?task=t");
+        assert_eq!(agent_app_url(BASE, Some("p1"), Some("t9")), "http://127.0.0.1:3000/en/agent-app?project=p1&task=t9");
+        assert_eq!(agent_app_url(BASE, Some("my proj"), None), "http://127.0.0.1:3000/en/agent-app?project=my%20proj");
+        assert_eq!(agent_app_url(BASE, Some(""), Some("t")), "http://127.0.0.1:3000/en/agent-app?task=t");
     }
 
     #[test]
@@ -224,8 +213,6 @@ mod tests {
 
     #[test]
     fn agent_url_detection() {
-        assert!(is_agent_url(BASE, "http://127.0.0.1:3000/en"));
-        assert!(is_agent_url(BASE, "http://127.0.0.1:3000/en?project=a&task=b"));
         assert!(is_agent_url(BASE, "http://127.0.0.1:3000/en/agent-app"));
         assert!(is_agent_url(BASE, "http://127.0.0.1:3000/en/agent-app?project=a&task=b"));
         assert!(!is_agent_url(BASE, "http://127.0.0.1:3000/en/agent-application"));
@@ -234,7 +221,7 @@ mod tests {
 
     #[test]
     fn agent_tab_preserves_query_when_already_on_agent() {
-        let cur = "http://127.0.0.1:3000/en?project=p&task=t";
+        let cur = "http://127.0.0.1:3000/en/agent-app?project=p&task=t";
         let (target, remembered) = tab_target(BASE, "agent", Some(cur), None);
         assert_eq!(target, cur);
         assert_eq!(remembered, None);
@@ -244,13 +231,13 @@ mod tests {
     fn agent_tab_from_dashboard_remembers_page() {
         let cur = "http://127.0.0.1:3000/en/projects/7";
         let (target, remembered) = tab_target(BASE, "agent", Some(cur), None);
-        assert_eq!(target, "http://127.0.0.1:3000/en");
+        assert_eq!(target, "http://127.0.0.1:3000/en/agent-app");
         assert_eq!(remembered.as_deref(), Some(cur));
     }
 
     #[test]
     fn dashboard_tab_restores_last_page_from_agent() {
-        let cur = "http://127.0.0.1:3000/en?project=p";
+        let cur = "http://127.0.0.1:3000/en/agent-app?project=p";
         let (target, remembered) = tab_target(BASE, "dashboard", Some(cur), Some("http://127.0.0.1:3000/en/projects/7"));
         assert_eq!(target, "http://127.0.0.1:3000/en/projects/7");
         assert_eq!(remembered.as_deref(), Some("http://127.0.0.1:3000/en/projects/7"));
@@ -258,7 +245,7 @@ mod tests {
 
     #[test]
     fn dashboard_tab_defaults_home_and_stays_put() {
-        assert_eq!(tab_target(BASE, "dashboard", Some("http://127.0.0.1:3000/en"), None).0, "http://127.0.0.1:3000/en");
+        assert_eq!(tab_target(BASE, "dashboard", Some("http://127.0.0.1:3000/en/agent-app"), None).0, "http://127.0.0.1:3000/en");
         assert_eq!(tab_target(BASE, "dashboard", Some("about:blank"), None).0, "http://127.0.0.1:3000/en");
         let here = "http://127.0.0.1:3000/en/graph";
         assert_eq!(tab_target(BASE, "dashboard", Some(here), None).0, here);
