@@ -257,6 +257,7 @@ class AgentSettingsUpdate(BaseModel):
     default_model: Optional[str] = None
     providers: Optional[list[AgentProviderConfig]] = None
     api_keys: Optional[dict[str, str]] = None  # write-only raw keys
+    remove_provider_ids: Optional[list[str]] = None  # custom provider ids to delete
     filter_provider: Optional[str] = None
     judgment_provider: Optional[str] = None
     threshold_overrides: Optional[dict] = None

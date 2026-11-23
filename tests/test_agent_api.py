@@ -1058,3 +1058,102 @@ async def test_implement_rejects_live_worker(client):
             await runtime.implement("noor", tid, worker_live=lambda _tid: True)
     finally:
         api_module.supervisor = None
+
+
+_OPENROUTER = {
+    "id": "openrouter", "name": "OpenRouter",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible",
+}
+
+
+def test_put_settings_accepts_custom_openai_compatible_provider(client):
+    resp = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "filter_provider": "openrouter",
+        "judgment_provider": "openrouter",
+        "providers": [_OPENROUTER],
+        "api_keys": {"openrouter": "sk-or"},
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filter_provider"] == "openrouter"
+    assert body["judgment_provider"] == "openrouter"
+    assert body["has_keys"]["openrouter"] is True
+    custom = next(p for p in body["providers"] if p["id"] == "openrouter")
+    assert custom["base_url"].startswith("https://openrouter.ai")
+
+
+def test_put_settings_rejects_custom_id_colliding_with_builtin(client):
+    resp = client.put("/api/agent/settings", json={
+        "providers": [{
+            "id": "ollama", "name": "Fake", "base_url": "http://x", "model_ids": ["m"],
+            "kind": "openai_compatible",
+        }],
+    })
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("bad_id", ["none", "Bad Id", "x", "has.dot"])
+def test_put_settings_rejects_invalid_custom_provider_id(client, bad_id):
+    resp = client.put("/api/agent/settings", json={
+        "providers": [{**_OPENROUTER, "id": bad_id}],
+    })
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("override", [{"base_url": "  "}, {"model_ids": []}, {"model_ids": ["  "]}])
+def test_put_settings_rejects_custom_provider_missing_base_url_or_model(client, override):
+    resp = client.put("/api/agent/settings", json={"providers": [{**_OPENROUTER, **override}]})
+    assert resp.status_code == 400
+
+
+def test_put_settings_custom_judgment_gliclass_still_rejected(client):
+    resp = client.put("/api/agent/settings", json={
+        "judgment_provider": "gliclass", "providers": [_OPENROUTER],
+    })
+    assert resp.status_code == 400
+    assert "gliclass" in resp.json()["detail"]
+
+
+def test_put_settings_rejects_unknown_custom_role(client):
+    resp = client.put("/api/agent/settings", json={"filter_provider": "openrouter"})
+    assert resp.status_code == 400
+
+
+def test_put_settings_remove_provider_ids_blocked_when_in_use(client):
+    seeded = client.put("/api/agent/settings", json={
+        "filter_provider": "openrouter",
+        "judgment_provider": "none",
+        "providers": [_OPENROUTER],
+    })
+    assert seeded.status_code == 200
+    blocked = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert blocked.status_code == 400
+    assert "openrouter" in blocked.json()["detail"]
+    still = client.get("/api/agent/settings").json()
+    assert any(p["id"] == "openrouter" for p in still["providers"])
+    assert still["filter_provider"] == "openrouter"
+    client.put("/api/agent/settings", json={"filter_provider": "none", "judgment_provider": "none", "default_model": "deepseek-chat"})
+    ok = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert ok.status_code == 200
+    assert all(p["id"] != "openrouter" for p in ok.json()["providers"])
+
+
+def test_put_settings_remove_provider_blocked_when_default_model_uses_it(client):
+    client.put("/api/agent/settings", json={"default_model": "llama-3.1-8b", "providers": [_OPENROUTER]})
+    blocked = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert blocked.status_code == 400
+    assert "openrouter" in blocked.json()["detail"]
+
+
+def test_put_settings_remove_builtin_provider_rejected(client):
+    resp = client.put("/api/agent/settings", json={"remove_provider_ids": ["deepseek"]})
+    assert resp.status_code == 400
+
+
+def test_put_settings_remove_provider_drops_its_api_key(client):
+    client.put("/api/agent/settings", json={"providers": [_OPENROUTER], "api_keys": {"openrouter": "sk-or"}})
+    ok = client.put("/api/agent/settings", json={"remove_provider_ids": ["openrouter"]})
+    assert ok.status_code == 200
+    assert not ok.json()["has_keys"].get("openrouter")

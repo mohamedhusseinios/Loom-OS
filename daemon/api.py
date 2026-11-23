@@ -13,7 +13,7 @@ from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from daemon.agent_credentials import merge_providers
+from daemon.agent_credentials import BUILTIN_PROVIDER_IDS, PROVIDER_KIND_OPENAI, is_valid_custom_provider_id, merge_providers
 from daemon.registry import AgentRegistry, ProjectExistsError
 from daemon.graph_engine import GraphEngine
 from daemon.router import Router
@@ -905,17 +905,58 @@ def _ollama_model_set(providers: list) -> bool:
     return False
 
 
+def _provider_has_model(provider: dict) -> bool:
+    return any(isinstance(model, str) and model.strip() for model in (provider.get("model_ids") or []))
+
+
+def _validate_custom_provider_rows(payload: AgentSettingsUpdate) -> None:
+    for provider in payload.providers or []:
+        pid = provider.id
+        if pid in BUILTIN_PROVIDER_IDS:
+            if provider.kind == PROVIDER_KIND_OPENAI:
+                raise HTTPException(status_code=400, detail=f"Custom provider id '{pid}' collides with a built-in provider")
+            continue
+        if pid == "none" or not is_valid_custom_provider_id(pid):
+            raise HTTPException(status_code=400, detail=f"Custom provider id '{pid}' is invalid (use lowercase letters, digits, - or _, min 2 chars, not 'none')")
+        if provider.kind not in (None, PROVIDER_KIND_OPENAI):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' must have kind openai_compatible")
+        if not provider.base_url.strip():
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' requires a base_url")
+        if not _provider_has_model(provider.model_dump()):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{pid}' requires a model")
+
+
+def _validate_provider_removal(payload: AgentSettingsUpdate, current, merged: list[dict], filt: str | None, judg: str | None) -> None:
+    removed = set(payload.remove_provider_ids or [])
+    for pid in sorted(removed):
+        if pid in BUILTIN_PROVIDER_IDS:
+            raise HTTPException(status_code=400, detail=f"Built-in provider '{pid}' cannot be removed")
+        if pid == filt or pid == judg:
+            role = "filter_provider" if pid == filt else "judgment_provider"
+            raise HTTPException(status_code=400, detail=f"Provider '{pid}' is in use as {role}")
+    default_model = payload.default_model or current.default_model
+    remaining_models = {m for p in merged if p.get("id") not in removed for m in (p.get("model_ids") or [])}
+    for provider in merged:
+        if provider.get("id") in removed and default_model in (provider.get("model_ids") or []) and default_model not in remaining_models:
+            raise HTTPException(status_code=400, detail=f"Provider '{provider['id']}' is in use by default_model '{default_model}'")
+
+
 def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
+    _validate_custom_provider_rows(payload)
     filt_in = payload.filter_provider
     judg_in = payload.judgment_provider
     filt = _normalize_decision_provider(filt_in if filt_in is not None else current.filter_provider)
     judg = _normalize_decision_provider(judg_in if judg_in is not None else current.judgment_provider)
-    if filt_in is not None and filt not in _FILTER_PROVIDERS:
-        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, or none")
+    merged = merge_providers(list(current.providers), list(payload.providers) if payload.providers is not None else None)
+    _validate_provider_removal(payload, current, merged, filt, judg)
+    removed = set(payload.remove_provider_ids or [])
+    custom_ids = {p["id"] for p in merged if p["id"] not in BUILTIN_PROVIDER_IDS and p["id"] not in removed and p.get("kind") == PROVIDER_KIND_OPENAI}
+    if filt_in is not None and filt not in _FILTER_PROVIDERS and filt not in custom_ids:
+        raise HTTPException(status_code=400, detail="filter_provider must be typesafe, ollama, gliclass, none, or a custom openai_compatible provider id")
     if judg_in is not None and judg == "gliclass":
         raise HTTPException(status_code=400, detail="judgment_provider=gliclass is not supported")
-    if judg_in is not None and judg not in _JUDGMENT_PROVIDERS:
-        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, or none")
+    if judg_in is not None and judg not in _JUDGMENT_PROVIDERS and judg not in custom_ids:
+        raise HTTPException(status_code=400, detail="judgment_provider must be typesafe, ollama, none, or a custom openai_compatible provider id")
     if filt_in is not None:
         payload.filter_provider = filt
     if judg_in is not None:
@@ -923,9 +964,12 @@ def _validate_decision_settings(payload: AgentSettingsUpdate, current) -> None:
     touches_ollama = filt == "ollama" or judg == "ollama"
     sets_ollama_role = _normalize_decision_provider(filt_in) == "ollama" or _normalize_decision_provider(judg_in) == "ollama"
     updates_ollama = any(provider.id == "ollama" for provider in (payload.providers or []))
-    merged = merge_providers(list(current.providers), list(payload.providers) if payload.providers is not None else None)
     if touches_ollama and (sets_ollama_role or updates_ollama) and not _ollama_model_set(merged):
         raise HTTPException(status_code=400, detail="Ollama decision provider requires a model")
+    for role_value in {filt, judg} & custom_ids:
+        provider = next(p for p in merged if p["id"] == role_value)
+        if not _provider_has_model(provider):
+            raise HTTPException(status_code=400, detail=f"Custom provider '{role_value}' requires a model")
 
 
 @app.put("/api/agent/settings")
