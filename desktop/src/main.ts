@@ -1,30 +1,44 @@
-type TabId = "agent" | "dashboard";
+import { invoke } from "@tauri-apps/api/core";
 
-const PLACEHOLDER_URLS: Record<TabId, string> = {
-  agent: "placeholder://agent",
-  dashboard: "placeholder://dashboard",
-};
+type TabId = "agent" | "dashboard";
 
 let selected: TabId = "agent";
 
-function render(): void {
+function tabFromUrl(url: string): TabId {
+  return /\/agent-app(?:[/?#]|$)/.test(url) ? "agent" : "dashboard";
+}
+
+function render(url: string): void {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     const active = button.dataset.tab === selected;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
   });
-  const url = document.querySelector<HTMLElement>("#url");
-  if (url) url.textContent = PLACEHOLDER_URLS[selected];
+  const el = document.querySelector<HTMLElement>("#url");
+  if (el) el.textContent = url;
 }
 
-function selectTab(tab: TabId): void {
+async function selectTab(tab: TabId): Promise<void> {
   selected = tab;
-  render();
+  try {
+    render(await invoke<string>("navigate_tab", { tab }));
+  } catch (e) {
+    render(`error: ${String(e)}`);
+  }
+}
+
+// Content links (e.g. inside the dashboard) change the URL without the chrome knowing; keep tab + URL display in sync.
+async function syncFromContent(): Promise<void> {
+  const url = await invoke<string | null>("content_url").catch(() => null);
+  if (!url || url === "about:blank") return;
+  selected = tabFromUrl(url);
+  render(url);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
-    button.addEventListener("click", () => selectTab(button.dataset.tab as TabId));
+    button.addEventListener("click", () => void selectTab(button.dataset.tab as TabId));
   });
-  render();
+  render("");
+  window.setInterval(() => void syncFromContent(), 1000);
 });

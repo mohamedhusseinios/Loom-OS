@@ -65,7 +65,7 @@ pub fn is_dashboard_ready(status: u16) -> bool {
     (200..400).contains(&status)
 }
 
-async fn http_get_status(url: &str) -> Option<u16> {
+pub(crate) async fn http_get_status(url: &str) -> Option<u16> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let (host, port, path) = parse_http_url(url)?;
     let work = async {
@@ -310,9 +310,20 @@ impl StackManager {
     /// Kill owned process trees; no-op when attached to an externally managed stack.
     /// Safe to call from any thread at any time (GUI exit, SIGINT handler), including mid-`ensure_and_start`.
     pub fn shutdown(&self) {
+        self.stop(true);
+    }
+
+    /// Stop owned children like `shutdown`, but leave the manager reusable (does not latch `shutting_down`).
+    pub fn stop_for_restart(&self) {
+        self.stop(false);
+    }
+
+    fn stop(&self, latch: bool) {
         let children = {
             let mut g = self.lock();
-            g.shutting_down = true; // stop any in-flight ensure from spawning more
+            if latch {
+                g.shutting_down = true; // stop any in-flight ensure from spawning more
+            }
             if !g.owned {
                 return;
             }
