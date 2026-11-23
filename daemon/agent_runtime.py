@@ -16,7 +16,7 @@ import coding_agent.patterns as patterns_pkg
 from coding_agent.patterns import load_patterns
 from coding_agent.selection import RankedStrategy
 from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
-from daemon.agent_credentials import resolve_chat_key
+from daemon.agent_credentials import is_custom_chat_provider_id, resolve_chat_key
 from daemon.decision import NullDecisionClient, DecisionClient, build_decision_clients, resolve_decision_config
 from daemon.llm_client import LlmError, build_llm_client
 from daemon.models import (
@@ -205,7 +205,7 @@ class AgentRuntime:
         stored_key, base_url, model, api_style = creds.llm_from_stored()
         provider_id = creds.active_chat_provider_id()
         api_key = resolve_chat_key(provider_id, stored_key)
-        return build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style), model
+        return build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style, allow_missing_key=is_custom_chat_provider_id(provider_id)), model
 
     async def _decision_settings(self) -> tuple[object, dict[str, str]]:
         settings = await self.registry.get_agent_settings(mask_keys=True)

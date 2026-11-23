@@ -10,7 +10,7 @@ import urllib.error
 from daemon.jev_client import (
     JevClient, JevError, resolve_systemone_url, _retry_delay, MAX_RETRY_SLEEP_SEC,
 )
-from daemon.llm_client import LlmClient, LlmError
+from daemon.llm_client import LlmClient, LlmError, build_llm_client, resolve_chat_completions_url
 
 
 def _http_error(code: int, body: bytes = b"err", retry_after=None) -> urllib.error.HTTPError:
@@ -140,4 +140,41 @@ def test_llm_chat_parses_content():
 def test_llm_missing_key_raises():
     client = LlmClient(api_key="")
     with pytest.raises(LlmError):
+        client.chat([{"role": "user", "content": "hi"}])
+
+
+def test_resolve_chat_completions_url_appends_v1_to_bare_host():
+    assert resolve_chat_completions_url("https://api.deepseek.com") == "https://api.deepseek.com/v1/chat/completions"
+    assert resolve_chat_completions_url("https://api.deepseek.com/") == "https://api.deepseek.com/v1/chat/completions"
+
+
+def test_resolve_chat_completions_url_does_not_double_v1():
+    assert resolve_chat_completions_url("https://openrouter.ai/api/v1") == "https://openrouter.ai/api/v1/chat/completions"
+    assert resolve_chat_completions_url("https://api.groq.com/openai/v1") == "https://api.groq.com/openai/v1/chat/completions"
+    assert resolve_chat_completions_url("http://localhost:11434/v1/") == "http://localhost:11434/v1/chat/completions"
+    full = "http://localhost:1234/v1/chat/completions"
+    assert resolve_chat_completions_url(full) == full
+    assert resolve_chat_completions_url(full + "/") == full
+
+
+def test_llm_custom_root_posts_single_v1_and_keyless_omits_auth():
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        return _ok_response({"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+    with patch("daemon.llm_client._open_http", side_effect=fake_urlopen):
+        client = build_llm_client("", "http://localhost:9000/v1", allow_missing_key=True)
+        assert client.available is True
+        assert client.chat([{"role": "user", "content": "hi"}], model="llama") == "ok"
+    assert captured["url"] == "http://localhost:9000/v1/chat/completions"
+    assert captured["auth"] is None
+
+
+def test_llm_deepseek_without_key_stays_unavailable():
+    client = build_llm_client("", "https://api.deepseek.com")
+    assert client.available is False
+    with pytest.raises(LlmError, match="API key"):
         client.chat([{"role": "user", "content": "hi"}])

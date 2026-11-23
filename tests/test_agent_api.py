@@ -192,6 +192,43 @@ async def test_exited_worker_seals_run_failed(client):
 
 
 @pytest.mark.asyncio
+async def test_respawned_worker_is_not_sealed_failed(client, monkeypatch):
+    import daemon.supervisor as sup_mod
+    from daemon.supervisor import WorkerSupervisor
+
+    class _LiveProc:
+        def __init__(self, cmd, *args, **kwargs):
+            self._returncode = None
+        def poll(self):
+            return self._returncode
+
+    monkeypatch.setattr(sup_mod.subprocess, "Popen", _LiveProc)
+    reg = api_module.registry
+    tid = await reg.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Retry me", instruction="try again",
+    ))
+    with patch.object(api_module, "_route_task_execution", return_value=True):
+        created = client.post(f"/api/projects/noor/tasks/{tid}/implement")
+    assert created.status_code == 200
+    first = (await reg.list_agent_runs(task_id=tid))[0]
+    supervisor = WorkerSupervisor()
+    supervisor.spawn("noor", "loom-agent", "/tmp/noor", tid)
+    supervisor._procs[tid]._returncode = 1
+    assert tid in supervisor.exited_task_ids()
+    await reg.create_agent_run(
+        task_id=tid, project="noor", run_dir=first.run_dir + "-retry", status="running",
+    )
+    supervisor.spawn("noor", "loom-agent", "/tmp/noor", tid)
+    assert supervisor.is_running(tid) is True
+    sealed = await agent_runtime_module.seal_exited_worker_runs(
+        reg, supervisor, None, JsonlEventTail(),
+    )
+    assert sealed == 0
+    runs = await reg.list_agent_runs(task_id=tid)
+    assert {run.status for run in runs} == {"running"}
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_writes_cancel_file(client):
     reg = api_module.registry
     tid = await reg.create_agent_task(AgentTaskCreatePayload(
@@ -1066,6 +1103,36 @@ _OPENROUTER = {
     "base_url": "https://openrouter.ai/api/v1",
     "model_ids": ["llama-3.1-8b"], "kind": "openai_compatible",
 }
+
+
+def test_keyless_custom_chat_posts_single_v1(client, monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    saved = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "chat_provider": "openrouter",
+        "providers": [_OPENROUTER],
+    })
+    assert saved.status_code == 200
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "hello local"}}], "usage": {}}
+        ).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    with patch("daemon.llm_client._open_http", side_effect=fake_urlopen):
+        chat = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})
+    assert chat.status_code == 200
+    assert chat.json()["reply"] == "hello local"
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert captured["auth"] is None
 
 
 def test_put_settings_accepts_custom_openai_compatible_provider(client):

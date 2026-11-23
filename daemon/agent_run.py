@@ -28,7 +28,7 @@ from pathlib import Path
 from coding_agent.events import JsonlEventSink
 from coding_agent.runners.react import ReactRunner
 from coding_agent.session import RunSession
-from daemon.agent_credentials import resolve_chat_key
+from daemon.agent_credentials import is_custom_chat_provider_id, resolve_chat_key
 from daemon.coding_adapters import LlmClientAdapter, SimpleUsageMeter, StubContextSource, WorktreeSandbox
 from daemon.llm_client import LlmError, build_llm_client
 
@@ -45,6 +45,17 @@ def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str,
     return api_key, base_url, model, api_style, creds.active_chat_provider_id()
 
 
+def _resolve_llm_settings() -> tuple[str, str, str, str, str]:
+    """Return ``(api_key, base_url, model, api_style, provider_id)`` for this process."""
+    db_key, db_base, db_model, db_style, db_provider = load_llm_config_from_settings()
+    provider_id = os.environ.get("LOOM_AGENT_PROVIDER") or db_provider
+    api_key = resolve_chat_key(provider_id, db_key if provider_id == db_provider else "")
+    base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
+    model = os.environ.get("LOOM_AGENT_MODEL") or db_model
+    api_style = os.environ.get("LOOM_AGENT_API_STYLE") or db_style
+    return api_key, base_url, model, api_style, provider_id
+
+
 def resolve_llm_config() -> tuple[str, str, str, str]:
     """Match chat: dashboard settings first, then LOOM_AGENT_*/provider env.
 
@@ -52,13 +63,12 @@ def resolve_llm_config() -> tuple[str, str, str, str]:
     used when the effective provider is the stored one, and ``resolve_chat_key`` only
     falls back to ``DEEPSEEK_API_KEY`` for the deepseek preset (never a custom endpoint).
     """
-    db_key, db_base, db_model, db_style, db_provider = load_llm_config_from_settings()
-    provider_id = os.environ.get("LOOM_AGENT_PROVIDER") or db_provider
-    api_key = resolve_chat_key(provider_id, db_key if provider_id == db_provider else "")
-    base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
-    model = os.environ.get("LOOM_AGENT_MODEL") or db_model
-    api_style = os.environ.get("LOOM_AGENT_API_STYLE") or db_style
+    api_key, base_url, model, api_style, _provider_id = _resolve_llm_settings()
     return api_key, base_url, model, api_style
+
+
+def _llm_client_for_process(api_key: str, base_url: str, api_style: str, provider_id: str):
+    return build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style, allow_missing_key=is_custom_chat_provider_id(provider_id))
 
 
 def _events_path(manifest: dict, manifest_file: Path) -> Path:
@@ -148,7 +158,7 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
     manifest = dict(loaded)
     if prompt and not manifest.get("prompt"):
         manifest["prompt"] = prompt
-    api_key, base_url, resolved_model, api_style = resolve_llm_config()
+    api_key, base_url, resolved_model, api_style, provider_id = _resolve_llm_settings()
     if model:
         resolved_model = model
     if not manifest.get("model"):
@@ -163,7 +173,7 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
             "executed_runner": "react",
         })
     try:
-        client = build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style)
+        client = _llm_client_for_process(api_key, base_url, api_style, provider_id)
         session = RunSession(
             manifest,
             WorktreeSandbox(_worktree_root(manifest)),
@@ -195,10 +205,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.prompt:
         parser.error("--prompt is required unless --manifest is set")
 
-    api_key, base_url, model, api_style = resolve_llm_config()
+    api_key, base_url, model, api_style, provider_id = _resolve_llm_settings()
     if args.model:
         model = args.model
-    client = build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style)
+    client = _llm_client_for_process(api_key, base_url, api_style, provider_id)
     messages = [
         {
             "role": "system",

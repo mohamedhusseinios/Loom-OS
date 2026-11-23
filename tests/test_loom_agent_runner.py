@@ -396,3 +396,48 @@ def test_resolve_llm_config_deepseek_env_fallback_still_works(tmp_path, monkeypa
     monkeypatch.delenv("LOOM_AGENT_PROVIDER", raising=False)
     key, _, _, _ = resolve_llm_config()
     assert key == "sk-process-env"
+
+
+def test_run_manifest_keyless_custom_posts_openai_v1_root(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import MagicMock, patch
+    from daemon.agent_run import run_manifest
+
+    manifest = {
+        "prompt": "say hi",
+        "model": "llama",
+        "run_dir": str(tmp_path / "run"),
+        "events_path": str(tmp_path / "run" / "events.jsonl"),
+        "worktree": str(tmp_path),
+        "step_limit": 2,
+        "token_limit": 1000,
+        "cost_limit_usd": 1,
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("LOOM_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setenv("LOOM_AGENT_PROVIDER", "local-llm")
+    monkeypatch.setenv("LOOM_AGENT_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("LOOM_AGENT_MODEL", "llama")
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-should-not-be-sent")
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        body = json.dumps({
+            "choices": [{"message": {"content": '{"thought":"ok","tool":null,"done":true}'}}],
+            "usage": {},
+        }).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    with patch("daemon.llm_client._open_http", side_effect=fake_urlopen):
+        code = run_manifest(str(path))
+    assert code == 0
+    assert captured["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert captured["auth"] is None

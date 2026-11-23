@@ -48,6 +48,9 @@ class WorkerSupervisor:
         if agent == "loom-agent":
             env = self._loom_agent_env(manifest_path)
         self._procs[task_id] = subprocess.Popen(cmd, env=env)
+        # This process replaces any earlier exit. Leaving the id in _exited
+        # makes the JSONL tail seal the replacement run as worker_exit.
+        self._exited.discard(task_id)
 
     @staticmethod
     def _loom_agent_env(manifest_path: str | None = None) -> dict[str, str]:

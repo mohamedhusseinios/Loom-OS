@@ -37,10 +37,27 @@ def _open_http(req: urllib.request.Request, timeout: float):
 DEFAULT_BASE_URL = DEFAULT_DEEPSEEK_BASE_URL
 DEFAULT_MODEL = DEFAULT_DEEPSEEK_MODEL
 ANTHROPIC_VERSION = "2023-06-01"
+_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
+_V1_SUFFIX = "/v1"
 
 
 class LlmError(Exception):
     """Raised when the chat completion call fails."""
+
+
+def resolve_chat_completions_url(base_url: str) -> str:
+    """Return a POST URL for ``/v1/chat/completions``.
+
+    A bare host such as ``https://api.deepseek.com`` gets ``/v1`` inserted.
+    A root that already ends in ``/v1`` (OpenRouter, Groq, LM Studio, Ollama)
+    or in ``/chat/completions`` is not doubled.
+    """
+    url = (base_url or "").strip().rstrip("/")
+    if url.endswith(_CHAT_COMPLETIONS_SUFFIX):
+        return url
+    if url.endswith(_V1_SUFFIX):
+        return f"{url}{_CHAT_COMPLETIONS_SUFFIX}"
+    return f"{url}{_V1_SUFFIX}{_CHAT_COMPLETIONS_SUFFIX}"
 
 
 class LlmClientProtocol(Protocol):
@@ -154,35 +171,36 @@ def list_remote_models(api_key: str, base_url: str, api_style: str = API_STYLE_O
 class LlmClient:
     """Minimal chat-completions client for OpenAI-compatible APIs."""
 
-    def __init__(self, api_key: str | None = None, base_url: str = DEFAULT_BASE_URL, timeout: float = 120.0):
+    def __init__(self, api_key: str | None = None, base_url: str = DEFAULT_BASE_URL, timeout: float = 120.0, *, allow_missing_key: bool = False):
         self.api_key = api_key if api_key is not None else os.environ.get("DEEPSEEK_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.allow_missing_key = allow_missing_key
         self.last_usage: dict[str, Any] | None = None
         self.api_style = API_STYLE_OPENAI
 
     @property
     def available(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key) or self.allow_missing_key
 
     def chat(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> str:
         """Return assistant content for a chat completion request."""
-        if not self.api_key:
+        if not self.api_key and not self.allow_missing_key:
             raise LlmError("API key not configured — add it in Agent settings")
-        url = f"{self.base_url}/v1/chat/completions"
+        url = resolve_chat_completions_url(self.base_url)
         body = json.dumps({
             "model": model,
             "messages": messages,
             "temperature": 0.2,
         }).encode()
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         payload = _http_json(
             url,
             method="POST",
             body=body,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=self.timeout,
         )
         usage = payload.get("usage") if isinstance(payload, dict) else None
@@ -264,8 +282,8 @@ class AnthropicLlmClient:
         return _parse_chat_json(self.chat(messages, model=model))
 
 
-def build_llm_client(api_key: str, base_url: str, api_style: str = API_STYLE_OPENAI, timeout: float = 120.0) -> LlmClient | AnthropicLlmClient:
+def build_llm_client(api_key: str, base_url: str, api_style: str = API_STYLE_OPENAI, timeout: float = 120.0, *, allow_missing_key: bool = False) -> LlmClient | AnthropicLlmClient:
     style = normalize_api_style(api_style)
     if style == API_STYLE_ANTHROPIC:
         return AnthropicLlmClient(api_key=api_key, base_url=base_url or DEFAULT_ANTHROPIC_BASE_URL, timeout=timeout)
-    return LlmClient(api_key=api_key, base_url=base_url or DEFAULT_BASE_URL, timeout=timeout)
+    return LlmClient(api_key=api_key, base_url=base_url or DEFAULT_BASE_URL, timeout=timeout, allow_missing_key=allow_missing_key)
