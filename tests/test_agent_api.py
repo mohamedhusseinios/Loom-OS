@@ -12,6 +12,7 @@ import daemon.api as api_module
 import daemon.agent_runtime as agent_runtime_module
 from daemon.agent_runtime import JsonlEventTail, drain_run_jsonl, emit_new_run_events
 from daemon.graph_engine import GraphEngine
+from daemon.llm_client import LlmError
 from daemon.models import AgentInfo, AgentTaskCreatePayload, AgentTaskStatus
 from daemon.orchestrator import SuggestResult
 from daemon.registry import AgentRegistry
@@ -1158,3 +1159,308 @@ def test_put_settings_remove_provider_drops_its_api_key(client):
     assert ok.status_code == 200
     assert not ok.json()["has_keys"].get("openrouter")
 
+
+def test_chat_provider_round_trip(client):
+    res = client.put("/api/agent/settings", json={
+        "chat_provider": "openai",
+        "default_model": "gpt-4o-mini",
+        "providers": [{
+            "id": "openai",
+            "name": "OpenAI",
+            "base_url": "https://api.openai.com",
+            "model_ids": ["gpt-4o-mini"],
+            "api_style": "openai",
+        }],
+        "api_keys": {"openai": "sk-openai-1234"},
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["chat_provider"] == "openai"
+    assert body["default_model"] == "gpt-4o-mini"
+    openai = next(p for p in body["providers"] if p["id"] == "openai")
+    assert openai["api_style"] == "openai"
+    assert body["has_keys"]["openai"] is True
+    got = client.get("/api/agent/settings")
+    assert got.json()["chat_provider"] == "openai"
+
+
+def test_chat_provider_rejects_decision_id(client):
+    res = client.put("/api/agent/settings", json={"chat_provider": "typesafe"})
+    assert res.status_code == 400
+
+
+def test_list_models_openai_compatible(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "chat_provider": "deepseek",
+        "api_keys": {"deepseek": "sk-list-test"},
+        "providers": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "model_ids": ["deepseek-chat"],
+            "api_style": "openai",
+        }],
+    })
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        assert api_key == "sk-list-test"
+        assert "deepseek" in base_url
+        assert api_style == "openai"
+        return ["deepseek-chat", "deepseek-reasoner"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={"provider_id": "deepseek"})
+    assert res.status_code == 200, res.text
+    assert res.json()["models"] == ["deepseek-chat", "deepseek-reasoner"]
+    assert "sk-list-test" not in res.text
+
+
+def test_list_models_uses_draft_key_and_anthropic_style(client, monkeypatch):
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        assert api_key == "sk-draft-ant"
+        assert api_style == "anthropic"
+        assert "anthropic" in base_url
+        return ["claude-sonnet-4-5"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "api_style": "anthropic",
+        "api_key": "sk-draft-ant",
+    })
+    assert res.status_code == 200, res.text
+    assert res.json()["models"] == ["claude-sonnet-4-5"]
+    assert "sk-draft-ant" not in res.text
+
+
+def test_list_models_does_not_send_stored_key_to_other_host(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "chat_provider": "deepseek",
+        "api_keys": {"deepseek": "sk-stored-secret"},
+        "providers": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "model_ids": ["deepseek-chat"],
+            "api_style": "openai",
+        }],
+    })
+    seen = {}
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        seen["api_key"] = api_key
+        seen["base_url"] = base_url
+        return ["deepseek-chat"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "https://attacker.example/collect",
+    })
+    assert res.status_code == 400
+    assert seen == {}
+    assert "sk-stored-secret" not in res.text
+    assert "attacker.example" not in res.text
+
+    masked = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "https://api.openai.com",
+        "api_key": "••••cret",
+    })
+    assert masked.status_code == 400
+    assert seen == {}
+    assert "sk-stored-secret" not in masked.text
+
+
+def test_list_models_does_not_send_env_key_to_other_host(client, monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-secret")
+    monkeypatch.setenv("LOOM_AGENT_API_KEY", "sk-loom-secret")
+    seen = {}
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        seen["api_key"] = api_key
+        seen["base_url"] = base_url
+        return ["gpt-4o"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "https://api.openai.com",
+    })
+    assert res.status_code == 400
+    assert seen == {}
+    assert "sk-env-secret" not in res.text
+    assert "sk-loom-secret" not in res.text
+
+    drafted = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "https://api.openai.com",
+        "api_key": "sk-draft-only",
+    })
+    assert drafted.status_code == 200, drafted.text
+    assert seen["api_key"] == "sk-draft-only"
+    assert seen["base_url"] == "https://api.openai.com"
+
+    seen.clear()
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    saved = client.post("/api/agent/providers/list-models", json={"provider_id": "deepseek"})
+    assert saved.status_code == 200, saved.text
+    assert seen["api_key"] == "sk-env-secret"
+    assert seen["base_url"] == "https://api.deepseek.com"
+    assert "sk-env-secret" not in saved.text
+
+
+def test_list_models_matching_url_still_uses_stored_key(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "api_keys": {"deepseek": "sk-stored-secret"},
+        "providers": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "model_ids": ["deepseek-chat"],
+            "api_style": "openai",
+        }],
+    })
+    seen = {}
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        seen["api_key"] = api_key
+        seen["base_url"] = base_url
+        return ["deepseek-chat"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "https://API.DeepSeek.com/",
+    })
+    assert res.status_code == 200, res.text
+    assert seen["api_key"] == "sk-stored-secret"
+    assert seen["base_url"] == "https://api.deepseek.com"
+    assert "sk-stored-secret" not in res.text
+
+
+def test_list_models_hides_provider_error_body(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "api_keys": {"deepseek": "sk-stored-secret"},
+        "providers": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "model_ids": ["deepseek-chat"],
+            "api_style": "openai",
+        }],
+    })
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        raise LlmError("LLM HTTP 401: bearer sk-stored-secret echoed")
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    res = client.post("/api/agent/providers/list-models", json={"provider_id": "deepseek"})
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Could not list models from the provider"
+    assert "sk-stored-secret" not in res.text
+    assert "echoed" not in res.text
+
+
+def test_list_models_blocks_metadata_and_private_urls(client, monkeypatch):
+    client.put("/api/agent/settings", json={
+        "api_keys": {"custom-box": "sk-lan-secret", "deepseek": "sk-stored-secret"},
+        "providers": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+                "api_style": "openai",
+            },
+            {
+                "id": "custom-box",
+                "name": "LAN",
+                "base_url": "http://192.168.1.20:11434",
+                "model_ids": ["qwen"],
+                "api_style": "openai",
+            },
+        ],
+    })
+    seen = {}
+
+    def fake_list(api_key, base_url, api_style="openai", timeout=30.0):
+        seen["api_key"] = api_key
+        seen["base_url"] = base_url
+        return ["qwen"]
+
+    monkeypatch.setattr(api_module, "list_remote_models", fake_list)
+    for body in (
+        {"provider_id": "deepseek", "base_url": "http://169.254.169.254/latest/meta-data", "api_key": "sk-draft"},
+        {"provider_id": "deepseek", "base_url": "http://10.1.2.3:11434", "api_key": "sk-draft"},
+        {"provider_id": "deepseek", "base_url": "file:///etc/passwd", "api_key": "sk-draft"},
+        {"provider_id": "deepseek", "base_url": "https://169.254.169.254", "api_key": "sk-draft"},
+    ):
+        res = client.post("/api/agent/providers/list-models", json=body)
+        assert res.status_code == 400, body
+        assert seen == {}
+        assert "sk-stored-secret" not in res.text
+        assert "169.254.169.254" not in res.text
+
+    lan = client.post("/api/agent/providers/list-models", json={"provider_id": "custom-box"})
+    assert lan.status_code == 200, lan.text
+    assert seen["api_key"] == "sk-lan-secret"
+    assert seen["base_url"] == "http://192.168.1.20:11434"
+
+    loopback = client.post("/api/agent/providers/list-models", json={
+        "provider_id": "deepseek",
+        "base_url": "http://127.0.0.1:11434",
+        "api_key": "sk-draft-local",
+    })
+    assert loopback.status_code == 200, loopback.text
+    assert seen["api_key"] == "sk-draft-local"
+    assert seen["base_url"] == "http://127.0.0.1:11434"
+
+
+def test_removing_custom_chat_provider_persists(client):
+    created = client.put("/api/agent/settings", json={
+        "chat_provider": "custom-gone",
+        "default_model": "llama-3",
+        "providers": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+                "api_style": "openai",
+            },
+            {
+                "id": "custom-gone",
+                "name": "Temp",
+                "base_url": "http://127.0.0.1:9",
+                "model_ids": ["llama-3"],
+                "api_style": "openai",
+            },
+        ],
+        "api_keys": {"custom-gone": "sk-temp-9999"},
+    })
+    assert created.status_code == 200, created.text
+    assert any(p["id"] == "custom-gone" for p in created.json()["providers"])
+    assert created.json()["has_keys"]["custom-gone"] is True
+
+    removed = client.put("/api/agent/settings", json={
+        "chat_provider": "deepseek",
+        "default_model": "deepseek-chat",
+        "providers": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com",
+                "model_ids": ["deepseek-chat"],
+                "api_style": "openai",
+            },
+        ],
+    })
+    assert removed.status_code == 200, removed.text
+    ids = {p["id"] for p in removed.json()["providers"]}
+    assert "custom-gone" not in ids
+    assert removed.json()["has_keys"].get("custom-gone") is not True
+    assert removed.json()["chat_provider"] == "deepseek"
+    again = client.get("/api/agent/settings")
+    assert "custom-gone" not in {p["id"] for p in again.json()["providers"]}

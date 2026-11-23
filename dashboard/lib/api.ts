@@ -498,9 +498,19 @@ export async function fetchFederatedReferences(
 
 // --- Loom Agent (orchestration loop) ---
 
+export interface AgentProvider {
+  id: string;
+  name: string;
+  base_url: string;
+  model_ids: string[];
+  api_style?: "openai" | "anthropic";
+  kind?: string;
+}
+
 export interface AgentSettings {
   default_model: string;
-  providers: { id: string; name: string; base_url: string; model_ids: string[]; kind?: string }[];
+  chat_provider: string;
+  providers: AgentProvider[];
   api_keys_masked: Record<string, string | null>;
   has_keys: Record<string, boolean>;
   filter_provider?: string | null;
@@ -553,6 +563,7 @@ export async function getAgentSettings(): Promise<AgentSettings> {
 
 export async function updateAgentSettings(payload: {
   default_model?: string;
+  chat_provider?: string;
   providers?: AgentSettings["providers"];
   api_keys?: Record<string, string>;
   remove_provider_ids?: string[];
@@ -564,6 +575,25 @@ export async function updateAgentSettings(payload: {
 }): Promise<AgentSettings> {
   const res = await fetch(`${BASE_URL}/api/agent/settings`, {
     method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    const message = typeof detail.detail === "string" ? detail.detail : `API error: ${res.status}`;
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+export async function listProviderModels(payload: {
+  provider_id?: string;
+  base_url?: string;
+  api_style?: "openai" | "anthropic";
+  api_key?: string;
+}): Promise<{ models: string[] }> {
+  const res = await fetch(`${BASE_URL}/api/agent/providers/list-models`, {
+    method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });

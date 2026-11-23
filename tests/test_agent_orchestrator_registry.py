@@ -18,8 +18,13 @@ async def test_default_settings_mask_empty_keys(reg, monkeypatch):
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     settings = await reg.get_agent_settings()
     assert settings.default_model == "deepseek-chat"
+    assert settings.chat_provider == "deepseek"
     assert any(p.id == "deepseek" for p in settings.providers)
+    assert any(p.id == "openai" for p in settings.providers)
+    assert any(p.id == "anthropic" for p in settings.providers)
     assert any(p.id == "typesafe" for p in settings.providers)
+    anthropic = next(p for p in settings.providers if p.id == "anthropic")
+    assert anthropic.api_style == "anthropic"
     assert settings.has_keys.get("deepseek") is False
     assert settings.has_keys.get("typesafe") is False
     assert settings.api_keys_masked == {} or all(
@@ -283,7 +288,7 @@ async def test_legacy_settings_gain_role_columns_without_forced_defaults(tmp_pat
         cursor = await reg.db.execute("PRAGMA table_info(agent_settings)")
         cols = {r[1] for r in await cursor.fetchall()}
         assert {
-            "filter_provider", "judgment_provider", "threshold_overrides_json",
+            "filter_provider", "judgment_provider", "threshold_overrides_json", "chat_provider",
             "selection_autonomy_enabled", "autonomy_min_fit", "autonomy_require_margin",
         } <= cols
         cursor = await reg.db.execute(
@@ -300,7 +305,7 @@ async def test_legacy_settings_gain_role_columns_without_forced_defaults(tmp_pat
         assert row["autonomy_require_margin"] == 1
         settings = await reg.get_agent_settings()
         ids = {p.id for p in settings.providers}
-        assert {"deepseek", "typesafe", "ollama", "gliclass"} <= ids
+        assert {"deepseek", "openai", "anthropic", "typesafe", "ollama", "gliclass"} <= ids
         assert settings.filter_provider is None
         assert settings.judgment_provider is None
         assert settings.selection_autonomy_enabled is True

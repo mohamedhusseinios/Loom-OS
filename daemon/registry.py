@@ -22,6 +22,7 @@ from daemon.agent_credentials import (
     mask_key,
     merge_providers,
     parse_settings_row,
+    sync_providers_on_update,
 )
 
 # Nullable decision telemetry. No DEFAULT so migrated rows stay NULL.
@@ -51,6 +52,7 @@ _SETTINGS_DECISION_COLUMNS = (
     ("selection_autonomy_enabled", "INTEGER NOT NULL DEFAULT 1"),
     ("autonomy_min_fit", "TEXT NOT NULL DEFAULT 'High'"),
     ("autonomy_require_margin", "INTEGER NOT NULL DEFAULT 1"),
+    ("chat_provider", "TEXT NOT NULL DEFAULT 'deepseek'"),
 )
 
 
@@ -160,6 +162,7 @@ class AgentRegistry:
             CREATE TABLE IF NOT EXISTS agent_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 default_model TEXT NOT NULL DEFAULT 'deepseek-chat',
+                chat_provider TEXT NOT NULL DEFAULT 'deepseek',
                 providers_json TEXT NOT NULL DEFAULT '[]',
                 api_keys_json TEXT NOT NULL DEFAULT '{}',
                 filter_provider TEXT,
@@ -889,9 +892,12 @@ class AgentRegistry:
                 "deepseek-chat",
                 list(DEFAULT_AGENT_PROVIDERS),
                 {},
+                "deepseek",
             )
+        keys = set(row.keys())
+        chat = row["chat_provider"] if "chat_provider" in keys else "deepseek"
         return parse_settings_row(
-            row["default_model"], row["providers_json"], row["api_keys_json"],
+            row["default_model"], row["providers_json"], row["api_keys_json"], chat,
         )
 
     @staticmethod
@@ -916,6 +922,7 @@ class AgentRegistry:
         masked = creds.masked_keys() if mask_keys else dict(creds.keys)
         return AgentSettings(
             default_model=creds.default_model,
+            chat_provider=creds.chat_provider or "deepseek",
             providers=providers,
             api_keys_masked=masked,
             has_keys=creds.has_keys(),
@@ -946,7 +953,7 @@ class AgentRegistry:
 
     async def get_agent_settings(self, mask_keys: bool = True) -> AgentSettings:
         cursor = await self.db.execute(
-            "SELECT default_model, providers_json, api_keys_json,"
+            "SELECT default_model, chat_provider, providers_json, api_keys_json,"
             " filter_provider, judgment_provider, threshold_overrides_json,"
             " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
@@ -973,7 +980,7 @@ class AgentRegistry:
 
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
         cursor = await self.db.execute(
-            "SELECT default_model, providers_json, api_keys_json,"
+            "SELECT default_model, chat_provider, providers_json, api_keys_json,"
             " filter_provider, judgment_provider, threshold_overrides_json,"
             " selection_autonomy_enabled, autonomy_min_fit, autonomy_require_margin"
             " FROM agent_settings WHERE id = 1"
@@ -981,14 +988,20 @@ class AgentRegistry:
         row = await cursor.fetchone()
         creds = self._settings_from_row(row)
         default_model = payload.default_model or creds.default_model
+        chat_provider = creds.chat_provider or "deepseek"
+        if payload.chat_provider is not None and str(payload.chat_provider).strip():
+            chat_provider = str(payload.chat_provider).strip()
+        removed_custom: list[str] = []
         if payload.providers is not None:
-            providers = merge_providers(creds.providers, payload.providers)
+            providers, removed_custom = sync_providers_on_update(creds.providers, payload.providers)
         else:
             providers = creds.providers
         removed_ids = set(payload.remove_provider_ids or [])
         if removed_ids:
             providers = [p for p in providers if p.get("id") not in removed_ids]
         raw_keys = dict(creds.keys)
+        for pid in removed_custom:
+            raw_keys.pop(pid, None)
         if payload.api_keys is not None:
             for pid, key in payload.api_keys.items():
                 if key is None or is_masked_key(key):
@@ -999,6 +1012,9 @@ class AgentRegistry:
                     raw_keys[pid] = key
         for pid in removed_ids:
             raw_keys.pop(pid, None)
+        provider_ids = {p.get("id") for p in providers}
+        if chat_provider not in provider_ids:
+            chat_provider = "deepseek"
         filt, judg, _overrides = self._decision_settings_from_row(row)
         raw_overrides = None
         if row is not None and "threshold_overrides_json" in row.keys():
@@ -1019,12 +1035,12 @@ class AgentRegistry:
         if payload.autonomy_require_margin is not None:
             autonomy_require_margin = payload.autonomy_require_margin
         await self.db.execute(
-            "UPDATE agent_settings SET default_model = ?, providers_json = ?, api_keys_json = ?,"
+            "UPDATE agent_settings SET default_model = ?, chat_provider = ?, providers_json = ?, api_keys_json = ?,"
             " filter_provider = ?, judgment_provider = ?, threshold_overrides_json = ?,"
             " selection_autonomy_enabled = ?, autonomy_min_fit = ?, autonomy_require_margin = ?"
             " WHERE id = 1",
             (
-                default_model, json.dumps(providers), json.dumps(raw_keys), filt, judg,
+                default_model, chat_provider, json.dumps(providers), json.dumps(raw_keys), filt, judg,
                 raw_overrides, selection_autonomy_enabled, autonomy_min_fit,
                 autonomy_require_margin,
             ),

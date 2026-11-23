@@ -10,8 +10,8 @@ Invoked as:
 Events are appended to ``events_path`` or ``run_dir/events.jsonl``.
 
 Resolves the LLM key from (in order):
-1. ``LOOM_AGENT_API_KEY`` / ``DEEPSEEK_API_KEY`` env
-2. Dashboard Agent settings in ``~/.loom/state.db`` (BYOK)
+1. Dashboard Agent settings in ``~/.loom/state.db`` (BYOK)
+2. ``LOOM_AGENT_API_KEY`` / provider-specific env
 
 Prints the model response (single-shot) or ``status: stop_reason`` (loop)
 to stdout for the worker to capture.
@@ -28,33 +28,37 @@ from pathlib import Path
 from coding_agent.events import JsonlEventSink
 from coding_agent.runners.react import ReactRunner
 from coding_agent.session import RunSession
-from daemon.agent_credentials import DEEPSEEK_PROVIDER_ID
+from daemon.agent_credentials import resolve_chat_key
 from daemon.coding_adapters import LlmClientAdapter, SimpleUsageMeter, StubContextSource, WorktreeSandbox
-from daemon.llm_client import LlmClient, LlmError
+from daemon.llm_client import LlmError, build_llm_client
 
 
 def _settings_db_path() -> str:
     return os.path.expanduser(os.environ.get("LOOM_DB_PATH", "~/.loom/state.db"))
 
 
-def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str, str, str]:
-    """Return ``(api_key, base_url, model, provider_id)`` from agent_settings, or empty key."""
+def load_llm_config_from_settings(db_path: str | None = None) -> tuple[str, str, str, str, str]:
+    """Return ``(api_key, base_url, model, api_style, provider_id)`` from agent_settings."""
     from daemon.agent_credentials import load_stored_credentials
     creds = load_stored_credentials(db_path or _settings_db_path())
-    return creds.llm_from_stored()
+    api_key, base_url, model, api_style = creds.llm_from_stored()
+    return api_key, base_url, model, api_style, creds.active_chat_provider_id()
 
 
-def resolve_llm_config() -> tuple[str, str, str]:
-    """Match chat: dashboard settings first, then LOOM_AGENT_*/DEEPSEEK_* env."""
-    db_key, db_base, db_model, db_provider = load_llm_config_from_settings()
+def resolve_llm_config() -> tuple[str, str, str, str]:
+    """Match chat: dashboard settings first, then LOOM_AGENT_*/provider env.
+
+    ``LOOM_AGENT_PROVIDER`` overrides the stored chat provider id; the stored key is only
+    used when the effective provider is the stored one, and ``resolve_chat_key`` only
+    falls back to ``DEEPSEEK_API_KEY`` for the deepseek preset (never a custom endpoint).
+    """
+    db_key, db_base, db_model, db_style, db_provider = load_llm_config_from_settings()
     provider_id = os.environ.get("LOOM_AGENT_PROVIDER") or db_provider
-    api_key = db_key or os.environ.get("LOOM_AGENT_API_KEY") or ""
-    # DeepSeek env creds are only valid for DeepSeek; never send them to a custom endpoint.
-    if not api_key and provider_id == DEEPSEEK_PROVIDER_ID:
-        api_key = os.environ.get("DEEPSEEK_API_KEY") or ""
+    api_key = resolve_chat_key(provider_id, db_key if provider_id == db_provider else "")
     base_url = os.environ.get("LOOM_AGENT_BASE_URL") or db_base
     model = os.environ.get("LOOM_AGENT_MODEL") or db_model
-    return api_key, base_url, model
+    api_style = os.environ.get("LOOM_AGENT_API_STYLE") or db_style
+    return api_key, base_url, model, api_style
 
 
 def _events_path(manifest: dict, manifest_file: Path) -> Path:
@@ -144,7 +148,7 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
     manifest = dict(loaded)
     if prompt and not manifest.get("prompt"):
         manifest["prompt"] = prompt
-    api_key, base_url, resolved_model = resolve_llm_config()
+    api_key, base_url, resolved_model, api_style = resolve_llm_config()
     if model:
         resolved_model = model
     if not manifest.get("model"):
@@ -159,7 +163,7 @@ def run_manifest(path: str, *, prompt: str | None = None, model: str | None = No
             "executed_runner": "react",
         })
     try:
-        client = LlmClient(api_key=api_key, base_url=base_url)
+        client = build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style)
         session = RunSession(
             manifest,
             WorktreeSandbox(_worktree_root(manifest)),
@@ -191,10 +195,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.prompt:
         parser.error("--prompt is required unless --manifest is set")
 
-    api_key, base_url, model = resolve_llm_config()
+    api_key, base_url, model, api_style = resolve_llm_config()
     if args.model:
         model = args.model
-    client = LlmClient(api_key=api_key, base_url=base_url)
+    client = build_llm_client(api_key=api_key, base_url=base_url, api_style=api_style)
     messages = [
         {
             "role": "system",

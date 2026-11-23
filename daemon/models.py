@@ -237,11 +237,13 @@ class AgentProviderConfig(BaseModel):
     name: str
     base_url: str
     model_ids: list[str] = Field(default_factory=list)
-    kind: Optional[str] = None
+    api_style: str = "openai"  # openai | anthropic
+    kind: Optional[str] = None  # builtin | openai_compatible (user-added chat/decision providers)
 
 
 class AgentSettings(BaseModel):
     default_model: str = "deepseek-chat"
+    chat_provider: str = "deepseek"
     providers: list[AgentProviderConfig] = Field(default_factory=list)
     api_keys_masked: dict[str, Optional[str]] = Field(default_factory=dict)
     has_keys: dict[str, bool] = Field(default_factory=dict)
@@ -255,6 +257,7 @@ class AgentSettings(BaseModel):
 
 class AgentSettingsUpdate(BaseModel):
     default_model: Optional[str] = None
+    chat_provider: Optional[str] = None
     providers: Optional[list[AgentProviderConfig]] = None
     api_keys: Optional[dict[str, str]] = None  # write-only raw keys
     remove_provider_ids: Optional[list[str]] = None  # custom provider ids to delete
@@ -264,6 +267,17 @@ class AgentSettingsUpdate(BaseModel):
     selection_autonomy_enabled: Optional[bool] = None
     autonomy_min_fit: Optional[str] = None
     autonomy_require_margin: Optional[bool] = None
+
+
+class ListModelsRequest(BaseModel):
+    provider_id: Optional[str] = None
+    base_url: Optional[str] = None
+    api_style: Optional[str] = None
+    api_key: Optional[str] = None  # draft key; never echoed back
+
+
+class ListModelsResponse(BaseModel):
+    models: list[str] = Field(default_factory=list)
 
 
 class AgentChatRecord(BaseModel):

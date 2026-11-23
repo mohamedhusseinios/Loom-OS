@@ -207,12 +207,13 @@ def test_benchmark_keys_present_from_settings(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     assert _keys_present(str(db)) is True
-    ts_key, ts_base, ds_key, ds_base, model = resolve_benchmark_credentials(str(db))
+    ts_key, ts_base, llm_key, llm_base, model, api_style = resolve_benchmark_credentials(str(db))
     assert ts_key == "ts-dash-jev"
     assert ts_base == "http://localhost:11434"
-    assert ds_key == "sk-dash-ds"
-    assert "deepseek" in ds_base
+    assert llm_key == "sk-dash-ds"
+    assert "deepseek" in llm_base
     assert model == "deepseek-chat"
+    assert api_style == "openai"
 
 
 def test_benchmark_settings_key_wins_over_env(tmp_path, monkeypatch):
@@ -238,9 +239,47 @@ def test_benchmark_settings_key_wins_over_env(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-from-env")
     monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
-    ts_key, _, ds_key, _, _ = resolve_benchmark_credentials(str(db))
+    ts_key, _, llm_key, _, _, api_style = resolve_benchmark_credentials(str(db))
     assert ts_key == "ts-from-settings"
-    assert ds_key == "sk-from-settings"
+    assert llm_key == "sk-from-settings"
+    assert api_style == "openai"
+
+
+
+def test_benchmark_credentials_respect_anthropic_style(tmp_path, monkeypatch):
+    import json
+    from scripts.agent_cost_report import resolve_benchmark_credentials
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LOOM_AGENT_API_KEY", raising=False)
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE agent_settings ("
+        " id INTEGER PRIMARY KEY, default_model TEXT, chat_provider TEXT,"
+        " providers_json TEXT, api_keys_json TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO agent_settings VALUES (1, ?, ?, ?, ?)",
+        (
+            "claude-sonnet-4-5",
+            "anthropic",
+            json.dumps([{
+                "id": "anthropic", "name": "Anthropic",
+                "base_url": "https://api.anthropic.com",
+                "model_ids": ["claude-sonnet-4-5"],
+                "api_style": "anthropic",
+            }]),
+            json.dumps({"anthropic": "sk-ant-bench"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    _, _, llm_key, llm_base, model, api_style = resolve_benchmark_credentials(str(db))
+    assert llm_key == "sk-ant-bench"
+    assert "anthropic" in llm_base
+    assert model == "claude-sonnet-4-5"
+    assert api_style == "anthropic"
 
 
 @pytest.mark.asyncio
