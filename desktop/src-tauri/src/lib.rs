@@ -55,7 +55,11 @@ pub fn run() {
             menu.append(&loom_menu)?;
             app.set_menu(menu)?;
 
-            // Window starts hidden with a blank content webview (no browser, no remote load); navigate + show once the stack is healthy (or failed, so the user is never stuck).
+            // Show the window right away with a "Starting Loom..." page; swap in the dashboard once healthy, or an error page (with logs path) on failure.
+            if let Err(e) = commands::show_html(&handle, &commands::starting_html()) {
+                eprintln!("loom: starting page failed: {e}");
+            }
+            let _ = window.show();
             let manager = app.state::<StackState>().0.clone();
             tauri::async_runtime::spawn(async move {
                 let cfg = stack::default_config();
@@ -65,9 +69,14 @@ pub fn run() {
                             eprintln!("loom: initial navigate failed: {e}");
                         }
                     }
-                    Err(e) => eprintln!("loom stack failed to start: {e}"),
+                    Err(e) => {
+                        eprintln!("loom stack failed to start: {e}");
+                        let logs = commands::get_paths().logs_dir;
+                        if let Err(e2) = commands::show_html(&handle, &commands::startup_error_html(&e, &logs)) {
+                            eprintln!("loom: error page failed: {e2}");
+                        }
+                    }
                 }
-                let _ = window.show();
             });
             Ok(())
         })

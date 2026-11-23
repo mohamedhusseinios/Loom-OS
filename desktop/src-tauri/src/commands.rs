@@ -123,6 +123,48 @@ pub fn navigate_content(app: &AppHandle, url: &str) -> Result<()> {
     webview.navigate(url.parse().map_err(|e| format!("bad url {url}: {e}"))?).map_err(|e| e.to_string())
 }
 
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn page_shell(title: &str, body: &str) -> String {
+    format!("<!doctype html><meta charset=\"utf-8\"><title>{title}</title><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0b0f;color:#e5e5ea;font:14px -apple-system,system-ui,sans-serif\"><div style=\"max-width:640px;padding:24px\">{body}</div></body>")
+}
+
+pub fn starting_html() -> String {
+    page_shell("Starting Loom", "<h2 style=\"margin:0 0 8px\">Starting Loom\u{2026}</h2><p style=\"color:#8e8e93\">First launch can take a few minutes while dependencies install.</p>")
+}
+
+pub fn startup_error_html(error: &str, logs_dir: &str) -> String {
+    page_shell(
+        "Loom failed to start",
+        &format!("<h2 style=\"margin:0 0 8px;color:#ff6b6b\">Loom failed to start</h2><pre style=\"white-space:pre-wrap;background:#16161d;padding:12px;border-radius:6px\">{}</pre><p>Logs: <code>{}</code></p><p style=\"color:#8e8e93\">Fix the problem, then use Restart or relaunch the app.</p>", html_escape(error), html_escape(logs_dir)),
+    )
+}
+
+/// Percent-encode everything but unreserved characters so the HTML survives inside a `data:` URL.
+pub fn html_data_url(html: &str) -> String {
+    let mut out = String::from("data:text/html;charset=utf-8,");
+    for b in html.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Show a static HTML page in the content webview (data: URL; falls back to `document.write` on about:blank).
+pub fn show_html(app: &AppHandle, html: &str) -> Result<()> {
+    if navigate_content(app, &html_data_url(html)).is_ok() {
+        return Ok(());
+    }
+    let webview = app.get_webview(CONTENT_LABEL).ok_or("content webview missing")?;
+    let js = format!("document.open();document.write({});document.close();", serde_json::to_string(html).map_err(|e| e.to_string())?);
+    webview.eval(js).map_err(|e| e.to_string())
+}
+
 /// Switch the single content webview between the Agent app and the Dashboard; returns the URL now shown.
 #[tauri::command]
 pub fn navigate_tab(app: AppHandle, nav: State<'_, NavState>, tab: String) -> Result<String> {
@@ -207,5 +249,22 @@ mod tests {
         assert_eq!(tab_target(BASE, "dashboard", Some("about:blank"), None).0, "http://127.0.0.1:3000/en");
         let here = "http://127.0.0.1:3000/en/graph";
         assert_eq!(tab_target(BASE, "dashboard", Some(here), None).0, here);
+    }
+
+    #[test]
+    fn error_page_escapes_and_shows_logs_path() {
+        let html = startup_error_html("boom <script>alert(1)</script> & more", "/x/logs");
+        assert!(html.contains("boom &lt;script&gt;alert(1)&lt;/script&gt; &amp; more"));
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("/x/logs"));
+    }
+
+    #[test]
+    fn data_url_is_encoded_and_parses() {
+        let url = html_data_url("<b>a b#c</b>");
+        assert!(url.starts_with("data:text/html;charset=utf-8,"));
+        assert!(!url[29..].contains(['<', ' ', '#']));
+        assert!(url.parse::<tauri::Url>().is_ok());
+        assert!(html_data_url(&startup_error_html("e", "/l")).parse::<tauri::Url>().is_ok());
     }
 }

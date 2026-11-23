@@ -143,7 +143,56 @@ fn copy_dir_overlay(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Copy the bundled payload into `install_root` when missing or when its version marker differs. Existing `.venv` / `node_modules` are kept; on upgrade the dashboard build and pip marker are invalidated. Returns whether a copy happened.
+const NPM_MARKER: &str = ".loom-desktop-npm-installed";
+
+fn dashboard_npm_marker(root: &Path) -> PathBuf {
+    root.join("dashboard").join(NPM_MARKER)
+}
+
+/// Remove payload-owned source trees (`daemon`, `coding_agent`, everything in `dashboard` except `node_modules`) so files dropped upstream do not linger after an upgrade.
+fn clear_payload_sources(install_root: &Path) {
+    for dir in ["daemon", "coding_agent"] {
+        let _ = std::fs::remove_dir_all(install_root.join(dir));
+    }
+    let Ok(entries) = std::fs::read_dir(install_root.join("dashboard")) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name() == "node_modules" {
+            continue;
+        }
+        let path = entry.path();
+        let _ = if entry.file_type().is_ok_and(|t| t.is_dir()) { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+    }
+}
+
+/// Stable 64-bit FNV-1a hex digest (std's `DefaultHasher` is not guaranteed stable across Rust releases).
+fn fnv1a_hex(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+/// Hash of `package-lock.json`, falling back to `package.json` when no lock exists.
+fn npm_deps_hash(dashboard: &Path) -> String {
+    let bytes = std::fs::read(dashboard.join("package-lock.json")).or_else(|_| std::fs::read(dashboard.join("package.json"))).unwrap_or_default();
+    fnv1a_hex(&bytes)
+}
+
+/// `npm install` is needed when `node_modules` is missing, or the marker is missing / differs from the current deps hash.
+fn npm_install_needed(dashboard: &Path) -> bool {
+    if !dashboard.join("node_modules").exists() {
+        return true;
+    }
+    std::fs::read_to_string(dashboard.join(NPM_MARKER)).map_or(true, |v| v.trim() != npm_deps_hash(dashboard))
+}
+
+fn write_npm_marker(dashboard: &Path) {
+    let _ = std::fs::write(dashboard.join(NPM_MARKER), npm_deps_hash(dashboard));
+}
+
+/// Copy the bundled payload into `install_root` when missing or when its version marker differs. On upgrade stale payload-owned sources are pruned first (`.venv` / `node_modules` kept), and the dashboard build, npm marker and pip marker are invalidated. Returns whether a copy happened.
 pub fn install_payload(payload: &Path, install_root: &Path, version: &str) -> Result<bool> {
     if !payload.join("run.sh").is_file() {
         return Err(format!("bundled payload missing at {}", payload.display()));
@@ -153,8 +202,13 @@ pub fn install_payload(payload: &Path, install_root: &Path, version: &str) -> Re
     if installed && std::fs::read_to_string(&marker).is_ok_and(|v| v.trim() == version) {
         return Ok(false);
     }
+    // Only prune when a previous payload install owns this dir (marker present); never touch a plain repo checkout.
+    if marker.is_file() {
+        clear_payload_sources(install_root);
+    }
     copy_dir_overlay(payload, install_root)?;
     let _ = std::fs::remove_dir_all(install_root.join("dashboard").join(".next"));
+    let _ = std::fs::remove_file(dashboard_npm_marker(install_root));
     let _ = std::fs::remove_file(install_root.join(".venv").join(".loom-desktop-installed"));
     std::fs::write(&marker, version).map_err(|e| format!("write payload marker: {e}"))?;
     Ok(true)
@@ -213,8 +267,9 @@ fn ensure_deps(cfg: &StackConfig) -> Result<()> {
         )?;
         let _ = std::fs::write(&marker, b"ok");
     }
-    if !dashboard.join("node_modules").exists() {
+    if npm_install_needed(&dashboard) {
         run_step("npm install", std::process::Command::new(npm()).args(["install", "--silent"]).current_dir(&dashboard).env("PATH", path_with_venv(root)))?;
+        write_npm_marker(&dashboard);
     }
     if cfg.packaged && !dashboard.join(".next").join("BUILD_ID").exists() {
         run_step("next build", std::process::Command::new(npm()).args(["run", "build"]).current_dir(&dashboard).env("PATH", path_with_venv(root)))?;
@@ -578,6 +633,69 @@ mod tests {
         assert!(install_payload(&payload, &root, "2").unwrap());
         assert!(root.join("dashboard").join("node_modules").is_dir(), "deps preserved across upgrade");
         assert!(!root.join("dashboard").join(".next").exists(), "stale build cleared on upgrade");
+    }
+
+    #[test]
+    fn npm_marker_logic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dash = tmp.path();
+        assert!(npm_install_needed(dash), "no node_modules");
+        std::fs::create_dir_all(dash.join("node_modules")).unwrap();
+        std::fs::write(dash.join("package.json"), r#"{"a":1}"#).unwrap();
+        assert!(npm_install_needed(dash), "node_modules but no marker");
+        write_npm_marker(dash);
+        assert!(!npm_install_needed(dash), "marker matches package.json");
+        std::fs::write(dash.join("package.json"), r#"{"a":2}"#).unwrap();
+        assert!(npm_install_needed(dash), "package.json changed");
+        write_npm_marker(dash);
+        std::fs::write(dash.join("package-lock.json"), "lock-1").unwrap();
+        assert!(npm_install_needed(dash), "lock now takes precedence and differs");
+        write_npm_marker(dash);
+        assert!(!npm_install_needed(dash));
+        std::fs::write(dash.join("package.json"), r#"{"a":3}"#).unwrap();
+        assert!(!npm_install_needed(dash), "package.json ignored while lock exists");
+        std::fs::write(dash.join("package-lock.json"), "lock-2").unwrap();
+        assert!(npm_install_needed(dash), "lock changed");
+        assert_eq!(fnv1a_hex(b"abc"), fnv1a_hex(b"abc"));
+        assert_ne!(fnv1a_hex(b"abc"), fnv1a_hex(b"abd"));
+    }
+
+    #[test]
+    fn upgrade_invalidates_npm_marker_and_prunes_stale_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (payload, root) = (tmp.path().join("payload"), tmp.path().join("app"));
+        std::fs::create_dir_all(payload.join("coding_agent")).unwrap();
+        std::fs::create_dir_all(payload.join("dashboard").join("app")).unwrap();
+        std::fs::write(payload.join("run.sh"), "#!/bin/sh").unwrap();
+        std::fs::write(payload.join("dashboard").join("package.json"), "{}").unwrap();
+        std::fs::write(payload.join("dashboard").join("app").join("keep.tsx"), "1").unwrap();
+        assert!(install_payload(&payload, &root, "1").unwrap());
+        let dash = root.join("dashboard");
+        std::fs::create_dir_all(dash.join("node_modules")).unwrap();
+        std::fs::create_dir_all(dash.join("app")).unwrap();
+        std::fs::write(dash.join("app").join("removed-route.tsx"), "old").unwrap();
+        std::fs::write(root.join("coding_agent").join("stale.py"), "old").unwrap();
+        write_npm_marker(&dash);
+        assert!(!npm_install_needed(&dash));
+        assert!(install_payload(&payload, &root, "2").unwrap());
+        assert!(!dash.join(NPM_MARKER).exists(), "npm marker invalidated");
+        assert!(npm_install_needed(&dash), "deps refresh after upgrade");
+        assert!(dash.join("node_modules").is_dir(), "node_modules kept");
+        assert!(dash.join("app").join("keep.tsx").is_file());
+        assert!(!dash.join("app").join("removed-route.tsx").exists(), "stale dashboard file pruned");
+        assert!(!root.join("coding_agent").join("stale.py").exists(), "stale python file pruned");
+    }
+
+    #[test]
+    fn install_payload_does_not_prune_unmarked_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (payload, root) = (tmp.path().join("payload"), tmp.path().join("repo"));
+        std::fs::create_dir_all(&payload).unwrap();
+        std::fs::write(payload.join("run.sh"), "#!/bin/sh").unwrap();
+        std::fs::create_dir_all(root.join("daemon")).unwrap();
+        std::fs::write(root.join("daemon").join("mine.py"), "x").unwrap();
+        assert!(install_payload(&payload, &root, "1").unwrap());
+        assert!(root.join("daemon").join("mine.py").is_file(), "no prior payload marker: leave sources alone");
     }
 
     #[test]
