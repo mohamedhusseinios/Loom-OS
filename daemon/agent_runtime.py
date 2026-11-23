@@ -24,10 +24,33 @@ from daemon.models import (
 )
 from daemon.pattern_selection import CLIENT_SNAPSHOT_WHY, FALLBACK_FAMILY_ID, FALLBACK_WHY, SelectionPreview, preview_strategies
 from daemon.orchestrator import (
-    LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult, context_hash,
+    CHAT_HISTORY_LIMIT, LOOM_ACTIONS, Orchestrator, STATUS_FOR_ACTION, SuggestResult,
+    build_context_pack, context_hash,
 )
 
 logger = logging.getLogger("loom.agent_runtime")
+
+SHARED_CONTEXT_CHAR_CAP = 4000
+_EMPTY_GRAPH_REPLY = (
+    "I don't have graph memory for this project yet. "
+    "Please build/refresh the graph, then ask again."
+)
+
+
+def _load_shared_context(project_path: str, max_chars: int = SHARED_CONTEXT_CHAR_CAP) -> str:
+    path = Path(project_path) / ".loom" / "SHARED_CONTEXT.md"
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("failed to read SHARED_CONTEXT.md at %s", path, exc_info=True)
+        return ""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
 
 FAMILIES_DIR = Path(patterns_pkg.__file__).parent / "families"
 
@@ -184,14 +207,44 @@ class AgentRuntime:
         self.emit_event = emit_event  # async callable(event, project, data)
 
     async def _task_hits(self, project_path: str, project_id: str, task) -> list[dict]:
+        question = f"{task.title}\n{task.instruction}"
+        return await self._hybrid_hits(project_path, project_id, question)
+
+    async def _hybrid_hits(self, project_path: str, project_id: str, question: str) -> list[dict]:
         if self.graph_engine is None:
             return []
-        question = f"{task.title}\n{task.instruction}"
         try:
             return await self.graph_engine.hybrid_query(project_path, project_id, question, top_k=12)
         except Exception:
-            logger.warning("hybrid_query failed while hashing context", exc_info=True)
+            logger.warning("hybrid_query failed while retrieving context", exc_info=True)
             return []
+
+    async def _project_chat_reply(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict[str, str]], llm, model: str | None) -> str:
+        """Ground project-level chat in SHARED_CONTEXT + hybrid graph hits (no task orchestrator)."""
+        hits = await self._hybrid_hits(project_path, project_id, message)
+        graph_path = Path(project_path) / "graphify-out" / "graph.json"
+        if not hits and not graph_path.exists():
+            return _EMPTY_GRAPH_REPLY
+
+        pack = build_context_pack(hits)
+        shared = _load_shared_context(project_path)
+        system = (
+            "You are the Loom agent for this project. Use ONLY the provided shared context "
+            "and graph memory. You already have project knowledge — never claim you lack "
+            "access to files or context when that memory is present. Cite concrete entities "
+            "from the graph when relevant. If the memory is thin, say what is missing."
+        )
+        context_parts: list[str] = []
+        if shared:
+            context_parts.append(f"Shared project context:\n{shared}")
+        context_parts.append(f"Graph memory:\n{pack}")
+        system_with_context = system + "\n\n" + "\n\n".join(context_parts)
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_with_context}]
+        prior = [m for m in chat_msgs[:-1] if m.get("role") in ("user", "assistant")]
+        messages.extend(prior[-CHAT_HISTORY_LIMIT:])
+        messages.append({"role": "user", "content": message})
+        return await asyncio.to_thread(llm.chat, messages, model)
 
     async def _stored_credentials(self):
         cursor = await self.registry.db.execute(
@@ -252,9 +305,9 @@ class AgentRuntime:
             if self.emit_event:
                 await self.emit_event("task:suggestion", project_id, sug.model_dump(mode="json"))
         else:
-            messages = [{"role": "system", "content": "You are the Loom agent. Help with project tasks."}]
-            messages.extend(chat_msgs)
-            reply = await asyncio.to_thread(llm.chat, messages, model)
+            reply = await self._project_chat_reply(
+                project_id, project_path, payload.message, chat_msgs, llm, model,
+            )
 
         await self.registry.add_agent_message(chat.id, "assistant", reply)
         if self.emit_event:

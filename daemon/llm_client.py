@@ -73,14 +73,29 @@ class LlmClientProtocol(Protocol):
     def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]: ...
 
 
+def _safe_http_error_detail(exc: urllib.error.HTTPError, limit: int = 240) -> str:
+    """Return a short provider error body with credential-looking substrings stripped."""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    text = " ".join(raw.split())
+    for marker in ("Bearer ", "sk-", "x-api-key", "api_key", "authorization"):
+        if marker.lower() in text.lower():
+            return ""
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
 def _http_json(url: str, *, method: str = "GET", body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 120.0) -> Any:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
         with _open_http(req, timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        # Response bodies can echo the Authorization header back to the caller.
-        raise LlmError(f"LLM HTTP {e.code}") from e
+        detail = _safe_http_error_detail(e)
+        raise LlmError(f"LLM HTTP {e.code}" + (f": {detail}" if detail else "")) from e
     except json.JSONDecodeError as e:
         raise LlmError("LLM returned invalid JSON") from e
     except LlmError:
