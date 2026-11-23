@@ -16,6 +16,15 @@ pub struct StackConfig {
     pub dashboard_url: String,
     pub install_root: PathBuf,
     pub packaged: bool,
+    /// Bundled app resources `payload/` dir (set at startup in packaged builds); copied into `install_root` on first run / upgrade.
+    pub payload_dir: Option<PathBuf>,
+}
+
+static PAYLOAD_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Record the bundled payload location (from Tauri `resource_dir()/payload`) for `default_config`.
+pub fn set_payload_dir(dir: PathBuf) {
+    let _ = PAYLOAD_DIR.set(dir);
 }
 
 /// Child handles live behind a *sync* mutex that is never held across an `.await`, so
@@ -114,7 +123,41 @@ pub fn default_config() -> StackConfig {
         dashboard_url: DASHBOARD_URL.to_string(),
         install_root: resolve_install_root(packaged, env_override, Path::new(env!("CARGO_MANIFEST_DIR")), &packaged_dir),
         packaged,
+        payload_dir: PAYLOAD_DIR.get().cloned(),
     }
+}
+
+const PAYLOAD_MARKER: &str = ".loom-payload-version";
+
+fn copy_dir_overlay(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("create {}: {e}", dst.display()))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("read {}: {e}", src.display()))? {
+        let entry = entry.map_err(|e| format!("read entry: {e}"))?;
+        let (from, to) = (entry.path(), dst.join(entry.file_name()));
+        if entry.file_type().map_err(|e| format!("file type: {e}"))?.is_dir() {
+            copy_dir_overlay(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("copy {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Copy the bundled payload into `install_root` when missing or when its version marker differs. Existing `.venv` / `node_modules` are kept; on upgrade the dashboard build and pip marker are invalidated. Returns whether a copy happened.
+pub fn install_payload(payload: &Path, install_root: &Path, version: &str) -> Result<bool> {
+    if !payload.join("run.sh").is_file() {
+        return Err(format!("bundled payload missing at {}", payload.display()));
+    }
+    let marker = install_root.join(PAYLOAD_MARKER);
+    let installed = install_root.join("run.sh").is_file() && install_root.join("coding_agent").is_dir();
+    if installed && std::fs::read_to_string(&marker).is_ok_and(|v| v.trim() == version) {
+        return Ok(false);
+    }
+    copy_dir_overlay(payload, install_root)?;
+    let _ = std::fs::remove_dir_all(install_root.join("dashboard").join(".next"));
+    let _ = std::fs::remove_file(install_root.join(".venv").join(".loom-desktop-installed"));
+    std::fs::write(&marker, version).map_err(|e| format!("write payload marker: {e}"))?;
+    Ok(true)
 }
 
 fn venv_bin(root: &Path) -> PathBuf {
@@ -152,6 +195,11 @@ fn path_with_venv(root: &Path) -> std::ffi::OsString {
 /// Blocking: create venv, install daemon deps, install dashboard deps, build dashboard when packaged.
 fn ensure_deps(cfg: &StackConfig) -> Result<()> {
     let root = &cfg.install_root;
+    if cfg.packaged {
+        if let Some(payload) = &cfg.payload_dir {
+            install_payload(payload, root, env!("CARGO_PKG_VERSION"))?;
+        }
+    }
     let dashboard = root.join("dashboard");
     if !venv_bin(root).join(exe("python")).exists() {
         let py = if cfg!(windows) { "python" } else { "python3" };
@@ -513,5 +561,28 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("dashboard")).unwrap();
         let root = resolve_install_root(false, None, &manifest, Path::new("/unused"));
         assert_eq!(root.canonicalize().unwrap(), tmp.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn install_payload_copies_then_skips_then_upgrades() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (payload, root) = (tmp.path().join("payload"), tmp.path().join("app"));
+        std::fs::create_dir_all(payload.join("coding_agent")).unwrap();
+        std::fs::write(payload.join("run.sh"), "#!/bin/sh").unwrap();
+        std::fs::write(payload.join("coding_agent").join("a.py"), "1").unwrap();
+        assert!(install_payload(&payload, &root, "1").unwrap());
+        assert!(root.join("coding_agent").join("a.py").is_file());
+        assert!(!install_payload(&payload, &root, "1").unwrap(), "same version: no re-copy");
+        std::fs::create_dir_all(root.join("dashboard").join("node_modules")).unwrap();
+        std::fs::create_dir_all(root.join("dashboard").join(".next")).unwrap();
+        assert!(install_payload(&payload, &root, "2").unwrap());
+        assert!(root.join("dashboard").join("node_modules").is_dir(), "deps preserved across upgrade");
+        assert!(!root.join("dashboard").join(".next").exists(), "stale build cleared on upgrade");
+    }
+
+    #[test]
+    fn install_payload_errors_without_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(install_payload(&tmp.path().join("nope"), &tmp.path().join("app"), "1").is_err());
     }
 }

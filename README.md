@@ -57,7 +57,7 @@ Full walkthrough: **[How to Use Guide](docs/USAGE.md)**.
 | Feature | What it does |
 |---------|----------------|
 | **Loom Agent + orchestration** | Dashboard chat agent grounded in project graph memory; Jev ranks hits; pluggable chat model proposes Accept / Dismiss / Implement |
-| **Coding Agent loop** | Extractable ReAct tool loop + pattern selection on Implement — see [`coding_agent/README.md`](coding_agent/README.md) (macOS DMG: `scripts/packaging/macos/build-dmg.sh`) |
+| **Coding Agent loop** | Extractable ReAct tool loop + pattern selection on Implement — see [`coding_agent/README.md`](coding_agent/README.md) (desktop app: `cd desktop && npm run tauri build`; interim DMG: `scripts/packaging/macos/build-dmg.sh`) |
 | **`./run.sh`** | One-command local bring-up for daemon + dashboard |
 | **`loom wire`** | Zero-config agent wiring — `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.mcp.json` |
 | **Cross-project federation** | Org-wide read-only search across indexed projects (`/api/federated/*` + Federation tab) |
@@ -262,7 +262,7 @@ cd dashboard && npm run dev
 
 Companion packages in this repo:
 
-- [`coding_agent/`](coding_agent/README.md) — Implement-time coding loop + pattern families (macOS DMG via [`scripts/packaging/macos/build-dmg.sh`](scripts/packaging/macos/build-dmg.sh))
+- [`coding_agent/`](coding_agent/README.md) — Implement-time coding loop + pattern families (Tauri desktop app via `cd desktop && npm run tauri build`; interim macOS DMG via [`scripts/packaging/macos/build-dmg.sh`](scripts/packaging/macos/build-dmg.sh))
 - [`loom-client/`](loom-client/) — Pydantic-validated inbox protocol SDK
 - [`clients/js/`](clients/js/) — JavaScript twin
 - [`integrations/langchain-loom/`](integrations/langchain-loom/) — LangChain memory
@@ -311,7 +311,7 @@ See [Development Guide](docs/DEVELOPMENT.md) and [Contributing](CONTRIBUTING.md)
 
 | Package | Docs |
 |---------|------|
-| **Coding Agent** (Implement loop) | [`coding_agent/README.md`](coding_agent/README.md) — install, usage, [macOS DMG](scripts/packaging/macos/build-dmg.sh) |
+| **Coding Agent** (Implement loop) | [`coding_agent/README.md`](coding_agent/README.md) — install, usage, [Tauri desktop app](coding_agent/README.md#desktop-app-tauri--primary-ship-path), interim [macOS DMG](scripts/packaging/macos/build-dmg.sh) |
 | Python client | [`loom-client/README.md`](loom-client/README.md) |
 | JavaScript client | [`clients/js/README.md`](clients/js/README.md) |
 | LangChain memory | [`integrations/langchain-loom/README.md`](integrations/langchain-loom/README.md) |

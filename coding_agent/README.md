@@ -34,20 +34,42 @@ loom start
 
 **Prerequisites:** Python 3.11+, Node.js 20+ (dashboard), Git 2.25+. Configure a BYOK chat model in the dashboard **Agent** settings (DeepSeek / OpenAI-compatible).
 
-### macOS disk image (full stack)
+### Desktop app (Tauri) — primary ship path
 
-Build a DMG that bundles daemon + coding agent + dashboard launcher:
+The **Loom Coding Agent** desktop app (`desktop/`, Tauri 2) is the primary way to ship and run the full stack. One window with **Agent** and **Dashboard** tabs; no browser is opened. The app owns the local daemon (`:8472`) and Next.js dashboard (`:3000`) and stops them on quit (it attaches instead if both are already healthy).
+
+```bash
+cd desktop
+npm install
+npm run tauri build
+```
+
+`tauri build` stages the stack sources (`daemon/`, `coding_agent/`, `dashboard/`, `pyproject.toml`, `run.sh`, no venv / `node_modules`) into the bundle via `desktop/scripts/stage-payload.mjs`. Artifacts land under Cargo's target dir, `desktop/src-tauri/target/release/bundle/` by default:
+
+| Host | Output |
+|------|--------|
+| macOS | `bundle/macos/Loom Coding Agent.app`, `bundle/dmg/Loom Coding Agent_<version>_<arch>.dmg` |
+| Windows | NSIS installer under `bundle/nsis/` (run the same command on Windows) |
+| Linux | AppImage / deb under `bundle/appimage/`, `bundle/deb/` (run the same command on Linux) |
+
+Only the macOS build is produced and exercised in this repo's workflow; Windows/Linux need a build on those hosts.
+
+First launch of a release build copies the bundled payload to `~/Library/Application Support/LoomCodingAgent/app` (Linux: `~/.local/share/LoomCodingAgent/app`, Windows: `%APPDATA%\LoomCodingAgent\app`), creates a venv, `pip install -e ".[llm]"`, runs `npm install` + `npm run build` in `dashboard/`, then starts the daemon and `next start`. Logs are in `LoomCodingAgent/logs/`. Later launches reuse the install; a new app version refreshes sources and keeps the venv / `node_modules`. Requires network on first run.
+
+Development: `cd desktop && npm run tauri dev` runs against the repo checkout (`next dev`).
+
+**Prerequisites:** Python 3.11+, Node.js 20+, Git, Rust toolchain (to build). Double-clicked `.app` bundles get a minimal PATH, so the app bootstraps Homebrew, nvm/fnm, Hermes Node and your login-shell PATH itself.
+
+### macOS disk image (interim, secondary)
+
+The older shell-launcher DMG is kept as a fallback; prefer the Tauri app above.
 
 ```bash
 bash scripts/packaging/macos/build-dmg.sh
 # → dist/Loom-Coding-Agent-<version>.dmg
 ```
 
-Open the DMG, drag **Loom Coding Agent** to Applications (or run it in place). The app uses the primary **Warp** Loom icon (`docs/branding/loom-icon-warp-512.png` → `AppIcon.icns`). First launch installs a local copy under `~/Library/Application Support/LoomCodingAgent`, creates a venv, installs Python deps, runs `npm install` in `dashboard/`, then starts `./run.sh --open`.
-
-Requires network on first run (pip / npm). Later launches reuse the installed copy.
-
-> **Note:** Double-clicking the `.app` uses a minimal macOS PATH (Terminal-only installs are invisible). The launcher adds Homebrew, nvm/fnm, Hermes Node, and your login-shell PATH automatically. If Node still isn’t found, install with `brew install node` or from [nodejs.org](https://nodejs.org/), then reopen the app.
+It installs the same support-dir copy and starts `./run.sh --open` (opens your browser). Requires network on first run (pip / npm).
 
 ---
 
@@ -55,7 +77,7 @@ Requires network on first run (pip / npm). Later launches reuse the installed co
 
 ### Dashboard (normal path)
 
-1. Start Loom: `./run.sh --open` (or the DMG app).
+1. Start Loom: `./run.sh --open` (or the desktop app).
 2. Open a project, chat with **Loom Agent**, or create a Kanban task.
 3. **Accept** a suggestion (or move a card to Ready), then **Implement**.
 4. Pick a strategy (top patterns) or **Let agent decide**.

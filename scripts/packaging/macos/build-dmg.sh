@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# NOTE: Interim / secondary packaging. The primary ship path is the Tauri desktop app:
+#   cd desktop && npm run tauri build   (see coding_agent/README.md)
+# This script remains as a shell-launcher fallback (opens the browser via run.sh --open).
 # Build dist/Loom-Coding-Agent-<version>.dmg — full Loom bring-up (daemon + coding_agent + dashboard).
 #
 # Usage:

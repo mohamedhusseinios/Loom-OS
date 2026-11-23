@@ -44,6 +44,10 @@ pub fn run() {
                 eprintln!("loom: could not install signal handler: {e}");
             }
 
+            if let Ok(res) = app.path().resource_dir() {
+                stack::set_payload_dir(res.join("payload"));
+            }
+
             let window = build_main_window(app.handle())?;
             let handle = app.handle().clone();
             let menu = Menu::default(&handle)?;
