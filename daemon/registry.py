@@ -985,6 +985,9 @@ class AgentRegistry:
             providers = merge_providers(creds.providers, payload.providers)
         else:
             providers = creds.providers
+        removed_ids = set(payload.remove_provider_ids or [])
+        if removed_ids:
+            providers = [p for p in providers if p.get("id") not in removed_ids]
         raw_keys = dict(creds.keys)
         if payload.api_keys is not None:
             for pid, key in payload.api_keys.items():
@@ -994,6 +997,8 @@ class AgentRegistry:
                     raw_keys.pop(pid, None)
                 else:
                     raw_keys[pid] = key
+        for pid in removed_ids:
+            raw_keys.pop(pid, None)
         filt, judg, _overrides = self._decision_settings_from_row(row)
         raw_overrides = None
         if row is not None and "threshold_overrides_json" in row.keys():

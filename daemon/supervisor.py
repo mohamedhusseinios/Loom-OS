@@ -59,11 +59,18 @@ class WorkerSupervisor:
             env["LOOM_AGENT_MANIFEST"] = manifest_path
         try:
             from daemon.agent_run import load_llm_config_from_settings
-            api_key, base_url, model = load_llm_config_from_settings()
+            api_key, base_url, model, provider_id = load_llm_config_from_settings()
         except Exception:
             return env
+        env["LOOM_AGENT_PROVIDER"] = provider_id
+        if provider_id != "deepseek":
+            # Custom endpoint: only its own stored key (possibly none); never the DeepSeek credential.
+            env.pop("DEEPSEEK_API_KEY", None)
+            env.pop("LOOM_AGENT_API_KEY", None)
+            if api_key:
+                env["LOOM_AGENT_API_KEY"] = api_key
         # Dashboard BYOK wins over a daemon-process DEEPSEEK_API_KEY, matching chat.
-        if api_key:
+        elif api_key:
             env["LOOM_AGENT_API_KEY"] = api_key
             env["DEEPSEEK_API_KEY"] = api_key
         if base_url:
