@@ -68,11 +68,18 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [fontScale, setFontScale] = useState(1);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  const abortInFlight = useCallback(() => {
+    if (!abortRef.current) return;
+    abortRef.current.abort();
+    abortRef.current = null;
+    setBusy(false);
+  }, []);
 
   useEffect(() => {
     setFontScale(readChatFontScale());
@@ -135,6 +142,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }, [projectId, taskId, showArchived, t]);
 
   const loadSession = useCallback(async (id: string) => {
+    abortInFlight();
     setLoadingMessages(true);
     setError("");
     setChatId(id);
@@ -155,7 +163,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     } finally {
       setLoadingMessages(false);
     }
-  }, [projectId, t]);
+  }, [projectId, t, abortInFlight]);
 
   async function copyText(text: string, key: string) {
     try {
@@ -172,6 +180,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   function startNewChat() {
+    abortInFlight();
     setChatId(undefined);
     setMessages([]);
     setInput("");
@@ -179,6 +188,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   function clearOpenChat() {
+    abortInFlight();
     setChatId(undefined);
     setMessages([]);
   }
@@ -217,6 +227,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
 
   useEffect(() => {
     let cancelled = false;
+    abortInFlight();
     setInput("");
     setError("");
     setChatId(undefined);
@@ -230,7 +241,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     return () => {
       cancelled = true;
     };
-  }, [projectId, taskId, showArchived, refreshSessions, loadSession]);
+  }, [projectId, taskId, showArchived, refreshSessions, loadSession, abortInFlight]);
 
   async function send() {
     const text = input.trim();
@@ -241,7 +252,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    const live = () => !controller.signal.aborted;
     const patchLast = (fn: (last: Msg) => Msg) => {
+      if (!live()) return;
       setMessages((rows) => {
         const last = rows[rows.length - 1];
         if (last?.role !== "assistant") return rows;
@@ -259,10 +272,13 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
         projectId,
         { message: text, task_id: taskId || undefined, chat_id: chatId },
         {
-          onMeta: (id) => setChatId(id),
+          onMeta: (id) => {
+            if (live()) setChatId(id);
+          },
           onReasoningDelta: (chunk) => patchLast((last) => ({ ...last, reasoning: (last.reasoning || "") + chunk })),
           onContentDelta: (chunk) => patchLast((last) => ({ ...last, content: last.content + chunk })),
           onDone: (result) => {
+            if (!live()) return;
             setChatId(result.chat_id);
             patchLast((last) => ({
               role: "assistant",
@@ -272,17 +288,21 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             if (!result.reply && !result.reasoning) setError(t("emptyReply"));
             if (result.suggestion_id && onSuggestion) onSuggestion(result.suggestion_id);
           },
-          onError: (message) => setError(message),
+          onError: (message) => {
+            if (live()) setError(message);
+          },
         },
         controller.signal,
       );
-      await refreshSessions();
+      if (live()) await refreshSessions();
     } catch (e) {
-      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : t("chatError"));
+      if (live()) setError(e instanceof Error ? e.message : t("chatError"));
     } finally {
-      dropEmptyAssistant();
-      if (abortRef.current === controller) abortRef.current = null;
-      setBusy(false);
+      if (live()) dropEmptyAssistant();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setBusy(false);
+      }
     }
   }
 
