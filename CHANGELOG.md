@@ -2,6 +2,32 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.7] — 2026-11-24
+
+Seventh public alpha after `v0.3.0-alpha.6`. GitHub prerelease only (not published to PyPI). Hardens team-mode auth, Kanban task binding, worker execution leases, MCP/inbox path trust, and safer coding-agent runner defaults from the ponytail security audit.
+
+### Highlights
+
+- **Team auth covers all API reads** — when `LOOM_AUTH_TOKEN` is set, Bearer is required on `/api/*` except `/api/health`; token compare is constant-time; short-lived `POST /api/ws-ticket` for WebSocket connect
+- **Task routes bound to project** — PATCH / progress / worker / diff / merge return 404 when `task_id` belongs to another project
+- **Atomic execution leases** — `execution_owner` claim before supervisor spawn and in `loom worker`, so dashboard one-shot and polling workers cannot double-run the same card
+- **MCP + inbox path trust** — project ids cannot traverse out of `~/.loom/inbox`; `register.json` must point at a real directory (keeps existing DB path on re-register)
+- **Safer runners + spend guardrails** — sandbox-bypass CLI flags only with `LOOM_ALLOW_UNSAFE_RUNNERS=1`; non-Claude runners get `LOOM_STDOUT_TIMEOUT_S` wall clock; Kanban status transitions enforced
+- **Credentials at rest** — `state.db` chmod `0600`; optional Fernet encryption of BYOK keys via `LOOM_CREDENTIALS_KEY` (or auth token) when `cryptography` is installed
+- **Ops knobs** — `LOOM_CORS_ORIGINS` for remote dashboards; shared-context regen debounced; unknown-agent heartbeats no longer silently “processed”
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.7
+./run.sh --open
+# or: pip install -e ".[dev,llm,crypto]" && loom start
+```
+
+**macOS app:** chat UI DMGs from `v0.3.0-alpha.6` still apply for the desktop shell; install this tag (or `pip install -e .`) for the hardened daemon. New `0.3.0a7` DMG builds can follow when the desktop bundle is rebuilt.
+
 ## [0.3.0-alpha.6] — 2026-11-24
 
 Sixth public alpha after `v0.3.0-alpha.5`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with Agent chat Markdown rendering, font zoom, copy actions, and live SSE streaming.
