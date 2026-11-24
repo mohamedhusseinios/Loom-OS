@@ -286,6 +286,7 @@ class AgentChatRecord(BaseModel):
     task_id: Optional[str] = None
     created_at: str
     updated_at: str
+    archived_at: Optional[str] = None
 
 
 class AgentChatSummary(BaseModel):
@@ -295,6 +296,7 @@ class AgentChatSummary(BaseModel):
     created_at: str
     updated_at: str
     preview: str = ""
+    archived_at: Optional[str] = None
 
 
 class AgentMessageRecord(BaseModel):

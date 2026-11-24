@@ -193,6 +193,12 @@ class AgentRegistry:
                 updated_at TEXT NOT NULL
             )
         """)
+        cursor = await self.db.execute("PRAGMA table_info(agent_chats)")
+        chat_cols = [r[1] for r in await cursor.fetchall()]
+        if "archived_at" not in chat_cols:
+            await self.db.execute(
+                "ALTER TABLE agent_chats ADD COLUMN archived_at TEXT"
+            )
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS agent_messages (
                 id TEXT PRIMARY KEY,
@@ -1073,6 +1079,7 @@ class AgentRegistry:
         return AgentChatRecord(
             id=row["id"], project=row["project"], task_id=row["task_id"],
             created_at=row["created_at"], updated_at=row["updated_at"],
+            archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
         )
 
     async def add_agent_message(self, chat_id: str, role: str, content: str, reasoning_content: str | None = None) -> AgentMessageRecord:
@@ -1090,7 +1097,7 @@ class AgentRegistry:
         return AgentMessageRecord(id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now, reasoning_content=reasoning_content)
 
 
-    async def list_agent_chats(self, project: str, task_id: str | None = None, limit: int = 50) -> list[AgentChatSummary]:
+    async def list_agent_chats(self, project: str, task_id: str | None = None, limit: int = 50, archived: bool = False) -> list[AgentChatSummary]:
         """List chats for a project, newest first, with last-message preview.
 
         When ``task_id`` is None, only project-scoped chats (task_id IS NULL) are returned.
@@ -1102,8 +1109,10 @@ class AgentRegistry:
         else:
             where = "c.project = ? AND c.task_id = ?"
             params = [project, task_id, limit]
+        arch_clause = "c.archived_at IS NOT NULL" if archived else "c.archived_at IS NULL"
+        where = f"{where} AND {arch_clause}"
         cursor = await self.db.execute(
-            "SELECT c.id, c.project, c.task_id, c.created_at, c.updated_at, "
+            "SELECT c.id, c.project, c.task_id, c.created_at, c.updated_at, c.archived_at, "
             "  COALESCE(("
             "    SELECT m.content FROM agent_messages m"
             "    WHERE m.chat_id = c.id"
@@ -1119,9 +1128,63 @@ class AgentRegistry:
                 id=r["id"], project=r["project"], task_id=r["task_id"],
                 created_at=r["created_at"], updated_at=r["updated_at"],
                 preview=(r["preview"] or "")[:120],
+                archived_at=r["archived_at"] if "archived_at" in r.keys() else None,
             )
             for r in rows
         ]
+
+    async def archive_agent_chat(self, chat_id: str) -> AgentChatRecord | None:
+        chat = await self.get_agent_chat(chat_id)
+        if chat is None:
+            return None
+        if chat.archived_at is None:
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.execute(
+                "UPDATE agent_chats SET archived_at = ? WHERE id = ?",
+                (now, chat_id),
+            )
+            await self.db.commit()
+            return await self.get_agent_chat(chat_id)
+        return chat
+
+    async def unarchive_agent_chat(self, chat_id: str) -> AgentChatRecord | None:
+        chat = await self.get_agent_chat(chat_id)
+        if chat is None:
+            return None
+        if chat.archived_at is not None:
+            await self.db.execute(
+                "UPDATE agent_chats SET archived_at = NULL WHERE id = ?",
+                (chat_id,),
+            )
+            await self.db.commit()
+            return await self.get_agent_chat(chat_id)
+        return chat
+
+    async def delete_agent_chat(self, chat_id: str) -> bool:
+        chat = await self.get_agent_chat(chat_id)
+        if chat is None:
+            return False
+        await self.db.execute("DELETE FROM agent_messages WHERE chat_id = ?", (chat_id,))
+        await self.db.execute("DELETE FROM agent_chats WHERE id = ?", (chat_id,))
+        await self.db.commit()
+        return True
+
+    async def agent_chat_summary(self, chat_id: str) -> AgentChatSummary | None:
+        chat = await self.get_agent_chat(chat_id)
+        if chat is None:
+            return None
+        cursor = await self.db.execute(
+            "SELECT content FROM agent_messages WHERE chat_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (chat_id,),
+        )
+        row = await cursor.fetchone()
+        preview = ((row["content"] if row else "") or "")[:120]
+        return AgentChatSummary(
+            id=chat.id, project=chat.project, task_id=chat.task_id,
+            created_at=chat.created_at, updated_at=chat.updated_at,
+            preview=preview, archived_at=chat.archived_at,
+        )
 
     async def list_agent_messages(self, chat_id: str, limit: int = 50) -> list[AgentMessageRecord]:
         """Return the latest ``limit`` messages in chronological order."""

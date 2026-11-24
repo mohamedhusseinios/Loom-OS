@@ -437,3 +437,42 @@ async def test_typesafe_provider_migrated_and_keys_cleared(tmp_path, monkeypatch
         assert raw["deepseek"] == "sk-legacy-1111"
     finally:
         await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_archive_unarchive_filters_lists(reg):
+    active = await reg.create_agent_chat("proj")
+    await reg.add_agent_message(active.id, "user", "keep me")
+    other = await reg.create_agent_chat("proj")
+    await reg.add_agent_message(other.id, "user", "archive me")
+
+    archived = await reg.archive_agent_chat(other.id)
+    assert archived is not None
+    assert archived.archived_at is not None
+    again = await reg.archive_agent_chat(other.id)
+    assert again is not None and again.archived_at == archived.archived_at
+
+    active_list = await reg.list_agent_chats("proj", archived=False)
+    assert [c.id for c in active_list] == [active.id]
+    assert active_list[0].archived_at is None
+
+    archived_list = await reg.list_agent_chats("proj", archived=True)
+    assert [c.id for c in archived_list] == [other.id]
+    assert archived_list[0].archived_at is not None
+    assert archived_list[0].preview == "archive me"
+
+    restored = await reg.unarchive_agent_chat(other.id)
+    assert restored is not None and restored.archived_at is None
+    assert set(c.id for c in await reg.list_agent_chats("proj", archived=False)) == {
+        other.id, active.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_chat_removes_messages(reg):
+    chat = await reg.create_agent_chat("proj")
+    await reg.add_agent_message(chat.id, "user", "bye")
+    assert await reg.delete_agent_chat(chat.id) is True
+    assert await reg.get_agent_chat(chat.id) is None
+    assert await reg.list_agent_messages(chat.id) == []
+    assert await reg.delete_agent_chat(chat.id) is False
