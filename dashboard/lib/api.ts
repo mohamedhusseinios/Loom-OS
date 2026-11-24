@@ -640,6 +640,61 @@ export async function agentChat(
   return res.json();
 }
 
+export type AgentChatStreamHandlers = {
+  onMeta?: (chatId: string) => void;
+  onReasoningDelta?: (text: string) => void;
+  onContentDelta?: (text: string) => void;
+  onDone?: (result: { chat_id: string; reply: string; reasoning: string | null; suggestion_id: string | null }) => void;
+  onError?: (message: string) => void;
+};
+
+export async function agentChatStream(projectId: string, payload: { message: string; task_id?: string; chat_id?: string }, handlers: AgentChatStreamHandlers, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chat/stream`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `chat stream failed (${res.status})`);
+  }
+  if (!res.body) throw new Error("chat stream returned empty body");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() || "";
+    for (const part of parts) {
+      let event = "message";
+      let data = "";
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      const json = JSON.parse(data) as Record<string, unknown>;
+      if (event === "meta" && typeof json.chat_id === "string") handlers.onMeta?.(json.chat_id);
+      else if (event === "reasoning_delta" && typeof json.text === "string") handlers.onReasoningDelta?.(json.text);
+      else if (event === "content_delta" && typeof json.text === "string") handlers.onContentDelta?.(json.text);
+      else if (event === "done") {
+        handlers.onDone?.({
+          chat_id: String(json.chat_id ?? ""),
+          reply: String(json.reply ?? ""),
+          reasoning: (json.reasoning as string | null) ?? null,
+          suggestion_id: (json.suggestion_id as string | null) ?? null,
+        });
+      } else if (event === "error") {
+        handlers.onError?.(String(json.message ?? "chat stream error"));
+      }
+    }
+  }
+}
+
 export async function listAgentChats(
   projectId: string,
   taskId?: string | null,

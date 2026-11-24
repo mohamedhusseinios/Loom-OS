@@ -7,7 +7,7 @@ import { ChatMarkdown } from "@/components/chat-markdown";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import {
-  agentChat,
+  agentChatStream,
   archiveAgentChat,
   deleteAgentChat,
   unarchiveAgentChat,
@@ -70,6 +70,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     setFontScale(readChatFontScale());
@@ -234,27 +237,51 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     if (!text || busy) return;
     setInput("");
     setError("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
+    setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: "", reasoning: null }]);
     setBusy(true);
-    try {
-      const res = await agentChat(projectId, {
-        message: text,
-        task_id: taskId || undefined,
-        chat_id: chatId,
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const patchLast = (fn: (last: Msg) => Msg) => {
+      setMessages((rows) => {
+        const last = rows[rows.length - 1];
+        if (last?.role !== "assistant") return rows;
+        return [...rows.slice(0, -1), fn(last)];
       });
-      setChatId(res.chat_id);
-      const reply = (res.reply ?? "").trim();
-      const reasoning = (res.reasoning ?? "").trim() || null;
-      if (!reply && !reasoning) {
-        setError(t("emptyReply"));
-      } else {
-        setMessages((m) => [...m, { role: "assistant", content: reply, reasoning }]);
-      }
-      if (res.suggestion_id && onSuggestion) onSuggestion(res.suggestion_id);
+    };
+    const dropEmptyAssistant = () => {
+      setMessages((rows) => {
+        const last = rows[rows.length - 1];
+        return last?.role === "assistant" && !last.content && !last.reasoning ? rows.slice(0, -1) : rows;
+      });
+    };
+    try {
+      await agentChatStream(
+        projectId,
+        { message: text, task_id: taskId || undefined, chat_id: chatId },
+        {
+          onMeta: (id) => setChatId(id),
+          onReasoningDelta: (chunk) => patchLast((last) => ({ ...last, reasoning: (last.reasoning || "") + chunk })),
+          onContentDelta: (chunk) => patchLast((last) => ({ ...last, content: last.content + chunk })),
+          onDone: (result) => {
+            setChatId(result.chat_id);
+            patchLast((last) => ({
+              role: "assistant",
+              content: result.reply || last.content,
+              reasoning: result.reasoning ?? last.reasoning,
+            }));
+            if (!result.reply && !result.reasoning) setError(t("emptyReply"));
+            if (result.suggestion_id && onSuggestion) onSuggestion(result.suggestion_id);
+          },
+          onError: (message) => setError(message),
+        },
+        controller.signal,
+      );
       await refreshSessions();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("chatError"));
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : t("chatError"));
     } finally {
+      dropEmptyAssistant();
+      if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
     }
   }
@@ -425,7 +452,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             <p className="text-xs text-zinc-500">{t("emptyHint")}</p>
           )}
           {messages.map((m, i) => (
-            <div
+            m.role === "assistant" && !m.content && !m.reasoning ? null : <div
               key={i}
               className={`rounded-md px-2.5 py-2 text-sm [font-size:calc(0.875rem*var(--chat-font-scale))] ${
                 m.role === "user"
@@ -490,7 +517,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
               ) : null}
             </div>
           ))}
-          {busy && (
+          {busy && !(messages[messages.length - 1]?.role === "assistant" && (messages[messages.length - 1].content || messages[messages.length - 1].reasoning)) && (
             <div className="me-8 flex items-center gap-2 rounded-md bg-zinc-900 px-2.5 py-2 text-sm text-zinc-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {t("thinking")}
