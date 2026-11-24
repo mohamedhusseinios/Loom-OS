@@ -461,6 +461,53 @@ class AnthropicLlmClient:
                 texts.append(block)
         return "\n".join(t for t in texts if t).strip()
 
+    def chat_stream(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> Iterator[StreamDelta]:
+        """Stream text deltas from the Anthropic Messages API (SSE)."""
+        if not self.api_key:
+            raise LlmError("API key not configured — add it in Agent settings")
+        self.last_usage = None
+        self.last_reasoning_content = None
+        system, converted = _split_system_messages(messages)
+        if not converted:
+            converted = [{"role": "user", "content": ""}]
+        body_obj: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 4096,
+            "temperature": 0.2,
+            "messages": converted,
+            "stream": True,
+        }
+        if system:
+            body_obj["system"] = system
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/messages",
+            data=json.dumps(body_obj).encode(),
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with _open_http(req, self.timeout) as resp:
+                for obj in _iter_sse_json(resp):
+                    if obj.get("type") != "content_block_delta":
+                        continue
+                    delta = obj.get("delta") or {}
+                    if not isinstance(delta, dict) or delta.get("type") != "text_delta":
+                        continue
+                    text = delta.get("text")
+                    if isinstance(text, str) and text:
+                        yield StreamDelta("content", text)
+        except urllib.error.HTTPError as e:
+            detail = _safe_http_error_detail(e)
+            raise LlmError(f"LLM HTTP {e.code}" + (f": {detail}" if detail else "")) from e
+        except LlmError:
+            raise
+        except Exception as e:
+            raise LlmError(str(e)) from e
+
     def chat_json(self, messages: list[dict[str, str]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
         return _parse_chat_json(self.chat(messages, model=model))
 

@@ -186,3 +186,30 @@ def test_openai_chat_stream_yields_content_deltas(monkeypatch):
     assert ("content", "lo") in texts
     assert ("reasoning", "think") in texts
     assert client.last_reasoning_content == "think"
+
+
+def test_anthropic_chat_stream_yields_text_deltas(monkeypatch):
+    chunks = [
+        b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n\n',
+        b'data: {"type":"message_stop"}\n\n',
+    ]
+
+    class _StreamResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def __iter__(self):
+            return iter(chunks)
+
+    def fake_open(req, timeout=120.0):
+        body = json.loads(req.data.decode())
+        assert body["stream"] is True
+        return _StreamResp()
+
+    monkeypatch.setattr("daemon.llm_client._open_http", fake_open)
+    client = AnthropicLlmClient(api_key="sk-ant")
+    events = list(client.chat_stream([{"role": "user", "content": "x"}], model="claude-sonnet-4-5"))
+    assert [(e.kind, e.text) for e in events] == [("content", "Hi")]
