@@ -314,6 +314,10 @@
   },
   "LoomAgent": {
     "title": "Loom Agent",
+    "zoomIn": "Larger text",
+    "zoomOut": "Smaller text",
+    "zoomReset": "Reset text size",
+    "zoomPercent": "{pct}%",
     "settings": "Settings",
     "settingsTitle": "Agent settings",
     "defaultModel": "Default model",

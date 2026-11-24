@@ -314,6 +314,10 @@
   },
   "LoomAgent": {
     "title": "وكيل Loom",
+    "zoomIn": "تكبير النص",
+    "zoomOut": "تصغير النص",
+    "zoomReset": "إعادة حجم النص",
+    "zoomPercent": "{pct}%",
     "settings": "الإعدادات",
     "settingsTitle": "إعدادات الوكيل",
     "defaultModel": "النموذج الافتراضي",

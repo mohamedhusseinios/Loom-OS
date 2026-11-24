@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Archive, ArchiveRestore, Loader2, MessageSquarePlus, Send, Settings, Trash2 } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -28,6 +28,22 @@ interface LoomAgentChatProps {
   onSuggestion?: (suggestionId: string) => void;
 }
 
+const CHAT_FONT_STEPS = [0.875, 1, 1.125, 1.25, 1.5] as const;
+const CHAT_FONT_KEY = "loom-agent-chat-font-scale";
+
+function readChatFontScale(): number {
+  if (typeof window === "undefined") return 1;
+  const raw = window.localStorage.getItem(CHAT_FONT_KEY);
+  const n = raw ? Number(raw) : 1;
+  return CHAT_FONT_STEPS.includes(n as (typeof CHAT_FONT_STEPS)[number]) ? n : 1;
+}
+
+function nearestFontStep(scale: number, dir: 1 | -1): number {
+  const idx = CHAT_FONT_STEPS.findIndex((s) => s === scale);
+  const i = idx < 0 ? CHAT_FONT_STEPS.indexOf(1) : idx;
+  return CHAT_FONT_STEPS[Math.min(CHAT_FONT_STEPS.length - 1, Math.max(0, i + dir))] ?? 1;
+}
+
 function previewLabel(chat: AgentChatSummary, fallback: string): string {
   const preview = chat.preview.trim();
   if (!preview) return fallback;
@@ -46,6 +62,50 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [error, setError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [fontScale, setFontScale] = useState(1);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setFontScale(readChatFontScale());
+  }, []);
+
+  const commitFontScale = useCallback((next: number | ((prev: number) => number)) => {
+    setFontScale((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      window.localStorage.setItem(CHAT_FONT_KEY, String(value));
+      return value;
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!el!.contains(document.activeElement) && !el!.matches(":hover")) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        commitFontScale((prev) => nearestFontStep(prev, 1));
+      } else if (e.key === "-") {
+        e.preventDefault();
+        commitFontScale((prev) => nearestFontStep(prev, -1));
+      } else if (e.key === "0") {
+        e.preventDefault();
+        commitFontScale(1);
+      }
+    }
+    function onWheel(e: WheelEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      commitFontScale((prev) => nearestFontStep(prev, e.deltaY < 0 ? 1 : -1));
+    }
+    window.addEventListener("keydown", onKey);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [commitFontScale]);
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
@@ -176,7 +236,12 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   return (
-    <div className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+    <div
+      ref={panelRef}
+      tabIndex={0}
+      style={{ ["--chat-font-scale" as string]: String(fontScale) }}
+      className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60 outline-none [&_.chat-md-root]:text-[length:calc(0.875rem*var(--chat-font-scale))] [&_.chat-md-root.text-xs]:text-[length:calc(0.75rem*var(--chat-font-scale))] [&_.chat-md-root.text-\[11px\]]:text-[length:calc(0.6875rem*var(--chat-font-scale))]"
+    >
       <aside className="flex w-[11.5rem] shrink-0 flex-col border-e border-zinc-800">
         <div className="flex items-center justify-between gap-1 border-b border-zinc-800 px-2 py-2">
           <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
@@ -286,13 +351,45 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
               {taskId ? t("taskScoped") : t("projectScoped")}
             </p>
           </div>
-          <Link
-            href="/agent-settings"
-            className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[0.8rem] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            {t("settings")}
-          </Link>
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => commitFontScale((prev) => nearestFontStep(prev, -1))}
+              title={t("zoomOut")}
+              aria-label={t("zoomOut")}
+            >
+              A−
+            </Button>
+            <span
+              className="min-w-[2.5rem] text-center text-[10px] text-zinc-500"
+              title={t("zoomReset")}
+              onDoubleClick={() => commitFontScale(1)}
+              role="presentation"
+            >
+              {t("zoomPercent", { pct: Math.round(fontScale * 100) })}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => commitFontScale((prev) => nearestFontStep(prev, 1))}
+              title={t("zoomIn")}
+              aria-label={t("zoomIn")}
+            >
+              A+
+            </Button>
+            <Link
+              href="/agent-settings"
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[0.8rem] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              {t("settings")}
+            </Link>
+          </div>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
           {loadingMessages && (
@@ -304,7 +401,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           {messages.map((m, i) => (
             <div
               key={i}
-              className={`rounded-md px-2.5 py-2 text-sm ${
+              className={`rounded-md px-2.5 py-2 text-sm [font-size:calc(0.875rem*var(--chat-font-scale))] ${
                 m.role === "user"
                   ? "ms-8 bg-zinc-800 text-zinc-100"
                   : "me-8 bg-zinc-900 text-zinc-300"
