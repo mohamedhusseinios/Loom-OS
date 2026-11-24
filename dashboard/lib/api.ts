@@ -612,6 +612,7 @@ export interface AgentChatSummary {
   created_at: string;
   updated_at: string;
   preview: string;
+  archived_at: string | null;
 }
 
 export interface AgentChatMessage {
@@ -642,12 +643,51 @@ export async function agentChat(
 export async function listAgentChats(
   projectId: string,
   taskId?: string | null,
+  opts?: { archived?: boolean },
 ): Promise<AgentChatSummary[]> {
-  const qs = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
+  const params = new URLSearchParams();
+  if (taskId) params.set("task_id", taskId);
+  if (opts?.archived) params.set("archived", "1");
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const data = await fetchApi<{ chats: AgentChatSummary[] }>(
     `/api/projects/${projectId}/agent/chats${qs}`,
   );
   return data.chats;
+}
+
+export async function archiveAgentChat(projectId: string, chatId: string): Promise<AgentChatSummary> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chats/${chatId}/archive`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    throw new Error(detail.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function unarchiveAgentChat(projectId: string, chatId: string): Promise<AgentChatSummary> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chats/${chatId}/unarchive`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    throw new Error(detail.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteAgentChat(projectId: string, chatId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agent/chats/${chatId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({} as { detail?: string }));
+    throw new Error(detail.detail || `API error: ${res.status}`);
+  }
 }
 
 export async function listAgentChatMessages(

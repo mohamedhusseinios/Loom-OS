@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, MessageSquarePlus, Send, Settings } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2, MessageSquarePlus, Send, Settings, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import {
   agentChat,
+  archiveAgentChat,
+  deleteAgentChat,
+  unarchiveAgentChat,
   listAgentChatMessages,
   listAgentChats,
   type AgentChatSummary,
@@ -40,11 +43,13 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
     try {
-      const chats = await listAgentChats(projectId, taskId || undefined);
+      const chats = await listAgentChats(projectId, taskId || undefined, { archived: showArchived });
       setSessions(chats);
       return chats;
     } catch (e) {
@@ -53,7 +58,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     } finally {
       setLoadingSessions(false);
     }
-  }, [projectId, taskId, t]);
+  }, [projectId, taskId, showArchived, t]);
 
   const loadSession = useCallback(async (id: string) => {
     setLoadingMessages(true);
@@ -85,21 +90,59 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setError("");
   }
 
+  function clearOpenChat() {
+    setChatId(undefined);
+    setMessages([]);
+  }
+
+  async function onArchive(id: string) {
+    try {
+      await archiveAgentChat(projectId, id);
+      if (chatId === id) clearOpenChat();
+      await refreshSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function onUnarchive(id: string) {
+    try {
+      await unarchiveAgentChat(projectId, id);
+      await refreshSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function onConfirmDelete() {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
+    setPendingDeleteId(null);
+    try {
+      await deleteAgentChat(projectId, id);
+      if (chatId === id) clearOpenChat();
+      await refreshSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setInput("");
     setError("");
     setChatId(undefined);
     setMessages([]);
+    setPendingDeleteId(null);
     (async () => {
       const chats = await refreshSessions();
-      if (cancelled || chats.length === 0) return;
+      if (cancelled || showArchived || chats.length === 0) return;
       await loadSession(chats[0].id);
     })();
     return () => {
       cancelled = true;
     };
-  }, [projectId, taskId, refreshSessions, loadSession]);
+  }, [projectId, taskId, showArchived, refreshSessions, loadSession]);
 
   async function send() {
     const text = input.trim();
@@ -132,7 +175,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   return (
-    <div className="flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+    <div className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
       <aside className="flex w-[11.5rem] shrink-0 flex-col border-e border-zinc-800">
         <div className="flex items-center justify-between gap-1 border-b border-zinc-800 px-2 py-2">
           <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
@@ -155,26 +198,83 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             <p className="px-1.5 py-1 text-[11px] text-zinc-500">{t("loadingSessions")}</p>
           )}
           {!loadingSessions && sessions.length === 0 && (
-            <p className="px-1.5 py-1 text-[11px] text-zinc-500">{t("noSessions")}</p>
+            <p className="px-1.5 py-1 text-[11px] text-zinc-500">
+              {showArchived ? t("noArchivedSessions") : t("noSessions")}
+            </p>
           )}
           {sessions.map((s) => {
             const active = s.id === chatId;
             return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => void loadSession(s.id)}
-                className={`w-full rounded-md px-2 py-1.5 text-start text-[11px] leading-snug transition-colors ${
-                  active
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`}
-              >
-                <span className="line-clamp-2">{previewLabel(s, t("untitledSession"))}</span>
-              </button>
+              <div key={s.id} className="group/row relative">
+                <button
+                  type="button"
+                  onClick={() => void loadSession(s.id)}
+                  className={`w-full rounded-md px-2 py-1.5 text-start text-[11px] leading-snug transition-colors ${
+                    active
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="line-clamp-2 pe-12">{previewLabel(s, t("untitledSession"))}</span>
+                </button>
+                <div className="absolute end-1 top-1 hidden gap-0.5 group-hover/row:flex group-focus-within/row:flex">
+                  {showArchived ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-5 w-5 p-0 text-zinc-500 hover:text-zinc-100"
+                      title={t("unarchiveSession")}
+                      aria-label={t("unarchiveSession")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onUnarchive(s.id);
+                      }}
+                    >
+                      <ArchiveRestore className="h-3 w-3" />
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-5 w-5 p-0 text-zinc-500 hover:text-zinc-100"
+                      title={t("archiveSession")}
+                      aria-label={t("archiveSession")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onArchive(s.id);
+                      }}
+                    >
+                      <Archive className="h-3 w-3" />
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-5 w-5 p-0 text-zinc-500 hover:text-red-400"
+                    title={t("deleteSession")}
+                    aria-label={t("deleteSession")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDeleteId(s.id);
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
             );
           })}
         </div>
+        <button
+          type="button"
+          className="border-t border-zinc-800 px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-200"
+          onClick={() => setShowArchived((v) => !v)}
+        >
+          {showArchived ? t("activeSessions") : t("archivedSessions")}
+        </button>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -256,6 +356,28 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           </Button>
         </div>
       </div>
+      {pendingDeleteId && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/80 p-4">
+          <div
+            role="alertdialog"
+            aria-labelledby="delete-session-title"
+            className="w-full max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-lg"
+          >
+            <h4 id="delete-session-title" className="text-sm font-semibold text-zinc-100">
+              {t("deleteSessionConfirmTitle")}
+            </h4>
+            <p className="mt-1 text-xs text-zinc-400">{t("deleteSessionConfirmBody")}</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setPendingDeleteId(null)}>
+                {t("cancel")}
+              </Button>
+              <Button type="button" size="sm" variant="destructive" onClick={() => void onConfirmDelete()}>
+                {t("confirmDelete")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
