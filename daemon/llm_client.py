@@ -74,6 +74,18 @@ def _iter_sse_json(resp: Any) -> Iterator[dict[str, Any]]:
             yield obj
 
 
+def _raise_on_stream_error(obj: dict[str, Any]) -> None:
+    """Raise ``LlmError`` when an SSE payload is a provider error frame (OpenAI ``error`` / Anthropic ``type: error``)."""
+    err = obj.get("error")
+    if not err and obj.get("type") != "error":
+        return
+    if isinstance(err, dict):
+        message = err.get("message") or err.get("type") or "unknown error"
+    else:
+        message = str(err) if err else "unknown error"
+    raise LlmError(f"LLM stream error: {message}")
+
+
 def resolve_chat_completions_url(base_url: str) -> str:
     """Return a POST URL for ``/v1/chat/completions``.
 
@@ -362,6 +374,7 @@ class LlmClient:
         try:
             with _open_http(req, self.timeout) as resp:
                 for obj in _iter_sse_json(resp):
+                    _raise_on_stream_error(obj)
                     chunk_usage = obj.get("usage")
                     if isinstance(chunk_usage, dict):
                         usage = chunk_usage
@@ -492,6 +505,7 @@ class AnthropicLlmClient:
         try:
             with _open_http(req, self.timeout) as resp:
                 for obj in _iter_sse_json(resp):
+                    _raise_on_stream_error(obj)
                     if obj.get("type") != "content_block_delta":
                         continue
                     delta = obj.get("delta") or {}

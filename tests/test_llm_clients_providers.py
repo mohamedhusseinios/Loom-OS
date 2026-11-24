@@ -213,3 +213,36 @@ def test_anthropic_chat_stream_yields_text_deltas(monkeypatch):
     client = AnthropicLlmClient(api_key="sk-ant")
     events = list(client.chat_stream([{"role": "user", "content": "x"}], model="claude-sonnet-4-5"))
     assert [(e.kind, e.text) for e in events] == [("content", "Hi")]
+
+
+class _ChunkResp:
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def __iter__(self):
+        return iter(self._chunks)
+
+
+def test_openai_chat_stream_raises_on_error_frame(monkeypatch):
+    chunks = [
+        b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+        b'data: {"error":{"message":"rate limited","type":"rate_limit_error"}}\n\n',
+    ]
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda req, timeout=120.0: _ChunkResp(chunks))
+    client = LlmClient(api_key="sk-test")
+    with pytest.raises(LlmError, match="rate limited"):
+        list(client.chat_stream([{"role": "user", "content": "hi"}], model="m"))
+
+
+def test_anthropic_chat_stream_raises_on_error_frame(monkeypatch):
+    chunks = [b'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n']
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda req, timeout=120.0: _ChunkResp(chunks))
+    client = AnthropicLlmClient(api_key="sk-ant")
+    with pytest.raises(LlmError, match="Overloaded"):
+        list(client.chat_stream([{"role": "user", "content": "x"}], model="claude-sonnet-4-5"))
