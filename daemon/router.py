@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import logging
 from datetime import datetime, timezone
@@ -42,6 +43,9 @@ class Router:
         self.extracted_store = extracted_store
         self._event_queue: asyncio.Queue[WsEvent] = asyncio.Queue()
         self.coordinator = GraphUpdateCoordinator(graph_engine, self._on_graph_updated)
+        self._context_debounce_s = 15.0
+        self._context_gen: dict[str, int] = {}
+        self._context_paths: dict[str, str] = {}
 
     async def handle_file(self, project: str, filepath: str, user: str | None = None):
         """Route an inbox file to the correct handler."""
@@ -85,6 +89,18 @@ class Router:
         if user:
             agent_id = f"{payload.agent}-{project}-{user}"
 
+        existing = await self.registry.get_project(project)
+        if existing is not None:
+            project_path = existing.project_path
+        else:
+            project_path = str(Path(payload.project_path).expanduser().resolve())
+            if not Path(project_path).is_dir():
+                raise ValueError(f"project_path is not a directory: {project_path}")
+            # Block a few high-risk roots; agents should register a code repo.
+            risky = {"/", "/etc", "/var", "/private", str(Path.home() / ".ssh"), str(Path.home() / ".gnupg")}
+            if project_path in risky or project_path.startswith("/etc/") or project_path.endswith("/.ssh"):
+                raise ValueError(f"refusing to index sensitive path: {project_path}")
+
         agent = AgentInfo(
             agent_id=agent_id,
             agent_name=payload.agent,
@@ -96,17 +112,17 @@ class Router:
             user=user,
         )
         await self.registry.upsert_agent(agent)
-        await self.registry.upsert_project(project, payload.project_path)
+        await self.registry.upsert_project(project, project_path)
 
         # Trigger initial graph build (which also scans knowledge sources and
         # regenerates the shared context). When graphify isn't available we
         # still scan knowledge sources and publish the shared context so the
         # agent joins the fabric — knowledge sharing doesn't need the graph.
         if self.graph.available:
-            asyncio.create_task(self._build_project(project, payload.project_path))
+            asyncio.create_task(self._build_project(project, project_path))
         else:
             asyncio.create_task(
-                self._scan_and_share(project, payload.project_path)
+                self._scan_and_share(project, project_path)
             )
 
         await self._emit_event("agent:online", project, {
@@ -128,10 +144,11 @@ class Router:
         if user:
             agent_id = f"{payload.agent}-{project}-{user}"
         agent = await self.registry.get_agent(agent_id)
-        if agent:
-            agent.last_heartbeat = payload.timestamp
-            agent.status = AgentStatus.ONLINE
-            await self.registry.upsert_agent(agent)
+        if agent is None:
+            raise ValueError(f"heartbeat for unknown agent {agent_id}; register first")
+        agent.last_heartbeat = payload.timestamp
+        agent.status = AgentStatus.ONLINE
+        await self.registry.upsert_agent(agent)
 
     async def _handle_finding(self, project: str, path: Path, user: str | None = None):
         content = path.read_text()
@@ -270,8 +287,28 @@ class Router:
         })
         await self._regenerate_shared_context(project, project_path)
 
+    def _schedule_shared_context(self, project: str, project_path: str) -> None:
+        """Debounce shared-context regeneration per project (trailing edge)."""
+        self._context_paths[project] = project_path
+        gen = self._context_gen.get(project, 0) + 1
+        self._context_gen[project] = gen
+        asyncio.create_task(self._debounced_shared_context(project, gen))
+
+    async def _debounced_shared_context(self, project: str, gen: int) -> None:
+        await asyncio.sleep(self._context_debounce_s)
+        if self._context_gen.get(project) != gen:
+            return
+        path = self._context_paths.get(project)
+        if not path:
+            return
+        await self._regenerate_shared_context_now(project, path)
+
     async def _regenerate_shared_context(self, project: str, project_path: str):
-        """Regenerate the shared agent context file (best-effort)."""
+        """Schedule a debounced shared-context regen (best-effort)."""
+        self._schedule_shared_context(project, project_path)
+
+    async def _regenerate_shared_context_now(self, project: str, project_path: str):
+        """Regenerate the shared agent context file immediately."""
         try:
             from daemon.shared_context import generate_shared_context
             await generate_shared_context(

@@ -27,9 +27,25 @@ def create_worktree(repo_path: str, workspace_path: str, branch: str, base_ref: 
     _run(repo_path, "worktree", "prune")
 
     if os.path.exists(workspace_path):
-        # If it's already a valid worktree for the requested branch, reuse it
+        # Reuse only when this path is a registered worktree of repo_path on branch
         branch_check = _run(workspace_path, "rev-parse", "--abbrev-ref", "HEAD")
-        if branch_check.returncode == 0 and branch_check.stdout.strip() == branch:
+        listed = _run(repo_path, "worktree", "list", "--porcelain")
+        abs_ws = str(Path(workspace_path).resolve())
+        linked = False
+        if listed.returncode == 0:
+            for line in listed.stdout.splitlines():
+                if line.startswith("worktree "):
+                    try:
+                        if str(Path(line[9:]).resolve()) == abs_ws:
+                            linked = True
+                            break
+                    except OSError:
+                        continue
+        if (
+            linked
+            and branch_check.returncode == 0
+            and branch_check.stdout.strip() == branch
+        ):
             return
         # Stale or unexpected directory: clean it up
         remove_worktree(repo_path, workspace_path)

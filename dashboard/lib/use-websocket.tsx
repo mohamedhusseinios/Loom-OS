@@ -28,13 +28,9 @@ interface WebSocketContextValue {
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
-function getWsUrl(): string {
-  const token = process.env.NEXT_PUBLIC_LOOM_AUTH_TOKEN;
-  const withToken = (url: string) =>
-    token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
-
+function baseWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) {
-    return withToken(process.env.NEXT_PUBLIC_WS_URL);
+    return process.env.NEXT_PUBLIC_WS_URL;
   }
   if (typeof window !== "undefined") {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -42,9 +38,43 @@ function getWsUrl(): string {
       window.location.hostname === "localhost"
         ? "127.0.0.1"
         : window.location.hostname;
-    return withToken(`${proto}//${host}:8472/ws`);
+    return `${proto}//${host}:8472/ws`;
   }
-  return withToken("ws://127.0.0.1:8472/ws");
+  return "ws://127.0.0.1:8472/ws";
+}
+
+function withQueryToken(url: string, token: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+}
+
+async function resolveWsUrl(): Promise<string> {
+  const url = baseWsUrl();
+  const auth = process.env.NEXT_PUBLIC_LOOM_AUTH_TOKEN;
+  if (!auth) {
+    return url;
+  }
+  // Prefer a short-lived ticket so the long-lived team secret is not logged in
+  // proxy access logs. Fall back to the team token if the ticket call fails.
+  try {
+    const apiBase =
+      process.env.NEXT_PUBLIC_API_URL ||
+      (typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:8472`
+        : "http://localhost:8472");
+    const res = await fetch(`${apiBase}/api/ws-ticket`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${auth}` },
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { ticket?: string | null };
+      if (body.ticket) {
+        return withQueryToken(url, body.ticket);
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return withQueryToken(url, auth);
 }
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
@@ -65,8 +95,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     let attempts = 0;
     let unmounted = false;
 
-    const connect = () => {
-      ws = new WebSocket(getWsUrl());
+    const connect = async () => {
+      const wsUrl = await resolveWsUrl();
+      if (unmounted) return;
+      ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         attempts = 0;
@@ -98,11 +130,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         if (reconnectTimer) clearTimeout(reconnectTimer);
         attempts += 1;
         const delay = Math.min(1000 * 2 ** (attempts - 1), 10000);
-        reconnectTimer = setTimeout(connect, delay);
+        reconnectTimer = setTimeout(() => {
+          void connect();
+        }, delay);
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
       unmounted = true;

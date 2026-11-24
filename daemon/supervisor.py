@@ -44,9 +44,12 @@ class WorkerSupervisor:
             "--max-budget-usd", str(max_budget_usd),
         ]
         logger.info("spawning one-shot worker for task %s", task_id)
-        env = None
+        import os
+        env = os.environ.copy()
+        env["LOOM_EXECUTION_OWNER"] = f"daemon:{task_id}"
         if agent == "loom-agent":
             env = self._loom_agent_env(manifest_path)
+            env["LOOM_EXECUTION_OWNER"] = f"daemon:{task_id}"
         self._procs[task_id] = subprocess.Popen(cmd, env=env)
         # This process replaces any earlier exit. Leaving the id in _exited
         # makes the JSONL tail seal the replacement run as worker_exit.

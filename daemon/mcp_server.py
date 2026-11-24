@@ -44,18 +44,42 @@ mcp = FastMCP(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _loom_base(loom_dir: str | None = None) -> Path:
+    return Path(loom_dir).expanduser() if loom_dir else Path(os.path.expanduser("~/.loom"))
+
+
+def _safe_project_id(project: str) -> str:
+    """Reject path traversal / absolute segments in a project id."""
+    if not project or not isinstance(project, str):
+        raise ValueError("project id required")
+    name = project.strip()
+    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
+        raise ValueError(f"invalid project id: {project!r}")
+    if os.sep in name or (os.altsep and os.altsep in name):
+        raise ValueError(f"invalid project id: {project!r}")
+    return name
+
+
 def _state_db_path(loom_dir: str | None = None) -> Path:
-    base = Path(loom_dir) if loom_dir else Path(os.path.expanduser("~/.loom"))
-    return base / "state.db"
+    return _loom_base(loom_dir) / "state.db"
 
 
 def _project_inbox(project: str, loom_dir: str | None = None) -> Path:
-    base = Path(loom_dir) if loom_dir else Path(os.path.expanduser("~/.loom"))
-    return base / "inbox" / project
+    base = _loom_base(loom_dir).resolve()
+    inbox_root = (base / "inbox").resolve()
+    safe = _safe_project_id(project)
+    path = (inbox_root / safe).resolve()
+    if path != inbox_root and inbox_root not in path.parents:
+        raise ValueError(f"project inbox escapes loom inbox root: {project!r}")
+    return path
 
 
 def _find_project_path(project: str, loom_dir: str | None = None) -> str | None:
     import sqlite3
+    try:
+        project = _safe_project_id(project)
+    except ValueError:
+        return None
     db = _state_db_path(loom_dir)
     if not db.exists():
         return None
@@ -169,7 +193,10 @@ def search_knowledge_graph(query: str, project: str, loom_dir: str | None = None
                     })
 
     # 2. Search inbox findings
-    inbox = _project_inbox(project, loom_dir)
+    try:
+        inbox = _project_inbox(project, loom_dir)
+    except ValueError:
+        return results
     if inbox.exists():
         query_lower = query.lower()
         for f_path in sorted(
@@ -218,7 +245,10 @@ def add_to_memory(
         agent: The agent making this addition.
         finding_type: Type of finding (e.g. "code-analysis", "bug-report").
     """
-    inbox = _project_inbox(project, loom_dir)
+    try:
+        inbox = _project_inbox(project, loom_dir)
+    except ValueError as exc:
+        return {"error": str(exc)}
     inbox.mkdir(parents=True, exist_ok=True)
 
     # Prefix if not already structured

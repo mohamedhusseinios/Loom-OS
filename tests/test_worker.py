@@ -18,6 +18,8 @@ class _CaptureWorker(Worker):
         self.patches = []
         self.findings = []
         self.progress = []
+    def _claim_execution(self, task_id):
+        return True
     def _patch_task(self, task_id, body):
         self.patches.append((task_id, body)); return {}
     def _post_progress(self, task_id, message, kind="text"):

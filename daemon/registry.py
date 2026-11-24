@@ -14,6 +14,7 @@ from daemon.models import (
     TaskSuggestionRecord, SuggestionStatus,
     AgentRunRecord,
 )
+from daemon.credentials_crypto import decrypt_api_keys_json, encrypt_api_keys_json
 from daemon.agent_credentials import (
     DEFAULT_AGENT_PROVIDERS,
     StoredAgentCredentials,
@@ -77,6 +78,10 @@ class AgentRegistry:
         self.db = await aiosqlite.connect(expanded)
         self.db.row_factory = aiosqlite.Row
         await self.db.execute("PRAGMA journal_mode=WAL")
+        try:
+            os.chmod(expanded, 0o600)
+        except OSError:
+            pass
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 agent_id TEXT PRIMARY KEY,
@@ -144,6 +149,12 @@ class AgentRegistry:
             "CREATE INDEX IF NOT EXISTS idx_agent_tasks_project_status"
             " ON agent_tasks(project, status)"
         )
+        cursor = await self.db.execute("PRAGMA table_info(agent_tasks)")
+        at_cols = [r[1] for r in await cursor.fetchall()]
+        if "execution_owner" not in at_cols:
+            await self.db.execute(
+                "ALTER TABLE agent_tasks ADD COLUMN execution_owner TEXT"
+            )
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS task_progress (
                 task_id TEXT NOT NULL,
@@ -663,7 +674,38 @@ class AgentRegistry:
         )
         await self.db.commit()
 
+    async def claim_task_execution(self, task_id: str, owner: str) -> bool:
+        """Atomically claim a Running task for execution. Returns True if claimed.
+
+        Re-claim by the same owner succeeds (one-shot worker after daemon claim).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self.db.execute(
+            "UPDATE agent_tasks SET execution_owner = ?, updated_at = ?"
+            " WHERE id = ? AND (execution_owner IS NULL OR execution_owner = ''"
+            " OR execution_owner = ?)",
+            (owner, now, task_id, owner),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def release_task_execution(self, task_id: str, owner: str | None = None) -> None:
+        """Clear execution lease. If owner is set, only that owner can release."""
+        if owner is None:
+            await self.db.execute(
+                "UPDATE agent_tasks SET execution_owner = NULL, updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), task_id),
+            )
+        else:
+            await self.db.execute(
+                "UPDATE agent_tasks SET execution_owner = NULL, updated_at = ?"
+                " WHERE id = ? AND execution_owner = ?",
+                (datetime.now(timezone.utc).isoformat(), task_id, owner),
+            )
+        await self.db.commit()
+
     async def append_progress(self, task_id: str, kind: str, message: str) -> int:
+
         cursor = await self.db.execute(
             "SELECT COALESCE(MAX(seq), 0) AS m FROM task_progress WHERE task_id = ?",
             (task_id,),
@@ -818,6 +860,7 @@ class AgentRegistry:
 
     @staticmethod
     def _row_to_agent_task(row) -> AgentTaskRecord:
+        keys = row.keys()
         return AgentTaskRecord(
             id=row["id"],
             project=row["project"],
@@ -832,6 +875,7 @@ class AgentRegistry:
             updated_at=row["updated_at"],
             workspace_path=row["workspace_path"],
             result=row["result"],
+            execution_owner=row["execution_owner"] if "execution_owner" in keys else None,
         )
 
 
@@ -908,8 +952,11 @@ class AgentRegistry:
             )
         keys = set(row.keys())
         chat = row["chat_provider"] if "chat_provider" in keys else "deepseek"
+        raw_keys = row["api_keys_json"]
+        if isinstance(raw_keys, str):
+            raw_keys = decrypt_api_keys_json(raw_keys)
         return parse_settings_row(
-            row["default_model"], row["providers_json"], row["api_keys_json"], chat,
+            row["default_model"], row["providers_json"], raw_keys, chat,
         )
 
     @staticmethod
@@ -987,7 +1034,8 @@ class AgentRegistry:
         row = await cursor.fetchone()
         if row is None:
             return {}
-        keys = json.loads(row["api_keys_json"] or "{}")
+        plain = decrypt_api_keys_json(row["api_keys_json"] or "{}")
+        keys = json.loads(plain or "{}")
         return {k: v for k, v in keys.items() if v}
 
     async def update_agent_settings(self, payload: AgentSettingsUpdate) -> AgentSettings:
@@ -1052,7 +1100,7 @@ class AgentRegistry:
             " selection_autonomy_enabled = ?, autonomy_min_fit = ?, autonomy_require_margin = ?"
             " WHERE id = 1",
             (
-                default_model, chat_provider, json.dumps(providers), json.dumps(raw_keys), filt, judg,
+                default_model, chat_provider, json.dumps(providers), encrypt_api_keys_json(json.dumps(raw_keys)), filt, judg,
                 raw_overrides, selection_autonomy_enabled, autonomy_min_fit,
                 autonomy_require_margin,
             ),

@@ -27,12 +27,14 @@ async def test_handle_register(router_with_registry):
     # Create a register.json
     inbox = tmp_path / "inbox" / "test-proj"
     inbox.mkdir(parents=True)
+    repo = tmp_path / "fake-repo"
+    repo.mkdir()
     register_file = inbox / "register.json"
     register_file.write_text(json.dumps({
         "agent": "test-agent",
         "version": "1.0",
         "project": "test-proj",
-        "project_path": str(tmp_path / "fake-repo"),
+        "project_path": str(repo),
         "capabilities": ["testing"],
     }))
 
@@ -152,12 +154,14 @@ async def test_recall_integration_preserves_existing_behavior(tmp_path):
 
     inbox = tmp_path / "inbox" / "test-proj"
     inbox.mkdir(parents=True)
+    repo = tmp_path / "fake-repo"
+    repo.mkdir()
     register_file = inbox / "register.json"
     register_file.write_text(json.dumps({
         "agent": "test-agent",
         "version": "1.0",
         "project": "test-proj",
-        "project_path": str(tmp_path / "fake-repo"),
+        "project_path": str(repo),
         "capabilities": ["testing"],
     }))
 

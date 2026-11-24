@@ -99,6 +99,11 @@ def run_agent(agent, prompt, cwd, model=None, max_budget_usd=5.0,
     spec = RUNNERS.get(agent)
     if spec is None:
         raise ValueError(f"no runner for agent {agent!r}")
+    if max_budget_usd and not spec.supports_budget:
+        logger.warning(
+            "%s ignores --max-budget-usd; enforcing LOOM_STDOUT_TIMEOUT_S wall clock instead",
+            agent,
+        )
     return run_stdout(spec, prompt, cwd, on_progress=on_progress)
 
 
@@ -153,6 +158,19 @@ class Worker:
     def _get_running_tasks(self) -> list[dict]:
         return self._api("GET", f"/api/projects/{self.project}/tasks?status=running")
 
+    def _claim_execution(self, task_id: str) -> bool:
+        owner = os.environ.get("LOOM_EXECUTION_OWNER") or f"worker:{self.agent_id}:{task_id}"
+        try:
+            resp = self._api(
+                "POST",
+                f"/api/projects/{self.project}/tasks/{task_id}/claim",
+                {"owner": owner},
+            )
+        except Exception as exc:
+            logger.warning("claim failed for %s: %s", task_id, exc)
+            return False
+        return bool(resp.get("claimed"))
+
     def _patch_task(self, task_id: str, body: dict) -> dict:
         return self._api("PATCH", f"/api/projects/{self.project}/tasks/{task_id}", body)
 
@@ -186,6 +204,9 @@ class Worker:
 
     def _run_process_task(self, task: dict) -> None:
         task_id = task["id"]
+        if not self._claim_execution(task_id):
+            logger.info("task %s already claimed; skipping", task_id)
+            return
         title = task.get("title", "")
         instruction = task.get("instruction", "")
         criteria = task.get("acceptance_criteria") or ""

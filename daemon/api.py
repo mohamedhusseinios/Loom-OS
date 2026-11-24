@@ -66,6 +66,37 @@ WORKER_MAX_BUDGET_USD = 5.0
 supervisor: Optional[WorkerSupervisor] = None
 
 LOOM_WORKER_AGENTS = runners.runnable_agents()   # registry-derived: agents the worker can spawn
+
+
+# Allowed Kanban status transitions (from -> set of to). Same status is always ok.
+_ALLOWED_TASK_TRANSITIONS: dict[AgentTaskStatus, set[AgentTaskStatus]] = {
+    AgentTaskStatus.TRIAGE: {AgentTaskStatus.TODO, AgentTaskStatus.READY, AgentTaskStatus.DONE, AgentTaskStatus.ARCHIVED},
+    AgentTaskStatus.TODO: {AgentTaskStatus.READY, AgentTaskStatus.RUNNING, AgentTaskStatus.DONE, AgentTaskStatus.TRIAGE, AgentTaskStatus.ARCHIVED},
+    AgentTaskStatus.READY: {AgentTaskStatus.RUNNING, AgentTaskStatus.TODO, AgentTaskStatus.DONE, AgentTaskStatus.BLOCKED, AgentTaskStatus.ARCHIVED},
+    AgentTaskStatus.RUNNING: {AgentTaskStatus.DONE, AgentTaskStatus.BLOCKED, AgentTaskStatus.READY},
+    AgentTaskStatus.BLOCKED: {AgentTaskStatus.READY, AgentTaskStatus.RUNNING, AgentTaskStatus.TODO, AgentTaskStatus.ARCHIVED},
+    AgentTaskStatus.DONE: {AgentTaskStatus.ARCHIVED, AgentTaskStatus.READY},
+    AgentTaskStatus.ARCHIVED: {AgentTaskStatus.TODO},
+}
+
+
+async def _require_task_in_project(project_id: str, task_id: str) -> AgentTaskRecord:
+    """Load a task and ensure it belongs to project_id (404 otherwise)."""
+    record = await registry.get_agent_task(task_id)
+    if record is None or record.project != project_id:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    return record
+
+
+def _validate_status_transition(current: AgentTaskStatus, new: AgentTaskStatus) -> None:
+    if current == new:
+        return
+    allowed = _ALLOWED_TASK_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status transition: {current.value} -> {new.value}",
+        )
 LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
 agent_runtime: Optional[AgentRuntime] = None
 
@@ -140,9 +171,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Loom", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(TokenAuthMiddleware)
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("LOOM_CORS_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -734,6 +772,9 @@ async def _route_task_execution(project_id: str, task: AgentTaskRecord, manifest
         project = await registry.get_project(project_id)
         if project is None:
             return False
+        owner = f"daemon:{task.id}"
+        if not await registry.claim_task_execution(task.id, owner):
+            return False
         supervisor.spawn(
             project_id, agent, project.project_path, task.id,
             WORKER_MAX_BUDGET_USD, manifest_path=manifest_path,
@@ -780,9 +821,16 @@ async def list_agent_tasks(project_id: str, status: str = None):
 @app.patch("/api/projects/{project_id}/tasks/{task_id}")
 async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpdatePayload):
     """Update an agent task's status, assignee, or result."""
-    record = await registry.get_agent_task(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+    record = await _require_task_in_project(project_id, task_id)
+    if payload.status is not None:
+        _validate_status_transition(record.status, payload.status)
+        if payload.status == AgentTaskStatus.RUNNING:
+            deps = record.dependencies or []
+            if deps and not await registry._all_agent_task_deps_done(deps):
+                raise HTTPException(status_code=400, detail="Task dependencies are not done")
+            if record.status not in (AgentTaskStatus.READY, AgentTaskStatus.BLOCKED):
+                # transition table already guards; keep explicit message for deps path
+                pass
     await registry.update_agent_task(
         task_id,
         status=payload.status,
@@ -790,6 +838,8 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         result=payload.result,
         workspace_path=payload.workspace_path,
     )
+    if payload.status is not None and payload.status != AgentTaskStatus.RUNNING:
+        await registry.release_task_execution(task_id)
     updated = await registry.get_agent_task(task_id)
     if updated is None:
         raise HTTPException(status_code=500, detail="Task update failed")
@@ -831,6 +881,7 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
 @app.post("/api/projects/{project_id}/tasks/{task_id}/progress")
 async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayload):
     """Persist a progress line and relay it to WebSocket clients."""
+    await _require_task_in_project(project_id, task_id)
     seq = await registry.append_progress(task_id, payload.kind, payload.message)
     if router:
         await router._emit_event("task:progress", project_id, {
@@ -842,6 +893,7 @@ async def task_progress(project_id: str, task_id: str, payload: TaskProgressPayl
 @app.get("/api/projects/{project_id}/tasks/{task_id}/progress")
 async def get_task_progress(project_id: str, task_id: str):
     """Return the persisted progress transcript for a task, ordered by seq."""
+    await _require_task_in_project(project_id, task_id)
     items = await registry.list_progress(task_id)
     return {"items": [i.model_dump() for i in items]}
 
@@ -849,9 +901,7 @@ async def get_task_progress(project_id: str, task_id: str):
 @app.post("/api/projects/{project_id}/tasks/{task_id}/worker/start")
 async def worker_start(project_id: str, task_id: str):
     """Manually (re)start execution for a task with an assignee (routes by assignee)."""
-    record = await registry.get_agent_task(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+    record = await _require_task_in_project(project_id, task_id)
     if not record.assignee:
         raise HTTPException(status_code=400, detail="Task has no assignee")
     started = await _route_task_execution(project_id, record)
@@ -863,9 +913,7 @@ async def worker_stop(project_id: str, task_id: str):
     """Stop a live worker and mark its task blocked (cancelled by user)."""
     if supervisor is None:
         raise HTTPException(status_code=503, detail="Worker supervisor unavailable")
-    record = await registry.get_agent_task(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+    record = await _require_task_in_project(project_id, task_id)
     was_running = supervisor.stop(task_id)
     try:
         meta = _json.loads(record.result or "{}")
@@ -874,6 +922,7 @@ async def worker_stop(project_id: str, task_id: str):
     meta["cancelled"] = True
     await registry.update_agent_task(task_id, status=AgentTaskStatus.BLOCKED,
                                      result=_json.dumps(meta))
+    await registry.release_task_execution(task_id)
     updated = await registry.get_agent_task(task_id)
     if router:
         await router._emit_event("worker:exited", project_id, {"id": task_id})
@@ -1288,9 +1337,7 @@ def _task_base_branch(record: AgentTaskRecord) -> str:
 @app.get("/api/projects/{project_id}/tasks/{task_id}/diff")
 async def task_diff(project_id: str, task_id: str):
     """Return the git diff for a task's worktree branch vs its base branch."""
-    record = await registry.get_agent_task(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+    record = await _require_task_in_project(project_id, task_id)
     branch = f"loom/task-{task_id}"
     if not record.workspace_path:
         return {"diff": "", "branch": branch}
@@ -1323,9 +1370,7 @@ async def task_merge(project_id: str, task_id: str,
     Body is optional: ``{"target": "<branch>", "remote": <bool>}``. With no
     body, merges into the repo's current branch (backward compatible).
     """
-    record = await registry.get_agent_task(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+    record = await _require_task_in_project(project_id, task_id)
     project = await registry.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1672,6 +1717,29 @@ async def get_federated_references(symbol: str = ""):
     idx = await _get_federated_index()
     refs = await idx.cross_project_references(symbol.strip())
     return {"symbol": symbol, "references": refs}
+
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/claim")
+async def claim_task_execution(project_id: str, task_id: str, payload: dict | None = Body(default=None)):
+    """Atomically claim a Running task for worker execution."""
+    record = await _require_task_in_project(project_id, task_id)
+    owner = (payload or {}).get("owner") or f"worker:{task_id}"
+    if not isinstance(owner, str) or not owner.strip():
+        raise HTTPException(status_code=400, detail="owner must be a non-empty string")
+    claimed = await registry.claim_task_execution(task_id, owner.strip())
+    return {"claimed": claimed, "task_id": task_id, "status": record.status.value}
+
+
+@app.post("/api/ws-ticket")
+async def create_ws_ticket(_=Depends(require_token)):
+    """Issue a short-lived WebSocket ticket (team mode). No-op body when auth off."""
+    from daemon.auth import is_auth_enabled, issue_ws_ticket
+    if not is_auth_enabled():
+        return {"ticket": None, "ttl_s": 0}
+    ticket = issue_ws_ticket()
+    from daemon.auth import WS_TICKET_TTL_S
+    return {"ticket": ticket, "ttl_s": WS_TICKET_TTL_S}
 
 
 @app.websocket("/ws")

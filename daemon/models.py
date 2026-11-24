@@ -208,6 +208,7 @@ class AgentTaskRecord(BaseModel):
     updated_at: str
     workspace_path: Optional[str] = None
     result: Optional[str] = None
+    execution_owner: Optional[str] = None
 
 
 class AgentTaskUpdatePayload(BaseModel):

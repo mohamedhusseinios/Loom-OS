@@ -995,9 +995,12 @@ def test_token_auth_middleware_blocks_writes_when_token_configured(client, tmp_p
     proj_dir.mkdir()
     configure_auth_token("secret-token")
     try:
-        # GET is allowed without auth
+        # GET /api/* requires token when auth is on (health stays public)
         get_resp = client.get("/api/projects")
-        assert get_resp.status_code == 200
+        assert get_resp.status_code == 401
+        assert client.get("/api/health").status_code == 200
+        ok_get = client.get("/api/projects", headers={"Authorization": "Bearer secret-token"})
+        assert ok_get.status_code == 200
 
         # POST without token is rejected with 401
         post_resp = client.post("/api/projects", json={"name": "newproj", "path": str(proj_dir)})

@@ -1,3 +1,4 @@
+import os
 import pytest
 from daemon.runners import (
     AgentResult, RunnerSpec, RUNNERS, runnable_agents, run_stdout,
@@ -14,12 +15,24 @@ def test_runnable_agents_is_registry_keys():
 
 @pytest.mark.parametrize("agent, expected", [
     ("hermes", ["-z", "do X"]),
+    ("codex", ["exec", "do X"]),
+    ("gemini-cli", ["-p", "do X"]),
+    ("copilot-cli", ["-p", "do X"]),
+    ("aider", ["--message", "do X"]),
+])
+def test_build_argv_safe_defaults(agent, expected, monkeypatch):
+    monkeypatch.delenv("LOOM_ALLOW_UNSAFE_RUNNERS", raising=False)
+    assert RUNNERS[agent].build_argv("do X") == expected
+
+
+@pytest.mark.parametrize("agent, expected", [
     ("codex", ["exec", "--dangerously-bypass-approvals-and-sandbox", "do X"]),
     ("gemini-cli", ["-p", "do X", "--approval-mode", "yolo"]),
     ("copilot-cli", ["-p", "do X", "--allow-all-tools"]),
     ("aider", ["--message", "do X", "--yes-always"]),
 ])
-def test_build_argv_per_stdout_agent(agent, expected):
+def test_build_argv_unsafe_opt_in(agent, expected, monkeypatch):
+    monkeypatch.setenv("LOOM_ALLOW_UNSAFE_RUNNERS", "1")
     assert RUNNERS[agent].build_argv("do X") == expected
 
 
@@ -45,3 +58,13 @@ def test_run_stdout_nonzero_exit_is_error(tmp_path):
     res = run_stdout(spec, "ignored", str(tmp_path))
     assert res.is_error is True
     assert "oops" in res.text
+
+
+def test_run_stdout_timeout(tmp_path):
+    spec = RunnerSpec(
+        binary="sleep", mode="stdout",
+        build_argv=lambda p: ["2"],
+    )
+    res = run_stdout(spec, "ignored", str(tmp_path), timeout_s=0.1)
+    assert res.is_error is True
+    assert "timeout" in res.text.lower()
