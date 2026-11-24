@@ -78,7 +78,9 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
         rehypePlugins={[[rehypePrettyCode, { theme: "github-dark", keepBackground: false }]]}
         components={{
           a: ({ href, children }) =>
-            isSafeLinkHref(href) ? (
+            variant === "compact" ? (
+              <span>{children}</span>
+            ) : isSafeLinkHref(href) ? (
               <a href={href} target="_blank" rel="noreferrer" className="text-sky-400 underline underline-offset-2">
                 {children}
               </a>
