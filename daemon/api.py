@@ -40,7 +40,7 @@ from daemon.models import (
     ListModelsRequest, ListModelsResponse,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from daemon.models import ImplementRequest
 from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
 from daemon.llm_client import LlmError, list_remote_models
@@ -1137,6 +1137,35 @@ async def agent_chat(project_id: str, payload: AgentChatRequest):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return result.model_dump()
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/projects/{project_id}/agent/chat/stream")
+async def agent_chat_stream(project_id: str, payload: AgentChatRequest):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    runtime = _get_agent_runtime()
+    try:
+        await runtime._available_llm()
+    except LlmError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async def gen():
+        try:
+            async for item in runtime.chat_stream(project_id, project.project_path, payload):
+                event = item.pop("event")
+                yield _sse(event, item)
+        except (LlmError, ValueError) as e:
+            yield _sse("error", {"message": str(e)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
 
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/suggest")

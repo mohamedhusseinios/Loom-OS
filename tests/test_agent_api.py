@@ -1668,3 +1668,125 @@ def test_removing_custom_chat_provider_persists(client):
     assert removed.json()["chat_provider"] == "deepseek"
     again = client.get("/api/agent/settings")
     assert "custom-gone" not in {p["id"] for p in again.json()["providers"]}
+
+
+def _configure_keyless_local_chat(client):
+    saved = client.put("/api/agent/settings", json={
+        "default_model": "llama-3.1-8b",
+        "chat_provider": "local-llm",
+        "providers": [{
+            "id": "local-llm",
+            "name": "Local",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "model_ids": ["llama-3.1-8b"],
+            "api_style": "openai",
+            "kind": "openai_compatible",
+        }],
+    })
+    assert saved.status_code == 200, saved.text
+
+
+async def test_agent_chat_stream_sse(client, monkeypatch, tmp_path):
+    _configure_keyless_local_chat(client)
+    graph_dir = tmp_path / "noor" / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    (graph_dir / "graph.json").write_text(json.dumps({"nodes": [], "links": []}))
+    chunks = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n\n',
+        b'data: {"choices":[{"delta":{"content":"a"}}]}\n\n',
+        b'data: {"choices":[{"delta":{"content":"b"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+
+    class _StreamResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def __iter__(self):
+            return iter(chunks)
+
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda req, timeout=120.0: _StreamResp())
+
+    with client.stream("POST", "/api/projects/noor/agent/chat/stream", json={"message": "hi"}) as res:
+        assert res.status_code == 200
+        assert "text/event-stream" in res.headers.get("content-type", "")
+        body = "".join(res.iter_text())
+    assert "event: meta" in body
+    assert "event: reasoning_delta" in body
+    assert "event: content_delta" in body
+    assert "event: done" in body
+    done = [b for b in body.split("\n\n") if b.startswith("event: done")][0]
+    data = json.loads(done.split("data: ", 1)[1])
+    assert data["reply"] == "ab"
+    assert data["reasoning"] == "think"
+
+    msgs = client.get(f"/api/projects/noor/agent/chats/{data['chat_id']}/messages").json()["messages"]
+    assert [(m["role"], m["content"]) for m in msgs] == [("user", "hi"), ("assistant", "ab")]
+
+
+def test_agent_chat_stream_missing_project_404(client):
+    res = client.post("/api/projects/missing/agent/chat/stream", json={"message": "hi"})
+    assert res.status_code == 404
+
+
+def test_agent_chat_stream_without_key_returns_400(client):
+    res = client.post("/api/projects/noor/agent/chat/stream", json={"message": "hi"})
+    assert res.status_code == 400
+    assert "API key" in res.json()["detail"]
+
+
+async def test_agent_chat_stream_persists_partial_on_error(client, monkeypatch, tmp_path):
+    _configure_keyless_local_chat(client)
+    graph_dir = tmp_path / "noor" / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    (graph_dir / "graph.json").write_text(json.dumps({"nodes": [], "links": []}))
+
+    class _BrokenResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"part"}}]}\n\n'
+            raise OSError("connection reset")
+
+    monkeypatch.setattr("daemon.llm_client._open_http", lambda req, timeout=120.0: _BrokenResp())
+
+    with client.stream("POST", "/api/projects/noor/agent/chat/stream", json={"message": "hi"}) as res:
+        body = "".join(res.iter_text())
+    assert "event: error" in body
+    assert "connection reset" in body
+    meta = [b for b in body.split("\n\n") if b.startswith("event: meta")][0]
+    chat_id = json.loads(meta.split("data: ", 1)[1])["chat_id"]
+    msgs = client.get(f"/api/projects/noor/agent/chats/{chat_id}/messages").json()["messages"]
+    assert [(m["role"], m["content"]) for m in msgs] == [("user", "hi"), ("assistant", "part")]
+
+
+async def test_agent_chat_stream_task_chat_one_shot(client):
+    _configure_keyless_local_chat(client)
+    tid = await api_module.registry.create_agent_task(AgentTaskCreatePayload(
+        project="noor", title="Fix bug", instruction="fix null",
+    ))
+    fake = SuggestResult(
+        action_id="loom.move_ready",
+        action_label="Move task to Ready",
+        confidence=0.8,
+        prose="Promote to ready",
+        catalog=[{"id": "loom.move_ready", "label": "Move task to Ready"}],
+        reply="Promote to ready",
+    )
+    with patch("daemon.agent_runtime.Orchestrator.run_suggest_cycle", return_value=fake):
+        with client.stream("POST", "/api/projects/noor/agent/chat/stream", json={"message": "hi", "task_id": tid}) as res:
+            body = "".join(res.iter_text())
+    events = [b.split("\n", 1)[0] for b in body.strip().split("\n\n")]
+    assert events == ["event: meta", "event: content_delta", "event: done"]
+    done = json.loads(body.strip().split("\n\n")[-1].split("data: ", 1)[1])
+    assert done["reply"] == "Promote to ready"
+    assert done["suggestion_id"]
+    msgs = client.get(f"/api/projects/noor/agent/chats/{done['chat_id']}/messages").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant"]

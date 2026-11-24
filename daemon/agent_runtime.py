@@ -7,8 +7,10 @@ import dataclasses
 import json
 import logging
 import os
+import threading
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from coding_agent.selection import RankedStrategy
 from coding_agent.session import DEFAULT_COST_LIMIT_USD, DEFAULT_STEP_LIMIT, DEFAULT_TOKEN_LIMIT
 from daemon.agent_credentials import is_custom_chat_provider_id, resolve_chat_key
 from daemon.decision import NullDecisionClient, DecisionClient, build_decision_clients, resolve_decision_config
-from daemon.llm_client import LlmError, build_llm_client, history_with_reasoning
+from daemon.llm_client import LlmError, StreamDelta, build_llm_client, history_with_reasoning
 from daemon.models import (
     AgentChatRequest, AgentChatResponse, AgentTaskStatus, ImplementRequest, SuggestionStatus,
 )
@@ -219,12 +221,12 @@ class AgentRuntime:
             logger.warning("hybrid_query failed while retrieving context", exc_info=True)
             return []
 
-    async def _project_chat_reply(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict], llm, model: str | None) -> str:
-        """Ground project-level chat in SHARED_CONTEXT + hybrid graph hits (no task orchestrator)."""
+    async def _project_chat_messages(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict]) -> tuple[list[dict], list[dict]] | None:
+        """Return ``(messages, no_history_messages)`` for project chat, or None when graph memory is empty."""
         hits = await self._hybrid_hits(project_path, project_id, message)
         graph_path = Path(project_path) / "graphify-out" / "graph.json"
         if not hits and not graph_path.exists():
-            return _EMPTY_GRAPH_REPLY
+            return None
 
         pack = build_context_pack(hits)
         shared = _load_shared_context(project_path)
@@ -245,22 +247,49 @@ class AgentRuntime:
         prior = history_with_reasoning(
             [m for m in chat_msgs[:-1] if m.get("role") in ("user", "assistant")]
         )[-CHAT_HISTORY_LIMIT:]
-        messages: list[dict] = [{"role": "system", "content": system_with_context}]
-        messages.extend(prior)
-        messages.append({"role": "user", "content": message})
+        bare = [{"role": "system", "content": system_with_context}, {"role": "user", "content": message}]
+        messages: list[dict] = [bare[0], *prior, bare[1]]
+        return messages, (bare if prior else [])
+
+    async def _project_chat_reply(self, project_id: str, project_path: str, message: str, chat_msgs: list[dict], llm, model: str | None) -> str:
+        """Ground project-level chat in SHARED_CONTEXT + hybrid graph hits (no task orchestrator)."""
+        built = await self._project_chat_messages(project_id, project_path, message, chat_msgs)
+        if built is None:
+            return _EMPTY_GRAPH_REPLY
+        messages, bare = built
         try:
             return await asyncio.to_thread(llm.chat, messages, model)
         except LlmError as exc:
             # Reasoning models (Reflection Beam, DeepSeek-R1, …) require prior
             # assistant reasoning_content. Old sessions lack it — retry without history.
-            if "reasoning_content" not in str(exc) or not prior:
+            if "reasoning_content" not in str(exc) or not bare:
                 raise
             logger.warning("provider requires reasoning_content; retrying without prior turns")
-            return await asyncio.to_thread(
-                llm.chat,
-                [{"role": "system", "content": system_with_context}, {"role": "user", "content": message}],
-                model,
-            )
+            return await asyncio.to_thread(llm.chat, bare, model)
+
+    async def _stream_llm(self, llm, messages: list[dict], model: str | None) -> AsyncIterator[StreamDelta]:
+        """Bridge the blocking ``llm.chat_stream`` generator onto the event loop, delta by delta."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        done = object()
+
+        def worker() -> None:
+            try:
+                for delta in llm.chat_stream(messages, model):
+                    loop.call_soon_threadsafe(queue.put_nowait, delta)
+            except BaseException as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, done)
+
+        threading.Thread(target=worker, daemon=True).start()
+        while True:
+            item = await queue.get()
+            if item is done:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
 
     async def _stored_credentials(self):
         cursor = await self.registry.db.execute(
@@ -281,11 +310,14 @@ class AgentRuntime:
         raw_keys = await self.registry.get_raw_api_keys()
         return settings, raw_keys
 
-    async def chat(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AgentChatResponse:
+    async def _available_llm(self):
         llm, model = await self._llm_from_settings()
         if not llm.available:
             raise LlmError("API key not configured — add it in Agent settings")
+        return llm, model
 
+    async def _prepare_chat(self, project_id: str, payload: AgentChatRequest):
+        """Load or create the chat, persist the user message once, and return ``(chat, chat_msgs)``."""
         chat = None
         if payload.chat_id:
             chat = await self.registry.get_agent_chat(payload.chat_id)
@@ -302,44 +334,105 @@ class AgentRuntime:
             if m.role == "assistant" and m.reasoning_content:
                 item["reasoning_content"] = m.reasoning_content
             chat_msgs.append(item)
+        return chat, chat_msgs
+
+    async def _task_chat_reply(self, project_id: str, project_path: str, payload: AgentChatRequest, chat_msgs: list[dict], llm, model: str | None) -> tuple[str, str]:
+        """Run the task orchestrator for one chat turn. Returns ``(reply, suggestion_id)``."""
+        task = await self.registry.get_agent_task(payload.task_id)
+        if task is None:
+            raise ValueError(f"task not found: {payload.task_id}")
+        settings, raw_keys = await self._decision_settings()
+        orch = Orchestrator(self.graph_engine, llm=llm)
+        result = await orch.run_suggest_cycle(
+            project_path, project_id, task,
+            chat_messages=history_with_reasoning(chat_msgs[:-1]),
+            user_message=payload.message,
+            model=model,
+            settings=settings,
+            raw_keys=raw_keys,
+        )
+        sug = await self.registry.create_task_suggestion(
+            project_id, task.id, result.action_id, result.action_label,
+            result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
+        )
+        if self.emit_event:
+            await self.emit_event("task:suggestion", project_id, sug.model_dump(mode="json"))
+        return result.reply, sug.id
+
+    async def _finish_chat(self, project_id: str, chat_id: str, reply: str, reasoning: str | None) -> None:
+        await self.registry.add_agent_message(chat_id, "assistant", reply, reasoning_content=reasoning)
+        if self.emit_event:
+            await self.emit_event("agent:message", project_id, {
+                "chat_id": chat_id, "role": "assistant", "content": reply,
+                "reasoning": reasoning,
+            })
+
+    async def chat(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AgentChatResponse:
+        llm, model = await self._available_llm()
+        chat, chat_msgs = await self._prepare_chat(project_id, payload)
 
         suggestion_id = None
-        reply = ""
         if payload.task_id:
-            task = await self.registry.get_agent_task(payload.task_id)
-            if task is None:
-                raise ValueError(f"task not found: {payload.task_id}")
-            settings, raw_keys = await self._decision_settings()
-            orch = Orchestrator(self.graph_engine, llm=llm)
-            result = await orch.run_suggest_cycle(
-                project_path, project_id, task,
-                chat_messages=history_with_reasoning(chat_msgs[:-1]),
-                user_message=payload.message,
-                model=model,
-                settings=settings,
-                raw_keys=raw_keys,
-            )
-            reply = result.reply
-            sug = await self.registry.create_task_suggestion(
-                project_id, task.id, result.action_id, result.action_label,
-                result.confidence, result.prose, result.catalog, **_suggestion_fields(result),
-            )
-            suggestion_id = sug.id
-            if self.emit_event:
-                await self.emit_event("task:suggestion", project_id, sug.model_dump(mode="json"))
+            reply, suggestion_id = await self._task_chat_reply(project_id, project_path, payload, chat_msgs, llm, model)
         else:
             reply = await self._project_chat_reply(
                 project_id, project_path, payload.message, chat_msgs, llm, model,
             )
 
         reasoning = getattr(llm, "last_reasoning_content", None)
-        await self.registry.add_agent_message(chat.id, "assistant", reply, reasoning_content=reasoning)
-        if self.emit_event:
-            await self.emit_event("agent:message", project_id, {
-                "chat_id": chat.id, "role": "assistant", "content": reply,
-                "reasoning": reasoning,
-            })
+        await self._finish_chat(project_id, chat.id, reply, reasoning)
         return AgentChatResponse(chat_id=chat.id, reply=reply, suggestion_id=suggestion_id, reasoning=reasoning)
+
+    async def chat_stream(self, project_id: str, project_path: str, payload: AgentChatRequest) -> AsyncIterator[dict]:
+        """Like ``chat`` but yields SSE-shaped event dicts; project chat streams token deltas."""
+        llm, model = await self._available_llm()
+        chat, chat_msgs = await self._prepare_chat(project_id, payload)
+        yield {"event": "meta", "chat_id": chat.id}
+
+        reply = ""
+        reasoning: str | None = None
+        suggestion_id = None
+        try:
+            if payload.task_id:
+                reply, suggestion_id = await self._task_chat_reply(project_id, project_path, payload, chat_msgs, llm, model)
+                reasoning = getattr(llm, "last_reasoning_content", None)
+                if reasoning:
+                    yield {"event": "reasoning_delta", "text": reasoning}
+                if reply:
+                    yield {"event": "content_delta", "text": reply}
+            else:
+                built = await self._project_chat_messages(project_id, project_path, payload.message, chat_msgs)
+                if built is None:
+                    reply = _EMPTY_GRAPH_REPLY
+                    yield {"event": "content_delta", "text": reply}
+                else:
+                    messages, bare = built
+                    attempts = [messages, bare] if bare else [messages]
+                    for i, attempt in enumerate(attempts):
+                        try:
+                            async for delta in self._stream_llm(llm, attempt, model):
+                                if delta.kind == "reasoning":
+                                    reasoning = (reasoning or "") + delta.text
+                                    yield {"event": "reasoning_delta", "text": delta.text}
+                                else:
+                                    reply += delta.text
+                                    yield {"event": "content_delta", "text": delta.text}
+                            break
+                        except LlmError as exc:
+                            # Same reasoning_content retry as _project_chat_reply, only before any delta.
+                            if i + 1 == len(attempts) or "reasoning_content" not in str(exc) or reply or reasoning:
+                                raise
+                            logger.warning("provider requires reasoning_content; retrying without prior turns")
+                    if reasoning is not None and not reasoning.strip():
+                        reasoning = None
+            await self._finish_chat(project_id, chat.id, reply, reasoning)
+        except Exception as exc:
+            logger.warning("streamed chat failed for %s", chat.id, exc_info=True)
+            if reply or reasoning:
+                await self.registry.add_agent_message(chat.id, "assistant", reply, reasoning_content=reasoning)
+            yield {"event": "error", "message": str(exc)}
+            return
+        yield {"event": "done", "chat_id": chat.id, "reply": reply, "reasoning": reasoning, "suggestion_id": suggestion_id}
 
     async def suggest(self, project_id: str, project_path: str, task_id: str, force: bool = True):
         task = await self.registry.get_agent_task(task_id)
