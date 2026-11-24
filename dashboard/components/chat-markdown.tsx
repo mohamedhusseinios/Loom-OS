@@ -26,6 +26,7 @@ function isSafeLinkHref(href: string | undefined): href is string {
 function CodeBlockPre(props: { children: ReactNode; copyLabel?: string; copiedLabel?: string }) {
   const { children, copyLabel = "Copy code", copiedLabel = "Copied" } = props;
   const preRef = useRef<HTMLPreElement>(null);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -34,7 +35,11 @@ function CodeBlockPre(props: { children: ReactNode; copyLabel?: string; copiedLa
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetTimerRef.current = null;
+      }, 1500);
     } catch {
       /* clipboard unavailable */
     }

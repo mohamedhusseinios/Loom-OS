@@ -68,6 +68,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [fontScale, setFontScale] = useState(1);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -160,7 +161,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       return;
     }
     setCopiedKey(key);
-    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+    copyResetTimerRef.current = window.setTimeout(() => {
+      setCopiedKey((k) => (k === key ? null : k));
+      copyResetTimerRef.current = null;
+    }, 1500);
   }
 
   function startNewChat() {
@@ -435,7 +440,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                       variant="ghost"
                       className="h-6 gap-1 px-1.5 text-[10px] text-zinc-500 hover:text-zinc-100"
                       title={copiedKey === `${i}:thinking` ? t("copied") : t("copyThinking")}
-                      aria-label={t("copyThinking")}
+                      aria-label={copiedKey === `${i}:thinking` ? t("copied") : t("copyThinking")}
                       onClick={() => void copyText(m.reasoning || "", `${i}:thinking`)}
                     >
                       {copiedKey === `${i}:thinking` ? <Check className="h-3 w-3" /> : <Brain className="h-3 w-3" />}
@@ -449,7 +454,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                       variant="ghost"
                       className="h-6 gap-1 px-1.5 text-[10px] text-zinc-500 hover:text-zinc-100"
                       title={copiedKey === `${i}:message` ? t("copied") : t("copyMessage")}
-                      aria-label={t("copyMessage")}
+                      aria-label={copiedKey === `${i}:message` ? t("copied") : t("copyMessage")}
                       onClick={() => void copyText(m.content, `${i}:message`)}
                     >
                       {copiedKey === `${i}:message` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
