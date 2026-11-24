@@ -673,7 +673,7 @@ wheels = [
 
 [[package]]
 name = "loom-os"
-version = "0.3.0a5"
+version = "0.3.0a6"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

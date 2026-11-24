@@ -2,6 +2,29 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.6] — 2026-11-24
+
+Sixth public alpha after `v0.3.0-alpha.5`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with Agent chat Markdown rendering, font zoom, copy actions, and live SSE streaming.
+
+### Highlights
+
+- **Markdown chat bubbles** — GFM replies (headings, lists, tables, highlighted code) in user/assistant/thinking bubbles, session previews, and suggestion prose; link hrefs sanitized
+- **Chat font zoom** — header A−/A+ plus Ctrl/Cmd ±/0 and Ctrl/Cmd+wheel; scale persists in `localStorage`
+- **Copy actions** — copy message, thinking, and fenced code blocks with brief “Copied” feedback
+- **Live token streaming** — `POST .../agent/chat/stream` (SSE) for project chat; task chat stays one-shot through the same path; dashboard updates the assistant bubble live and aborts on session change
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.6
+./run.sh --open
+# or: pip install -e ".[dev,llm]" && loom start
+```
+
+**macOS app:** download `Loom-Coding-Agent-0.3.0a6.dmg` or `Loom-Coding-Agent-Tauri-0.3.0a6-aarch64.dmg` from this release, open it, and run **Loom Coding Agent** (first launch installs under `~/Library/Application Support/LoomCodingAgent`).
+
 ## [0.3.0-alpha.5] — 2026-11-24
 
 Fifth public alpha after `v0.3.0-alpha.4`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with Agent chat Thinking UI and session archive/delete.
