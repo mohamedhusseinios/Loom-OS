@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Archive, ArchiveRestore, Loader2, MessageSquarePlus, Send, Settings, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Brain, Check, Copy, Loader2, MessageSquarePlus, Send, Settings, Trash2 } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
@@ -67,6 +67,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [showArchived, setShowArchived] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [fontScale, setFontScale] = useState(1);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -151,6 +152,16 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       setLoadingMessages(false);
     }
   }, [projectId, t]);
+
+  async function copyText(text: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+  }
 
   function startNewChat() {
     setChatId(undefined);
@@ -415,6 +426,38 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                   : "me-8 bg-zinc-900 text-zinc-300"
               }`}
             >
+              {m.role === "assistant" && (m.content || m.reasoning) ? (
+                <div className="mb-1 flex items-center justify-end gap-0.5">
+                  {m.reasoning ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 px-1.5 text-[10px] text-zinc-500 hover:text-zinc-100"
+                      title={copiedKey === `${i}:thinking` ? t("copied") : t("copyThinking")}
+                      aria-label={t("copyThinking")}
+                      onClick={() => void copyText(m.reasoning || "", `${i}:thinking`)}
+                    >
+                      {copiedKey === `${i}:thinking` ? <Check className="h-3 w-3" /> : <Brain className="h-3 w-3" />}
+                      {copiedKey === `${i}:thinking` ? t("copied") : null}
+                    </Button>
+                  ) : null}
+                  {m.content ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 px-1.5 text-[10px] text-zinc-500 hover:text-zinc-100"
+                      title={copiedKey === `${i}:message` ? t("copied") : t("copyMessage")}
+                      aria-label={t("copyMessage")}
+                      onClick={() => void copyText(m.content, `${i}:message`)}
+                    >
+                      {copiedKey === `${i}:message` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      {copiedKey === `${i}:message` ? t("copied") : null}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
               {m.role === "assistant" && m.reasoning ? (
                 <details className="group/think mb-2 rounded border border-zinc-800 bg-zinc-950/70 open:bg-zinc-950/90">
                   <summary className="cursor-pointer select-none list-none px-2 py-1.5 text-[11px] font-medium text-zinc-400 marker:content-none [&::-webkit-details-marker]:hidden">
@@ -424,12 +467,17 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                     </span>
                   </summary>
                   <div className="border-t border-zinc-800 px-2.5 py-2">
-                    <ChatMarkdown content={m.reasoning || ""} variant="muted" />
+                    <ChatMarkdown
+                      content={m.reasoning || ""}
+                      variant="muted"
+                      copyCodeLabel={t("copyCode")}
+                      copiedLabel={t("copied")}
+                    />
                   </div>
                 </details>
               ) : null}
               {m.content ? (
-                <ChatMarkdown content={m.content} />
+                <ChatMarkdown content={m.content} copyCodeLabel={t("copyCode")} copiedLabel={t("copied")} />
               ) : m.reasoning ? (
                 <p className="text-xs text-zinc-500">{t("reasoningOnlyHint")}</p>
               ) : null}

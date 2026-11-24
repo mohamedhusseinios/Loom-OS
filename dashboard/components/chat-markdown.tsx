@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypePrettyCode from "rehype-pretty-code";
@@ -21,8 +23,47 @@ function isSafeLinkHref(href: string | undefined): href is string {
   return lower.startsWith("http:") || lower.startsWith("https:") || lower.startsWith("mailto:");
 }
 
-export function ChatMarkdown(props: { content: string; className?: string; variant?: Variant }) {
-  const { content, className, variant = "default" } = props;
+function CodeBlockPre(props: { children: ReactNode; copyLabel?: string; copiedLabel?: string }) {
+  const { children, copyLabel = "Copy code", copiedLabel = "Copied" } = props;
+  const preRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    const text = preRef.current?.textContent ?? "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  return (
+    <div className="group/code relative my-2">
+      <button
+        type="button"
+        onClick={() => void copy()}
+        title={copied ? copiedLabel : copyLabel}
+        aria-label={copied ? copiedLabel : copyLabel}
+        className="absolute end-1.5 top-1.5 z-10 inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-900/90 px-1.5 py-0.5 text-[10px] text-zinc-400 opacity-0 transition-opacity hover:text-zinc-100 focus-visible:opacity-100 group-hover/code:opacity-100"
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        {copied ? copiedLabel : null}
+      </button>
+      <pre
+        ref={preRef}
+        className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950/80 p-2 text-[0.85em]"
+      >
+        {children}
+      </pre>
+    </div>
+  );
+}
+
+export function ChatMarkdown(props: { content: string; className?: string; variant?: Variant; copyCodeLabel?: string; copiedLabel?: string }) {
+  const { content, className, variant = "default", copyCodeLabel, copiedLabel } = props;
   if (!content.trim()) return null;
   return (
     <div data-variant={variant} className={cn(variantClass[variant], "chat-md-root break-words", className)}>
@@ -39,9 +80,9 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
               <span>{children}</span>
             ),
           pre: ({ children }) => (
-            <pre className="my-2 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950/80 p-2 text-[0.85em]">
+            <CodeBlockPre copyLabel={copyCodeLabel} copiedLabel={copiedLabel}>
               {children}
-            </pre>
+            </CodeBlockPre>
           ),
           code: ({ className: codeClass, children, ...rest }) => {
             const isBlock = Boolean(codeClass);
