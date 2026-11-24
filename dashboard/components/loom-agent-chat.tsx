@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Archive, ArchiveRestore, Loader2, MessageSquarePlus, Send, Settings, Trash2 } from "lucide-react";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import {
@@ -317,13 +318,13 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                       {t("thinkingLabel")}
                     </span>
                   </summary>
-                  <div className="whitespace-pre-wrap border-t border-zinc-800 px-2.5 py-2 text-xs leading-relaxed text-zinc-500">
-                    {m.reasoning}
+                  <div className="border-t border-zinc-800 px-2.5 py-2">
+                    <ChatMarkdown content={m.reasoning || ""} variant="muted" />
                   </div>
                 </details>
               ) : null}
               {m.content ? (
-                <div className="whitespace-pre-wrap">{m.content}</div>
+                <ChatMarkdown content={m.content} />
               ) : m.reasoning ? (
                 <p className="text-xs text-zinc-500">{t("reasoningOnlyHint")}</p>
               ) : null}
