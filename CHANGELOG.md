@@ -2,6 +2,28 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.5] — 2026-11-24
+
+Fifth public alpha after `v0.3.0-alpha.4`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with Agent chat Thinking UI and session archive/delete.
+
+### Highlights
+
+- **Collapsible Thinking** — chain-of-thought stays in an optional Thinking panel; the reply is distilled separately so CoT is not dumped as the answer
+- **Reasoning replay** — assistant `reasoning_content` is stored and replayed across turns (fixes Reflection Beam / R1-style HTTP 400 on follow-ups); empty-content turns distill a user-facing reply
+- **Archive & delete sessions** — soft-archive Agent chat sessions (Active / Archived toggle) with hover actions; hard delete removes chat + messages after confirm
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.5
+./run.sh --open
+# or: pip install -e ".[dev,llm]" && loom start
+```
+
+**macOS app:** download `Loom-Coding-Agent-0.3.0a5.dmg` or `Loom-Coding-Agent-Tauri-0.3.0a5-aarch64.dmg` from this release, open it, and run **Loom Coding Agent** (first launch installs under `~/Library/Application Support/LoomCodingAgent`).
+
 ## [0.3.0-alpha.4] — 2026-11-23
 
 Fourth public alpha after `v0.3.0-alpha.3`. GitHub prerelease only (not published to PyPI). Includes the macOS **Loom Coding Agent** DMGs with project-chat graph grounding.
