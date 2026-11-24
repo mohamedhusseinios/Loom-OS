@@ -1,7 +1,7 @@
 # Agent Chat Session Archive & Delete — Design
 
 **Date:** 2026-11-24  
-**Status:** Approved (conversation); pending written-spec review  
+**Status:** Approved (written-spec review 2026-11-24)  
 **Related:**
 - `daemon/registry.py` — `agent_chats` / `agent_messages` tables and CRUD
 - `daemon/models.py` — `AgentChatRecord`, `AgentChatSummary`
