@@ -4,8 +4,9 @@ import { useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypePrettyCode from "rehype-pretty-code";
+import rehypeHighlight from "rehype-highlight";
 import { cn } from "@/lib/utils";
+import "highlight.js/styles/github-dark.css";
 
 type Variant = "default" | "muted" | "compact";
 
@@ -26,7 +27,7 @@ function isSafeLinkHref(href: string | undefined): href is string {
 function CodeBlockPre(props: { children: ReactNode; copyLabel?: string; copiedLabel?: string }) {
   const { children, copyLabel = "Copy code", copiedLabel = "Copied" } = props;
   const preRef = useRef<HTMLPreElement>(null);
-  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -75,7 +76,7 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
     <div data-variant={variant} className={cn(variantClass[variant], "chat-md-root break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypePrettyCode, { theme: "github-dark", keepBackground: false }]]}
+        rehypePlugins={[[rehypeHighlight, { detect: false }]]}
         components={{
           a: ({ href, children }) =>
             variant === "compact" ? (
@@ -99,7 +100,7 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
             const isBlock = Boolean(codeClass);
             if (isBlock) {
               return (
-                <code className={cn(codeClass, "font-mono")} {...rest}>
+                <code className={cn(codeClass, "font-mono bg-transparent! p-0!")} {...rest}>
                   {children}
                 </code>
               );
