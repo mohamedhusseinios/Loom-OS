@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Check, X, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import type { TaskSuggestion } from "@/lib/api";
 
 interface SuggestionChipProps {
@@ -41,7 +42,7 @@ export function SuggestionChip({
         <div>
           <p className="text-xs uppercase tracking-wide text-zinc-500">{t("suggestion")}</p>
           <p className="text-sm font-medium text-zinc-100">{suggestion.action_label}</p>
-          <p className="text-xs text-zinc-400 mt-1 whitespace-pre-wrap">{suggestion.prose}</p>
+          <ChatMarkdown content={suggestion.prose} variant="muted" className="mt-1" />
           <p className="text-[11px] text-zinc-500 mt-1">
             {t("confidence", { pct })}
             {suggestion.jev_skipped ? ` · ${t("jevSkipped")}` : ""}

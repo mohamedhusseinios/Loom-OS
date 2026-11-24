@@ -305,7 +305,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                       : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
                   }`}
                 >
-                  <span className="line-clamp-2 pe-12">{previewLabel(s, t("untitledSession"))}</span>
+                  <span className="line-clamp-2 pe-12 [&_.chat-md-root_p]:my-0">
+                    <ChatMarkdown content={previewLabel(s, t("untitledSession"))} variant="compact" />
+                  </span>
                 </button>
                 <div className="absolute end-1 top-1 hidden gap-0.5 group-hover/row:flex group-focus-within/row:flex">
                   {showArchived ? (
