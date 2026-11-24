@@ -13,6 +13,14 @@ const variantClass: Record<Variant, string> = {
   compact: "chat-md text-[11px] leading-snug text-zinc-400",
 };
 
+function isSafeLinkHref(href: string | undefined): href is string {
+  if (!href) return false;
+  const trimmed = href.trim();
+  const lower = trimmed.toLowerCase();
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return true;
+  return lower.startsWith("http:") || lower.startsWith("https:") || lower.startsWith("mailto:");
+}
+
 export function ChatMarkdown(props: { content: string; className?: string; variant?: Variant }) {
   const { content, className, variant = "default" } = props;
   if (!content.trim()) return null;
@@ -22,11 +30,14 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypePrettyCode, { theme: "github-dark", keepBackground: false }]]}
         components={{
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-sky-400 underline underline-offset-2">
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) =>
+            isSafeLinkHref(href) ? (
+              <a href={href} target="_blank" rel="noreferrer" className="text-sky-400 underline underline-offset-2">
+                {children}
+              </a>
+            ) : (
+              <span>{children}</span>
+            ),
           pre: ({ children }) => (
             <pre className="my-2 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950/80 p-2 text-[0.85em]">
               {children}
