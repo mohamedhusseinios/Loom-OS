@@ -92,6 +92,42 @@ async def test_list_agent_chats_and_messages(client):
     assert missing_project.status_code == 404
 
 
+async def test_archive_unarchive_delete_agent_chat(client):
+    import daemon.api as api_module
+
+    chat = await api_module.registry.create_agent_chat("noor", task_id=None)
+    await api_module.registry.add_agent_message(chat.id, "user", "secret")
+
+    arch = client.post(f"/api/projects/noor/agent/chats/{chat.id}/archive")
+    assert arch.status_code == 200
+    assert arch.json()["archived_at"] is not None
+    assert arch.json()["id"] == chat.id
+
+    # idempotent
+    arch2 = client.post(f"/api/projects/noor/agent/chats/{chat.id}/archive")
+    assert arch2.status_code == 200
+    assert arch2.json()["archived_at"] == arch.json()["archived_at"]
+
+    active = client.get("/api/projects/noor/agent/chats")
+    assert chat.id not in [c["id"] for c in active.json()["chats"]]
+
+    archived = client.get("/api/projects/noor/agent/chats", params={"archived": 1})
+    assert [c["id"] for c in archived.json()["chats"]] == [chat.id]
+
+    un = client.post(f"/api/projects/noor/agent/chats/{chat.id}/unarchive")
+    assert un.status_code == 200
+    assert un.json()["archived_at"] is None
+    assert chat.id in [c["id"] for c in client.get("/api/projects/noor/agent/chats").json()["chats"]]
+
+    wrong = client.post(f"/api/projects/missing/agent/chats/{chat.id}/archive")
+    assert wrong.status_code == 404
+
+    deleted = client.delete(f"/api/projects/noor/agent/chats/{chat.id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/projects/noor/agent/chats/{chat.id}/messages").status_code == 404
+    assert client.delete(f"/api/projects/noor/agent/chats/{chat.id}").status_code == 404
+
+
 def test_chat_without_key_returns_400(client):
 
     res = client.post("/api/projects/noor/agent/chat", json={"message": "hi"})

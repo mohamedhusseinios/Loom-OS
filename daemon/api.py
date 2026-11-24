@@ -40,7 +40,7 @@ from daemon.models import (
     ListModelsRequest, ListModelsResponse,
 )
 from daemon.auth import TokenAuthMiddleware, require_token
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from daemon.models import ImplementRequest
 from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
 from daemon.llm_client import LlmError, list_remote_models
@@ -1070,11 +1070,13 @@ async def list_provider_models(payload: ListModelsRequest, _=Depends(require_tok
 
 
 @app.get("/api/projects/{project_id}/agent/chats")
-async def list_agent_chats(project_id: str, task_id: Optional[str] = None):
+async def list_agent_chats(project_id: str, task_id: Optional[str] = None, archived: int = 0):
     project = await registry.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    chats = await registry.list_agent_chats(project_id, task_id=task_id)
+    chats = await registry.list_agent_chats(
+        project_id, task_id=task_id, archived=bool(archived),
+    )
     return {"chats": [c.model_dump() for c in chats]}
 
 
@@ -1088,6 +1090,39 @@ async def list_agent_chat_messages(project_id: str, chat_id: str):
         raise HTTPException(status_code=404, detail="Chat not found")
     messages = await registry.list_agent_messages(chat_id)
     return {"messages": [m.model_dump() for m in messages]}
+
+
+async def _require_project_chat(project_id: str, chat_id: str):
+    project = await registry.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    chat = await registry.get_agent_chat(chat_id)
+    if chat is None or chat.project != project_id:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@app.post("/api/projects/{project_id}/agent/chats/{chat_id}/archive")
+async def archive_agent_chat(project_id: str, chat_id: str):
+    await _require_project_chat(project_id, chat_id)
+    await registry.archive_agent_chat(chat_id)
+    summary = await registry.agent_chat_summary(chat_id)
+    return summary.model_dump()
+
+
+@app.post("/api/projects/{project_id}/agent/chats/{chat_id}/unarchive")
+async def unarchive_agent_chat(project_id: str, chat_id: str):
+    await _require_project_chat(project_id, chat_id)
+    await registry.unarchive_agent_chat(chat_id)
+    summary = await registry.agent_chat_summary(chat_id)
+    return summary.model_dump()
+
+
+@app.delete("/api/projects/{project_id}/agent/chats/{chat_id}", status_code=204)
+async def delete_agent_chat(project_id: str, chat_id: str):
+    await _require_project_chat(project_id, chat_id)
+    await registry.delete_agent_chat(chat_id)
+    return Response(status_code=204)
 
 
 @app.post("/api/projects/{project_id}/agent/chat")
