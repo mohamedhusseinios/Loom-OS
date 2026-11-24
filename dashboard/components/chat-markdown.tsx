@@ -12,7 +12,7 @@ type Variant = "default" | "muted" | "compact";
 const variantClass: Record<Variant, string> = {
   default: "chat-md text-sm text-zinc-200",
   muted: "chat-md text-xs leading-relaxed text-zinc-500",
-  compact: "chat-md text-[11px] leading-snug text-zinc-400",
+  compact: "chat-md text-[11px] leading-snug text-inherit",
 };
 
 function isSafeLinkHref(href: string | undefined): href is string {
@@ -70,6 +70,7 @@ function CodeBlockPre(props: { children: ReactNode; copyLabel?: string; copiedLa
 export function ChatMarkdown(props: { content: string; className?: string; variant?: Variant; copyCodeLabel?: string; copiedLabel?: string }) {
   const { content, className, variant = "default", copyCodeLabel, copiedLabel } = props;
   if (!content.trim()) return null;
+  const codeCopyEnabled = variant !== "compact" && copyCodeLabel !== undefined && copiedLabel !== undefined;
   return (
     <div data-variant={variant} className={cn(variantClass[variant], "chat-md-root break-words", className)}>
       <ReactMarkdown
@@ -84,11 +85,14 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
             ) : (
               <span>{children}</span>
             ),
-          pre: ({ children }) => (
-            <CodeBlockPre copyLabel={copyCodeLabel} copiedLabel={copiedLabel}>
-              {children}
-            </CodeBlockPre>
-          ),
+          pre: ({ children }) =>
+            codeCopyEnabled ? (
+              <CodeBlockPre copyLabel={copyCodeLabel} copiedLabel={copiedLabel}>
+                {children}
+              </CodeBlockPre>
+            ) : (
+              <pre className="my-2 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950/80 p-2 text-[0.85em]">{children}</pre>
+            ),
           code: ({ className: codeClass, children, ...rest }) => {
             const isBlock = Boolean(codeClass);
             if (isBlock) {
