@@ -33,9 +33,13 @@ const CHAT_FONT_KEY = "loom-agent-chat-font-scale";
 
 function readChatFontScale(): number {
   if (typeof window === "undefined") return 1;
-  const raw = window.localStorage.getItem(CHAT_FONT_KEY);
-  const n = raw ? Number(raw) : 1;
-  return CHAT_FONT_STEPS.includes(n as (typeof CHAT_FONT_STEPS)[number]) ? n : 1;
+  try {
+    const raw = window.localStorage.getItem(CHAT_FONT_KEY);
+    const n = raw ? Number(raw) : 1;
+    return CHAT_FONT_STEPS.includes(n as (typeof CHAT_FONT_STEPS)[number]) ? n : 1;
+  } catch {
+    return 1;
+  }
 }
 
 function nearestFontStep(scale: number, dir: 1 | -1): number {
@@ -72,7 +76,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const commitFontScale = useCallback((next: number | ((prev: number) => number)) => {
     setFontScale((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
-      window.localStorage.setItem(CHAT_FONT_KEY, String(value));
+      try {
+        window.localStorage.setItem(CHAT_FONT_KEY, String(value));
+      } catch {
+        /* private mode / quota */
+      }
       return value;
     });
   }, []);
@@ -240,7 +248,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       ref={panelRef}
       tabIndex={0}
       style={{ ["--chat-font-scale" as string]: String(fontScale) }}
-      className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60 outline-none [&_.chat-md-root]:text-[length:calc(0.875rem*var(--chat-font-scale))] [&_.chat-md-root.text-xs]:text-[length:calc(0.75rem*var(--chat-font-scale))] [&_.chat-md-root.text-\[11px\]]:text-[length:calc(0.6875rem*var(--chat-font-scale))]"
+      className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60 outline-none [&_.chat-md-root[data-variant=default]]:text-[length:calc(0.875rem*var(--chat-font-scale))] [&_.chat-md-root[data-variant=muted]]:text-[length:calc(0.75rem*var(--chat-font-scale))] [&_.chat-md-root[data-variant=compact]]:text-[length:calc(0.6875rem*var(--chat-font-scale))]"
     >
       <aside className="flex w-[11.5rem] shrink-0 flex-col border-e border-zinc-800">
         <div className="flex items-center justify-between gap-1 border-b border-zinc-800 px-2 py-2">

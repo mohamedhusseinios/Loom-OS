@@ -25,7 +25,7 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
   const { content, className, variant = "default" } = props;
   if (!content.trim()) return null;
   return (
-    <div className={cn(variantClass[variant], "chat-md-root break-words", className)}>
+    <div data-variant={variant} className={cn(variantClass[variant], "chat-md-root break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypePrettyCode, { theme: "github-dark", keepBackground: false }]]}
@@ -61,9 +61,9 @@ export function ChatMarkdown(props: { content: string; className?: string; varia
           ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 ps-5">{children}</ul>,
           ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 ps-5">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-          h1: ({ children }) => <h1 className="mb-1 mt-2 text-base font-semibold text-zinc-50">{children}</h1>,
-          h2: ({ children }) => <h2 className="mb-1 mt-2 text-sm font-semibold text-zinc-50">{children}</h2>,
-          h3: ({ children }) => <h3 className="mb-1 mt-2 text-sm font-medium text-zinc-100">{children}</h3>,
+          h1: ({ children }) => <h1 className="mb-1 mt-2 text-[1.15em] font-semibold text-zinc-50">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-1 mt-2 text-[1.05em] font-semibold text-zinc-50">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-1 mt-2 text-[1em] font-medium text-zinc-100">{children}</h3>,
           p: ({ children }) => <p className="my-1.5 leading-relaxed">{children}</p>,
           blockquote: ({ children }) => (
             <blockquote className="my-1.5 border-s-2 border-zinc-600 ps-2 text-zinc-400">{children}</blockquote>
