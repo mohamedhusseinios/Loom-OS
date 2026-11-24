@@ -7,7 +7,8 @@ import logging
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Iterator, Literal, Protocol
 
 from daemon.agent_credentials import (
     API_STYLE_ANTHROPIC,
@@ -45,6 +46,34 @@ class LlmError(Exception):
     """Raised when the chat completion call fails."""
 
 
+@dataclass(frozen=True)
+class StreamDelta:
+    """One incremental fragment of a streamed assistant turn."""
+
+    kind: Literal["reasoning", "content"]
+    text: str
+
+
+def _iter_sse_json(resp: Any) -> Iterator[dict[str, Any]]:
+    """Yield decoded JSON objects from ``data:`` lines of an SSE response; stops at ``[DONE]``."""
+    for raw in resp:
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if not data:
+            continue
+        if data == "[DONE]":
+            return
+        try:
+            obj = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            yield obj
+
+
 def resolve_chat_completions_url(base_url: str) -> str:
     """Return a POST URL for ``/v1/chat/completions``.
 
@@ -71,6 +100,8 @@ class LlmClientProtocol(Protocol):
     def chat(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> str: ...
 
     def chat_json(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> dict[str, Any]: ...
+
+    def chat_stream(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> Iterator[StreamDelta]: ...
 
 
 def history_with_reasoning(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -307,6 +338,59 @@ class LlmClient:
         if reasoning:
             return self._distill_final_reply(messages, reasoning, model)
         return ""
+
+    def chat_stream(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> Iterator[StreamDelta]:
+        """Stream reasoning/content deltas; distill a final reply when only reasoning arrived."""
+        if not self.api_key and not self.allow_missing_key:
+            raise LlmError("API key not configured — add it in Agent settings")
+        url = resolve_chat_completions_url(self.base_url)
+        body = json.dumps({
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": True,
+        }).encode()
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        usage: dict[str, Any] | None = None
+        self.last_usage = None
+        self.last_reasoning_content = None
+        try:
+            with _open_http(req, self.timeout) as resp:
+                for obj in _iter_sse_json(resp):
+                    chunk_usage = obj.get("usage")
+                    if isinstance(chunk_usage, dict):
+                        usage = chunk_usage
+                    choices = obj.get("choices") or []
+                    if not choices or not isinstance(choices[0], dict):
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    reasoning_piece = delta.get("reasoning_content")
+                    if isinstance(reasoning_piece, str) and reasoning_piece:
+                        reasoning_parts.append(reasoning_piece)
+                        yield StreamDelta("reasoning", reasoning_piece)
+                    content_piece = delta.get("content")
+                    if isinstance(content_piece, str) and content_piece:
+                        content_parts.append(content_piece)
+                        yield StreamDelta("content", content_piece)
+        except urllib.error.HTTPError as e:
+            detail = _safe_http_error_detail(e)
+            raise LlmError(f"LLM HTTP {e.code}" + (f": {detail}" if detail else "")) from e
+        except LlmError:
+            raise
+        except Exception as e:
+            raise LlmError(str(e)) from e
+        self.last_usage = usage
+        reasoning = "".join(reasoning_parts)
+        self.last_reasoning_content = reasoning if reasoning.strip() else None
+        if not "".join(content_parts).strip() and self.last_reasoning_content:
+            distilled = self._distill_final_reply(messages, self.last_reasoning_content, model)
+            if distilled:
+                yield StreamDelta("content", distilled)
 
     def chat_json(self, messages: list[dict[str, Any]], model: str = DEFAULT_MODEL) -> dict[str, Any]:
         """Chat and parse the assistant reply as JSON (fenced blocks stripped)."""

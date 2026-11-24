@@ -150,3 +150,39 @@ def test_sync_providers_drops_omitted_custom():
     assert "custom-x" in removed
     assert all(p["id"] != "custom-x" for p in providers)
     assert any(p["id"] == "deepseek" for p in providers)
+
+
+def test_openai_chat_stream_yields_content_deltas(monkeypatch):
+    chunks = [
+        b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
+        b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
+        b'data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+
+    class _StreamResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            raise AssertionError("stream should iterate lines, not read()")
+
+        def __iter__(self):
+            return iter(chunks)
+
+    def fake_open(req, timeout=120.0):
+        body = json.loads(req.data.decode())
+        assert body["stream"] is True
+        return _StreamResp()
+
+    monkeypatch.setattr("daemon.llm_client._open_http", fake_open)
+    client = LlmClient(api_key="sk-test")
+    events = list(client.chat_stream([{"role": "user", "content": "hi"}], model="m"))
+    texts = [(e.kind, e.text) for e in events]
+    assert ("content", "Hel") in texts
+    assert ("content", "lo") in texts
+    assert ("reasoning", "think") in texts
+    assert client.last_reasoning_content == "think"
