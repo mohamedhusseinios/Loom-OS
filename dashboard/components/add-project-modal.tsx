@@ -111,7 +111,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
       }}
       className="fixed inset-0 m-auto h-fit w-fit rounded-xl p-0 bg-transparent max-w-none"
     >
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-[480px] p-6">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-[480px] p-6 text-zinc-100">
         <h2 className="text-lg font-bold text-zinc-100 mb-4">{t("heading")}</h2>
 
         <div className="flex gap-2 mb-4">
@@ -209,7 +209,13 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
 
         {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
 
-        <Button variant="ghost" size="sm" onClick={onClose} className="mt-3 w-full">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onClose}
+          className="mt-3 w-full border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+        >
           {t("cancel")}
         </Button>
       </div>
