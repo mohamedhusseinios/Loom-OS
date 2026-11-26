@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.agent_credentials import (
     BUILTIN_PROVIDER_IDS,
@@ -39,7 +39,8 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
     ListModelsRequest, ListModelsResponse,
 )
-from daemon.auth import TokenAuthMiddleware, require_token
+from daemon.auth import TokenAuthMiddleware
+from daemon.project_paths import project_inbox_dir, safe_project_id
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from daemon.models import ImplementRequest
 from daemon.agent_runtime import AgentRuntime, ConflictError, JsonlEventTail, SelectionConflict, drain_run_jsonl, seal_exited_worker_runs, selection_preview_to_dict
@@ -99,6 +100,41 @@ def _validate_status_transition(current: AgentTaskStatus, new: AgentTaskStatus) 
         )
 LOOM_INBOX_BASE = os.path.expanduser("~/.loom/inbox")
 agent_runtime: Optional[AgentRuntime] = None
+
+
+def _inbox_dir(project_id: str) -> str:
+    """Safe per-project inbox path under LOOM_INBOX_BASE."""
+    try:
+        return str(project_inbox_dir(LOOM_INBOX_BASE, project_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _require_safe_project_id(project_id: str) -> str:
+    try:
+        return safe_project_id(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _discover_roots() -> list[Path]:
+    roots = [Path.home().resolve()]
+    for part in os.environ.get("LOOM_DISCOVER_ROOTS", "").split(":"):
+        part = part.strip()
+        if part:
+            roots.append(Path(part).expanduser().resolve())
+    return roots
+
+
+def _path_under_discover_roots(expanded: str) -> bool:
+    try:
+        resolved = Path(expanded).resolve()
+    except OSError:
+        return False
+    for root in _discover_roots():
+        if resolved == root or root in resolved.parents:
+            return True
+    return False
 
 
 def _get_agent_runtime() -> AgentRuntime:
@@ -331,7 +367,8 @@ async def register_agent(project_id: str, payload: RegisterAgentPayload):
         raise HTTPException(status_code=400, detail="Project path does not exist")
 
     # Write register.json to the inbox
-    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
+    project_id = _require_safe_project_id(project_id)
+    inbox_dir = _inbox_dir(project_id)
     os.makedirs(inbox_dir, exist_ok=True)
     register_path = os.path.join(inbox_dir, "register.json")
 
@@ -550,7 +587,7 @@ async def rebuild_graph(project_id: str):
     )
 
     # Dual-write: inbox file (so the agent can see it) + registry row.
-    inbox_dir = os.path.expanduser(f"~/.loom/inbox/{project_id}")
+    inbox_dir = _inbox_dir(project_id)
     os.makedirs(inbox_dir, exist_ok=True)
     task_payload = TaskPayload(
         task_id=task_id,
@@ -663,17 +700,18 @@ async def _build_graph_background(
 @app.post("/api/projects", status_code=201)
 async def create_project(payload: ProjectCreatePayload):
     """Create a new tracked project."""
+    name = _require_safe_project_id(payload.name)
     path = os.path.expanduser(payload.path)
     if not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
     try:
-        project = await registry.create_project(payload.name, payload.name, path)
+        project = await registry.create_project(name, name, path)
     except ProjectExistsError:
         raise HTTPException(status_code=409, detail=f"Project '{payload.name}' is already tracked")
     if router:
-        await router._emit_event("project:created", payload.name, {
-            "project_id": payload.name,
-            "project_name": payload.name,
+        await router._emit_event("project:created", name, {
+            "project_id": name,
+            "project_name": name,
         })
     return project.model_dump()
 
@@ -688,15 +726,18 @@ async def delete_project(project_id: str):
     return {"deleted": True}
 
 @app.get("/api/discover")
-async def discover_directories(path: str = "~", _=Depends(require_token)):
+async def discover_directories(path: str = "~"):
     """Browse filesystem directories for project discovery.
 
     Does not follow symlinks (so a malicious link can't redirect browsing
-    outside the intended tree) and skips dot-directories.
+    outside the intended tree) and skips dot-directories. Paths must stay
+    under ``$HOME`` or a root listed in ``LOOM_DISCOVER_ROOTS``.
     """
     expanded = os.path.expanduser(path)
     if not os.path.isdir(expanded):
         raise HTTPException(status_code=400, detail="Path does not exist")
+    if not _path_under_discover_roots(expanded):
+        raise HTTPException(status_code=400, detail="Path outside allowed discover roots")
     dirs = []
     try:
         with os.scandir(expanded) as it:
@@ -755,7 +796,7 @@ def _drop_inbox_task(project_id: str, task_id: str, target_agent: str,
         task_id=task_id, target_agent=target_agent,
         instruction=instruction, priority=priority,
     )
-    inbox_dir = os.path.join(LOOM_INBOX_BASE, project_id)
+    inbox_dir = _inbox_dir(project_id)
     os.makedirs(inbox_dir, exist_ok=True)
     with open(os.path.join(inbox_dir, f"task-{task_id}.json"), "w") as f:
         f.write(payload.model_dump_json())
@@ -838,7 +879,8 @@ async def update_agent_task(project_id: str, task_id: str, payload: AgentTaskUpd
         result=payload.result,
         workspace_path=payload.workspace_path,
     )
-    if payload.status is not None and payload.status != AgentTaskStatus.RUNNING:
+    if payload.status is not None:
+        # Clear any prior lease (including poison claims taken before Running).
         await registry.release_task_execution(task_id)
     updated = await registry.get_agent_task(task_id)
     if updated is None:
@@ -942,7 +984,7 @@ async def list_workers(project_id: str):
 # --- Loom Agent (chat + orchestration loop) ---
 
 @app.get("/api/agent/settings")
-async def get_agent_settings(_=Depends(require_token)):
+async def get_agent_settings():
     return (await registry.get_agent_settings(mask_keys=True)).model_dump()
 
 
@@ -1053,7 +1095,7 @@ def _validate_chat_provider(payload: AgentSettingsUpdate, current) -> None:
 
 
 @app.put("/api/agent/settings")
-async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
+async def put_agent_settings(payload: AgentSettingsUpdate):
     current = await registry.get_agent_settings(mask_keys=True)
     _validate_decision_settings(payload, current)
     if payload.autonomy_min_fit is not None and payload.autonomy_min_fit not in {"High", "Medium", "Low"}:
@@ -1075,7 +1117,7 @@ def _public_list_models_error(message: str) -> str:
 
 
 @app.post("/api/agent/providers/list-models")
-async def list_provider_models(payload: ListModelsRequest, _=Depends(require_token)):
+async def list_provider_models(payload: ListModelsRequest):
     """List models for a chat provider using saved or draft credentials.
 
     Stored and environment keys are sent only to the saved provider URL.
@@ -1724,6 +1766,8 @@ async def get_federated_references(symbol: str = ""):
 async def claim_task_execution(project_id: str, task_id: str, payload: dict | None = Body(default=None)):
     """Atomically claim a Running task for worker execution."""
     record = await _require_task_in_project(project_id, task_id)
+    if record.status != AgentTaskStatus.RUNNING:
+        raise HTTPException(status_code=400, detail="task must be running to claim")
     owner = (payload or {}).get("owner") or f"worker:{task_id}"
     if not isinstance(owner, str) or not owner.strip():
         raise HTTPException(status_code=400, detail="owner must be a non-empty string")
@@ -1732,7 +1776,7 @@ async def claim_task_execution(project_id: str, task_id: str, payload: dict | No
 
 
 @app.post("/api/ws-ticket")
-async def create_ws_ticket(_=Depends(require_token)):
+async def create_ws_ticket():
     """Issue a short-lived WebSocket ticket (team mode). No-op body when auth off."""
     from daemon.auth import is_auth_enabled, issue_ws_ticket
     if not is_auth_enabled():

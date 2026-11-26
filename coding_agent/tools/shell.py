@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from coding_agent.ports import Sandbox
 from coding_agent.proc_run import DEFAULT_COMMAND_TIMEOUT_S
 
@@ -57,6 +59,9 @@ def shell(sandbox: Sandbox, argv: list[str]) -> dict:
     blocked = _blocked_git(argv)
     if blocked is not None:
         return blocked
+    blocked = _blocked_interpreter_escape(sandbox, argv)
+    if blocked is not None:
+        return blocked
     try:
         proc = sandbox.run(list(argv), timeout_s=DEFAULT_COMMAND_TIMEOUT_S)
     except OSError as exc:
@@ -68,6 +73,42 @@ def shell(sandbox: Sandbox, argv: list[str]) -> dict:
         "stdout": proc.stdout,
         "stderr": proc.stderr,
     }
+
+
+def _under_sandbox(sandbox: Sandbox, raw: str) -> bool:
+    root = sandbox.root().resolve()
+    try:
+        candidate = Path(raw)
+        target = candidate.resolve() if candidate.is_absolute() else (root / raw).resolve()
+    except OSError:
+        return False
+    return target == root or root in target.parents
+
+
+def _blocked_interpreter_escape(sandbox: Sandbox, argv: list[str]) -> dict | None:
+    """Block python -c and absolute paths that leave the worktree."""
+    if not argv:
+        return None
+    binary = argv[0]
+    if binary in ("python", "python3"):
+        if "-c" in argv:
+            return {"ok": False, "need_approval": True, "reason": "python_c_rejected"}
+        for token in argv[1:]:
+            if token.startswith("-"):
+                continue
+            if not _under_sandbox(sandbox, token):
+                return {"ok": False, "need_approval": False, "reason": "path_escapes_sandbox"}
+            break
+        return None
+    if binary in ("npm", "npx"):
+        for token in argv[1:]:
+            if token.startswith("-"):
+                continue
+            if "/" in token or "\\" in token or token.endswith(".js") or token.endswith(".mjs"):
+                if not _under_sandbox(sandbox, token):
+                    return {"ok": False, "need_approval": False, "reason": "path_escapes_sandbox"}
+        return None
+    return None
 
 
 def _blocked_git(argv: list[str]) -> dict | None:

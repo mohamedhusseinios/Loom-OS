@@ -177,13 +177,17 @@ def test_delete_project_not_found(client):
     res = client.delete("/api/projects/nonexistent")
     assert res.status_code == 404
 
-def test_discover_directories(client):
-    """GET /api/discover returns subdirectories."""
-    res = client.get("/api/discover?path=/tmp")
+def test_discover_directories(client, tmp_path, monkeypatch):
+    """GET /api/discover returns subdirectories under allowed roots."""
+    monkeypatch.setenv("LOOM_DISCOVER_ROOTS", str(tmp_path))
+    child = tmp_path / "proj"
+    child.mkdir()
+    res = client.get(f"/api/discover?path={tmp_path}")
     assert res.status_code == 200
     data = res.json()
     assert "directories" in data
     assert "parent" in data
+    assert any(d["name"] == "proj" for d in data["directories"])
 
 def test_discover_invalid_path(client):
     """GET /api/discover with invalid path returns 400."""
@@ -1016,12 +1020,17 @@ def test_token_auth_middleware_blocks_writes_when_token_configured(client, tmp_p
         assert authed_resp.status_code in (200, 201)
 
         # Discover is a sensitive GET — requires token when auth is on
-        assert client.get("/api/discover?path=/tmp").status_code == 401
-        ok = client.get(
-            "/api/discover?path=/tmp",
-            headers={"Authorization": "Bearer secret-token"},
-        )
-        assert ok.status_code == 200
+        assert client.get(f"/api/discover?path={tmp_path}").status_code == 401
+        import os
+        os.environ["LOOM_DISCOVER_ROOTS"] = str(tmp_path)
+        try:
+            ok = client.get(
+                f"/api/discover?path={tmp_path}",
+                headers={"Authorization": "Bearer secret-token"},
+            )
+            assert ok.status_code == 200
+        finally:
+            os.environ.pop("LOOM_DISCOVER_ROOTS", None)
     finally:
         configure_auth_token(None)
 

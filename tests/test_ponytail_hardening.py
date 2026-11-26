@@ -153,3 +153,87 @@ async def test_credentials_encrypt_roundtrip(tmp_path, monkeypatch):
     assert keys.get("deepseek") == "sk-secret"
     assert json.loads(decrypt_api_keys_json(stored))["deepseek"] == "sk-secret"
     await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_claim_rejects_non_running(tmp_path):
+    reg = AgentRegistry(str(tmp_path / "claim2.db"))
+    await reg.initialize()
+    await reg.create_project("p", "p", str(tmp_path))
+    tid = await reg.create_agent_task(
+        AgentTaskCreatePayload(project="p", title="t", instruction="x"),
+        status=AgentTaskStatus.TODO,
+    )
+    assert await reg.claim_task_execution(tid, "worker:a") is False
+    await reg.update_agent_task(tid, status=AgentTaskStatus.RUNNING)
+    assert await reg.claim_task_execution(tid, "worker:a") is True
+    await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_claim_api_rejects_non_running(client):
+    registry = api_module.registry
+    tid = await registry.create_agent_task(
+        AgentTaskCreatePayload(project="noor", title="t", instruction="x"),
+        status=AgentTaskStatus.READY,
+    )
+    res = client.post(f"/api/projects/noor/tasks/{tid}/claim", json={"owner": "worker:x"})
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_status_to_running_clears_poison_claim(client):
+    registry = api_module.registry
+    tid = await registry.create_agent_task(
+        AgentTaskCreatePayload(
+            project="noor", title="t", instruction="x",
+            assignee="claude-code-noor",
+        ),
+        status=AgentTaskStatus.READY,
+    )
+    # Force a poison claim while still READY (bypass API status gate via SQL).
+    await registry.db.execute(
+        "UPDATE agent_tasks SET execution_owner = ? WHERE id = ?",
+        ("evil", tid),
+    )
+    await registry.db.commit()
+    res = client.patch(f"/api/projects/noor/tasks/{tid}", json={"status": "running"})
+    assert res.status_code == 200
+    row = await registry.get_agent_task(tid)
+    # Lease cleared on status change; daemon may re-claim as daemon:<id>.
+    assert row.execution_owner in (None, "", f"daemon:{tid}")
+
+
+def test_inbox_helper_rejects_path_traversal(tmp_path):
+    from fastapi import HTTPException
+
+    api_module.LOOM_INBOX_BASE = str(tmp_path / "inbox")
+    with pytest.raises(HTTPException) as exc:
+        api_module._inbox_dir("../etc")
+    assert exc.value.status_code == 400
+    with pytest.raises(HTTPException) as exc:
+        api_module._require_safe_project_id("a/b")
+    assert exc.value.status_code == 400
+
+
+def test_create_project_rejects_bad_name(client, tmp_path):
+    d = tmp_path / "ok"
+    d.mkdir()
+    res = client.post("/api/projects", json={"name": "../evil", "path": str(d)})
+    assert res.status_code == 400
+
+
+def test_discover_rejects_outside_roots(client, monkeypatch, tmp_path):
+    monkeypatch.delenv("LOOM_DISCOVER_ROOTS", raising=False)
+    # /etc is outside home on typical setups
+    res = client.get("/api/discover?path=/etc")
+    assert res.status_code == 400
+
+
+def test_encrypt_requires_cryptography_when_key_set(monkeypatch):
+    monkeypatch.setenv("LOOM_CREDENTIALS_KEY", "k")
+    import daemon.credentials_crypto as crypto
+    monkeypatch.setattr(crypto, "_fernet", lambda material: None)
+    with pytest.raises(RuntimeError, match="cryptography"):
+        crypto.encrypt_api_keys_json("{}")
+

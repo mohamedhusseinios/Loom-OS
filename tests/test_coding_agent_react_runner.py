@@ -252,8 +252,11 @@ def test_tool_exception_emits_run_failed(tmp_path: Path) -> None:
 def test_cancel_during_shell_emits_cancelled_without_another_llm(tmp_path: Path) -> None:
     import time
 
+    root = tmp_path / "sandbox"
+    root.mkdir(exist_ok=True)
+    (root / "sleep.py").write_text("import time; time.sleep(30)\n", encoding="utf-8")
     llm = ScriptedLlm([
-        _action("sleep", "shell", {"argv": ["python3", "-c", "import time; time.sleep(30)"]}),
+        _action("sleep", "shell", {"argv": ["python3", "sleep.py"]}),
         _action("should not run", None, done=True),
     ])
     session = _session(tmp_path, llm)

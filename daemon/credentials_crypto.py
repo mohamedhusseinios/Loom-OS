@@ -35,7 +35,10 @@ def encrypt_api_keys_json(plain_json: str) -> str:
         return plain_json
     f = _fernet(material)
     if f is None:
-        return plain_json
+        raise RuntimeError(
+            "LOOM_CREDENTIALS_KEY/LOOM_AUTH_TOKEN is set but cryptography is not installed; "
+            "pip install 'loom-os[crypto]' (or cryptography)"
+        )
     token = f.encrypt(plain_json.encode("utf-8")).decode("ascii")
     return f"{_PREFIX}{token}"
 

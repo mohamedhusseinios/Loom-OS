@@ -226,17 +226,33 @@ def test_git_tool_push_rejected(tmp_path: Path) -> None:
     assert result == {"ok": False, "need_approval": False, "reason": "git_push_rejected"}
 
 
+def test_shell_rejects_python_c(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    result = shell(sandbox, ["python3", "-c", "print(1)"])
+    assert result == {"ok": False, "need_approval": True, "reason": "python_c_rejected"}
+
+
+def test_shell_rejects_path_outside_sandbox(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    result = shell(sandbox, ["python3", "/etc/passwd"])
+    assert result["ok"] is False
+    assert result["reason"] == "path_escapes_sandbox"
+
+
 def test_shell_tests_and_lint_pass_default_timeout(tmp_path: Path) -> None:
     sandbox = _sandbox(tmp_path)
+    script = sandbox.root() / "ok.py"
+    script.write_text("print(1)\n", encoding="utf-8")
     seen: list[float | None] = []
     real_run = sandbox.run
 
     def run(argv: list[str], *, timeout_s: float | None = None):
         seen.append(timeout_s)
-        return real_run(argv, timeout_s=0.01 if argv[:2] == ["python3", "-c"] else timeout_s)
+        short = argv[:2] == ["python3", "-c"] or argv == ["python3", "ok.py"]
+        return real_run(argv, timeout_s=0.01 if short else timeout_s)
 
     sandbox.run = run  # type: ignore[method-assign]
-    shell(sandbox, ["python3", "-c", "print(1)"])
+    shell(sandbox, ["python3", "ok.py"])
     run_tests(sandbox, {"test_command": ["python3", "-c", "print(1)"]})
     run_lint(sandbox, {"lint_command": ["python3", "-c", "print(1)"]})
 

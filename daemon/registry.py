@@ -677,14 +677,16 @@ class AgentRegistry:
     async def claim_task_execution(self, task_id: str, owner: str) -> bool:
         """Atomically claim a Running task for execution. Returns True if claimed.
 
-        Re-claim by the same owner succeeds (one-shot worker after daemon claim).
+        Only succeeds when status is ``running``. Re-claim by the same owner
+        succeeds (one-shot worker after daemon claim).
         """
         now = datetime.now(timezone.utc).isoformat()
         cursor = await self.db.execute(
             "UPDATE agent_tasks SET execution_owner = ?, updated_at = ?"
-            " WHERE id = ? AND (execution_owner IS NULL OR execution_owner = ''"
+            " WHERE id = ? AND status = ?"
+            " AND (execution_owner IS NULL OR execution_owner = ''"
             " OR execution_owner = ?)",
-            (owner, now, task_id, owner),
+            (owner, now, task_id, AgentTaskStatus.RUNNING.value, owner),
         )
         await self.db.commit()
         return cursor.rowcount > 0
@@ -742,10 +744,13 @@ class AgentRegistry:
         Searches inbox finding-*.md files for the project.  If no embeddings
         model is available returns text-only results.
         """
-        from daemon.embeddings import EmbeddingGenerator
+        import numpy as np
         from pathlib import Path
 
+        from daemon.embeddings import EmbeddingGenerator
+
         gen = EmbeddingGenerator()
+        query_vec = await gen.embed(query)
 
         # Findings are moved to .processed/ after ingest; search both places.
         # loom root is the parent of state.db (tests inject a temp db path).
@@ -761,6 +766,8 @@ class AgentRegistry:
             if processed.exists():
                 candidates.extend(processed.glob("finding-*.md"))
 
+        q_lower = query.lower()
+        nq = float(np.linalg.norm(query_vec))
         for f_path in candidates:
             if f_path.stem in seen:
                 continue
@@ -770,14 +777,11 @@ class AgentRegistry:
             except OSError:
                 continue
 
-            if query.lower() not in content.lower():
+            if q_lower not in content.lower():
                 continue
 
             doc_vec = await gen.embed(content[:500])
-            query_vec = await gen.embed(query)
-            import numpy as np
-            nq = np.linalg.norm(query_vec)
-            nd = np.linalg.norm(doc_vec)
+            nd = float(np.linalg.norm(doc_vec))
             sim = float(np.dot(query_vec, doc_vec) / (nq * nd + 1e-8)) if nq and nd else 0.0
 
             lines = content.split("\n")

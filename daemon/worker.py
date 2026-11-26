@@ -54,8 +54,11 @@ def run_claude(prompt, cwd, model=None, max_budget_usd=5.0, resume=None, on_prog
     if resume:
         cmd += ["--resume", resume]
 
+    # stderr=DEVNULL avoids a classic pipe deadlock: Claude can fill stderr
+    # while we block reading stdout. Errors still surface via non-zero exit
+    # and stream-json ``is_error`` / result text.
     proc = subprocess.Popen(
-        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         text=True, bufsize=1,
     )
     final = {"text": "", "session_id": None, "is_error": False}
@@ -76,11 +79,10 @@ def run_claude(prompt, cwd, model=None, max_budget_usd=5.0, resume=None, on_prog
     code = proc.wait()
     if code != 0:
         # Any non-zero exit is a failure (e.g. budget exhausted). Keep the
-        # result text if one was emitted; otherwise fall back to stderr
-        # (empty string is falsy, so the default kicks in when stderr is empty).
+        # result text if one was emitted; otherwise a generic message.
         final["is_error"] = True
         if not final["text"]:
-            final["text"] = (proc.stderr.read() or "claude exited non-zero").strip()
+            final["text"] = "claude exited non-zero"
     return ClaudeResult(final["text"], final["session_id"], final["is_error"])
 
 

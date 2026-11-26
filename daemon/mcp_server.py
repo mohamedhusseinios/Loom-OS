@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from daemon.project_paths import project_inbox_dir, safe_project_id as _safe_project_id
 
 # ---------------------------------------------------------------------------
 # FastMCP application
@@ -48,30 +49,12 @@ def _loom_base(loom_dir: str | None = None) -> Path:
     return Path(loom_dir).expanduser() if loom_dir else Path(os.path.expanduser("~/.loom"))
 
 
-def _safe_project_id(project: str) -> str:
-    """Reject path traversal / absolute segments in a project id."""
-    if not project or not isinstance(project, str):
-        raise ValueError("project id required")
-    name = project.strip()
-    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
-        raise ValueError(f"invalid project id: {project!r}")
-    if os.sep in name or (os.altsep and os.altsep in name):
-        raise ValueError(f"invalid project id: {project!r}")
-    return name
-
-
 def _state_db_path(loom_dir: str | None = None) -> Path:
     return _loom_base(loom_dir) / "state.db"
 
 
 def _project_inbox(project: str, loom_dir: str | None = None) -> Path:
-    base = _loom_base(loom_dir).resolve()
-    inbox_root = (base / "inbox").resolve()
-    safe = _safe_project_id(project)
-    path = (inbox_root / safe).resolve()
-    if path != inbox_root and inbox_root not in path.parents:
-        raise ValueError(f"project inbox escapes loom inbox root: {project!r}")
-    return path
+    return project_inbox_dir(_loom_base(loom_dir) / "inbox", project)
 
 
 def _find_project_path(project: str, loom_dir: str | None = None) -> str | None:
