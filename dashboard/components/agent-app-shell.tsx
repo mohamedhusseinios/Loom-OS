@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2, Plus, Square, Wand2 } from "lucide-react";
@@ -53,6 +53,17 @@ export function AgentAppShell() {
   const [addOpen, setAddOpen] = useState(false);
   const [cost, setCost] = useState<AgentCostSummary | null>(null);
   const [picker, setPicker] = useState<{ preview: SelectionPreview; notice: ImplementPickerNotice } | null>(null);
+  const [metricsProjectId, setMetricsProjectId] = useState(projectId);
+  const projectIdRef = useRef(projectId);
+  if (metricsProjectId !== projectId) {
+    setMetricsProjectId(projectId);
+    setCost(null);
+    setWorkerIds(new Set());
+  }
+
+  useLayoutEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   const setQuery = useCallback(
     (query: Record<string, string>) => router.replace({ pathname, query }),
@@ -74,9 +85,11 @@ export function AgentAppShell() {
   }, []);
 
   const loadTasks = useCallback(async () => {
-    if (!projectId) return;
+    const requested = projectId;
+    if (!requested) return;
     try {
-      const [taskList, workers] = await Promise.all([listAgentTasks(projectId), listWorkers(projectId)]);
+      const [taskList, workers] = await Promise.all([listAgentTasks(requested), listWorkers(requested)]);
+      if (projectIdRef.current !== requested) return;
       setTasks(taskList);
       setWorkerIds(new Set(workers.running));
     } catch {
@@ -85,10 +98,15 @@ export function AgentAppShell() {
   }, [projectId]);
 
   const loadCost = useCallback(() => {
-    if (!projectId) return;
-    getAgentCostSummary(projectId)
-      .then(setCost)
-      .catch(() => setCost(null));
+    const requested = projectId;
+    if (!requested) return;
+    getAgentCostSummary(requested)
+      .then((summary) => {
+        if (projectIdRef.current === requested) setCost(summary);
+      })
+      .catch(() => {
+        if (projectIdRef.current === requested) setCost(null);
+      });
   }, [projectId]);
 
   useEffect(() => {
@@ -100,6 +118,7 @@ export function AgentAppShell() {
   useEffect(() => {
     if (!projectId) return;
     return subscribe(`project:${projectId}`, (event) => {
+      if (projectIdRef.current !== projectId) return;
       if (event.event === "task:created" || event.event === "task:updated") {
         const task = event.data as unknown as AgentTask;
         setTasks((prev) => {

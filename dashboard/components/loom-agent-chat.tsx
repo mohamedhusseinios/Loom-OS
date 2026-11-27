@@ -65,6 +65,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [userDraft, setUserDraft] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [fontScale, setFontScale] = useState(1);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -146,6 +147,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setLoadingMessages(true);
     setError("");
     setChatId(id);
+    setUserDraft(false);
     try {
       const rows = await listAgentChatMessages(projectId, id);
       setMessages(
@@ -185,12 +187,14 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setMessages([]);
     setInput("");
     setError("");
+    setUserDraft(true);
   }
 
   function clearOpenChat() {
     abortInFlight();
     setChatId(undefined);
     setMessages([]);
+    setUserDraft(true);
   }
 
   async function onArchive(id: string) {
@@ -233,9 +237,14 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setChatId(undefined);
     setMessages([]);
     setPendingDeleteId(null);
+    setUserDraft(false);
     (async () => {
       const chats = await refreshSessions();
-      if (cancelled || showArchived || chats.length === 0) return;
+      if (cancelled) return;
+      if (showArchived || chats.length === 0) {
+        if (!showArchived && chats.length === 0) setUserDraft(true);
+        return;
+      }
       await loadSession(chats[0].id);
     })();
     return () => {
@@ -363,7 +372,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
-          {drafting && !showArchived && (
+          {userDraft && drafting && !showArchived && (
             <div
               className="rounded-md border border-dashed border-zinc-700 bg-zinc-900/40 px-2 py-1.5 text-[11px] text-zinc-300"
               aria-current="true"
@@ -402,7 +411,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                     <ChatMarkdown content={previewLabel(s, t("untitledSession"))} variant="compact" />
                   </span>
                 </button>
-                <div className="absolute end-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(pointer:coarse)]:opacity-100">
+                <div className="pointer-events-none absolute end-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100">
                   {showArchived ? (
                     <Button
                       type="button"
