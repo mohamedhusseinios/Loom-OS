@@ -2,6 +2,32 @@
 
 All notable changes to Loom OS are documented in this file.
 
+## [0.3.0-alpha.8] — 2026-11-27
+
+Eighth public alpha after `v0.3.0-alpha.7`. GitHub prerelease only (not published to PyPI). Ships the coding-agent run loop with pattern selection, custom OpenAI-compatible providers, pluggable Decision models, Coding Agent UX polish, and follow-on security hardening.
+
+### Highlights
+
+- **Coding agent loop** — ReAct PatternRunner with read/search/edit/shell/test tools, run budgets and cancel, JSONL event sink, and dashboard Implement flow with preview + strategy lock
+- **Phase 2 pattern selection** — two-stage catalog scoring, autonomy settings, Implement pattern picker, and runner fallback when a non-ReAct family is chosen
+- **Custom chat providers** — manage `openai_compatible` providers in Agent settings; chat/decision roles resolve from saved providers without leaking keys to keyless endpoints
+- **Pluggable Decision model** — Jev (TypeSafe / OpenRouter) and GLiClass clients with filter/judgment settings, cost report, and usage telemetry
+- **Coding Agent UX** — clearer handoff, sessions, and run context; fixes for new-chat draft flash, stale project metrics, and accidental mis-clicks
+- **Security follow-ups** — closes remaining ponytail-audit holes in workers, path trust, and search; safer cancel/respawn and custom-provider edge cases
+- **Usage surfaces** — project cost summary and suggestion usage on the dashboard
+
+### Install (from this tag)
+
+```bash
+git clone https://github.com/mohamedhusseinios/Loom-OS.git
+cd Loom-OS
+git checkout v0.3.0-alpha.8
+./run.sh --open
+# or: pip install -e ".[dev,llm,crypto]" && loom start
+```
+
+**macOS app:** chat UI DMGs from `v0.3.0-alpha.6` still apply for the desktop shell; install this tag (or `pip install -e .`) for the daemon. New `0.3.0a8` DMG builds can follow when the desktop bundle is rebuilt.
+
 ## [0.3.0-alpha.7] — 2026-11-24
 
 Seventh public alpha after `v0.3.0-alpha.6`. GitHub prerelease only (not published to PyPI). Hardens team-mode auth, Kanban task binding, worker execution leases, MCP/inbox path trust, and safer coding-agent runner defaults from the ponytail security audit.
