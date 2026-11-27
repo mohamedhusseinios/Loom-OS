@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from daemon import worktree as _worktree
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from daemon.agent_credentials import (
     BUILTIN_PROVIDER_IDS,
@@ -39,7 +39,7 @@ from daemon.models import (
     AgentChatRequest, AgentSettingsUpdate,
     ListModelsRequest, ListModelsResponse,
 )
-from daemon.auth import TokenAuthMiddleware
+from daemon.auth import TokenAuthMiddleware, require_token
 from daemon.project_paths import project_inbox_dir, safe_project_id
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from daemon.models import ImplementRequest
@@ -726,7 +726,7 @@ async def delete_project(project_id: str):
     return {"deleted": True}
 
 @app.get("/api/discover")
-async def discover_directories(path: str = "~"):
+async def discover_directories(path: str = "~", _=Depends(require_token)):
     """Browse filesystem directories for project discovery.
 
     Does not follow symlinks (so a malicious link can't redirect browsing
@@ -984,7 +984,7 @@ async def list_workers(project_id: str):
 # --- Loom Agent (chat + orchestration loop) ---
 
 @app.get("/api/agent/settings")
-async def get_agent_settings():
+async def get_agent_settings(_=Depends(require_token)):
     return (await registry.get_agent_settings(mask_keys=True)).model_dump()
 
 
@@ -1095,7 +1095,7 @@ def _validate_chat_provider(payload: AgentSettingsUpdate, current) -> None:
 
 
 @app.put("/api/agent/settings")
-async def put_agent_settings(payload: AgentSettingsUpdate):
+async def put_agent_settings(payload: AgentSettingsUpdate, _=Depends(require_token)):
     current = await registry.get_agent_settings(mask_keys=True)
     _validate_decision_settings(payload, current)
     if payload.autonomy_min_fit is not None and payload.autonomy_min_fit not in {"High", "Medium", "Low"}:
@@ -1117,7 +1117,7 @@ def _public_list_models_error(message: str) -> str:
 
 
 @app.post("/api/agent/providers/list-models")
-async def list_provider_models(payload: ListModelsRequest):
+async def list_provider_models(payload: ListModelsRequest, _=Depends(require_token)):
     """List models for a chat provider using saved or draft credentials.
 
     Stored and environment keys are sent only to the saved provider URL.

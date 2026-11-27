@@ -65,12 +65,16 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [userDraft, setUserDraft] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [fontScale, setFontScale] = useState(1);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Latest open-thread token. New Chat, another session, or a scope change bumps it
+  // so an in-flight list/messages fetch cannot overwrite that newer choice.
+  const sessionLoadRef = useRef(0);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -142,12 +146,15 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }, [projectId, taskId, showArchived, t]);
 
   const loadSession = useCallback(async (id: string) => {
+    const requestId = ++sessionLoadRef.current;
     abortInFlight();
     setLoadingMessages(true);
     setError("");
     setChatId(id);
+    setUserDraft(false);
     try {
       const rows = await listAgentChatMessages(projectId, id);
+      if (requestId !== sessionLoadRef.current) return;
       setMessages(
         rows
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -158,10 +165,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           })),
       );
     } catch (e) {
+      if (requestId !== sessionLoadRef.current) return;
       setError(e instanceof Error ? e.message : t("chatError"));
       setMessages([]);
     } finally {
-      setLoadingMessages(false);
+      if (requestId === sessionLoadRef.current) setLoadingMessages(false);
     }
   }, [projectId, t, abortInFlight]);
 
@@ -180,17 +188,23 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   function startNewChat() {
+    sessionLoadRef.current += 1;
     abortInFlight();
     setChatId(undefined);
     setMessages([]);
     setInput("");
     setError("");
+    setLoadingMessages(false);
+    setUserDraft(true);
   }
 
   function clearOpenChat() {
+    sessionLoadRef.current += 1;
     abortInFlight();
     setChatId(undefined);
     setMessages([]);
+    setLoadingMessages(false);
+    setUserDraft(true);
   }
 
   async function onArchive(id: string) {
@@ -227,19 +241,27 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = ++sessionLoadRef.current;
     abortInFlight();
     setInput("");
     setError("");
     setChatId(undefined);
     setMessages([]);
+    setLoadingMessages(false);
     setPendingDeleteId(null);
+    setUserDraft(false);
     (async () => {
       const chats = await refreshSessions();
-      if (cancelled || showArchived || chats.length === 0) return;
+      if (cancelled || requestId !== sessionLoadRef.current) return;
+      if (showArchived || chats.length === 0) {
+        if (!showArchived && chats.length === 0) setUserDraft(true);
+        return;
+      }
       await loadSession(chats[0].id);
     })();
     return () => {
       cancelled = true;
+      sessionLoadRef.current += 1;
     };
   }, [projectId, taskId, showArchived, refreshSessions, loadSession, abortInFlight]);
 
@@ -306,6 +328,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     }
   }
 
+  const activeSession = sessions.find((s) => s.id === chatId);
+  const drafting = !chatId;
+
   return (
     <div
       ref={panelRef}
@@ -313,9 +338,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
       style={{ ["--chat-font-scale" as string]: String(fontScale) }}
       className="relative flex h-full min-h-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60 outline-none [&_.chat-md-root[data-variant=default]]:text-[length:calc(0.875rem*var(--chat-font-scale))] [&_.chat-md-root[data-variant=muted]]:text-[length:calc(0.75rem*var(--chat-font-scale))] [&_.chat-md-root[data-variant=compact]]:text-[length:calc(0.6875rem*var(--chat-font-scale))]"
     >
-      <aside className="flex w-[11.5rem] shrink-0 flex-col border-e border-zinc-800">
+      <aside className="flex w-[12.5rem] shrink-0 flex-col border-e border-zinc-800" aria-label={t("sessions")}>
         <div className="flex items-center justify-between gap-1 border-b border-zinc-800 px-2 py-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+          <span className="text-[11px] font-medium text-zinc-400">
             {t("sessions")}
           </span>
           <Button
@@ -326,18 +351,60 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             onClick={startNewChat}
             title={t("newChat")}
             aria-label={t("newChat")}
+            aria-pressed={drafting}
           >
             <MessageSquarePlus className="h-3.5 w-3.5" />
           </Button>
         </div>
+        <div
+          className="grid grid-cols-2 gap-0.5 border-b border-zinc-800 p-1"
+          role="tablist"
+          aria-label={t("sessionLists")}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!showArchived}
+            className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+              !showArchived ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+            onClick={() => setShowArchived(false)}
+          >
+            {t("activeSessions")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={showArchived}
+            className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+              showArchived ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+            onClick={() => setShowArchived(true)}
+          >
+            {t("archivedSessions")}
+          </button>
+        </div>
         <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+          {userDraft && drafting && !showArchived && (
+            <div
+              className="rounded-md border border-dashed border-zinc-700 bg-zinc-900/40 px-2 py-1.5 text-[11px] text-zinc-300"
+              aria-current="true"
+            >
+              {t("draftSession")}
+            </div>
+          )}
           {loadingSessions && sessions.length === 0 && (
             <p className="px-1.5 py-1 text-[11px] text-zinc-500">{t("loadingSessions")}</p>
           )}
           {!loadingSessions && sessions.length === 0 && (
-            <p className="px-1.5 py-1 text-[11px] text-zinc-500">
-              {showArchived ? t("noArchivedSessions") : t("noSessions")}
-            </p>
+            <div className="px-1.5 py-2 space-y-1">
+              <p className="text-[11px] text-zinc-400">
+                {showArchived ? t("noArchivedSessions") : t("noSessions")}
+              </p>
+              {!showArchived && (
+                <p className="text-[10px] text-zinc-600 leading-snug">{t("noSessionsHint")}</p>
+              )}
+            </div>
           )}
           {sessions.map((s) => {
             const active = s.id === chatId;
@@ -346,9 +413,10 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                 <button
                   type="button"
                   onClick={() => void loadSession(s.id)}
-                  className={`w-full rounded-md px-2 py-1.5 text-start text-[11px] leading-snug transition-colors ${
+                  aria-current={active ? "true" : undefined}
+                  className={`w-full rounded-md px-2 py-1.5 text-start text-[11px] leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
                     active
-                      ? "bg-zinc-800 text-zinc-100"
+                      ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600"
                       : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
                   }`}
                 >
@@ -356,7 +424,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
                     <ChatMarkdown content={previewLabel(s, t("untitledSession"))} variant="compact" />
                   </span>
                 </button>
-                <div className="absolute end-1 top-1 hidden gap-0.5 group-hover/row:flex group-focus-within/row:flex">
+                <div className="pointer-events-none absolute end-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100">
                   {showArchived ? (
                     <Button
                       type="button"
@@ -407,21 +475,21 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             );
           })}
         </div>
-        <button
-          type="button"
-          className="border-t border-zinc-800 px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-200"
-          onClick={() => setShowArchived((v) => !v)}
-        >
-          {showArchived ? t("activeSessions") : t("archivedSessions")}
-        </button>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-          <div>
-            <h3 className="text-sm font-semibold text-zinc-100">{t("title")}</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-zinc-100 truncate">
+              {drafting
+                ? t("newChat")
+                : activeSession
+                  ? previewLabel(activeSession, t("untitledSession"))
+                  : t("untitledSession")}
+            </h3>
             <p className="text-[11px] text-zinc-500">
               {taskId ? t("taskScoped") : t("projectScoped")}
+              {busy ? ` · ${t("streaming")}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-0.5">
@@ -469,7 +537,10 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
             <p className="text-xs text-zinc-500">{t("loadingMessages")}</p>
           )}
           {!loadingMessages && messages.length === 0 && !busy && (
-            <p className="text-xs text-zinc-500">{t("emptyHint")}</p>
+            <div className="rounded-md border border-zinc-800/80 bg-zinc-900/30 px-3 py-3 space-y-1.5 max-w-prose">
+              <p className="text-xs text-zinc-300">{t("emptyHint")}</p>
+              <p className="text-[11px] text-zinc-500 leading-snug">{t("emptyHintDetail")}</p>
+            </div>
           )}
           {messages.map((m, i) => (
             m.role === "assistant" && !m.content && !m.reasoning ? null : <div
