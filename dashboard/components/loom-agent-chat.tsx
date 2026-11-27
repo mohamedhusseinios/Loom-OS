@@ -72,6 +72,9 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   const copyResetTimerRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Latest open-thread token. New Chat, another session, or a scope change bumps it
+  // so an in-flight list/messages fetch cannot overwrite that newer choice.
+  const sessionLoadRef = useRef(0);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -143,6 +146,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }, [projectId, taskId, showArchived, t]);
 
   const loadSession = useCallback(async (id: string) => {
+    const requestId = ++sessionLoadRef.current;
     abortInFlight();
     setLoadingMessages(true);
     setError("");
@@ -150,6 +154,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     setUserDraft(false);
     try {
       const rows = await listAgentChatMessages(projectId, id);
+      if (requestId !== sessionLoadRef.current) return;
       setMessages(
         rows
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -160,10 +165,11 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
           })),
       );
     } catch (e) {
+      if (requestId !== sessionLoadRef.current) return;
       setError(e instanceof Error ? e.message : t("chatError"));
       setMessages([]);
     } finally {
-      setLoadingMessages(false);
+      if (requestId === sessionLoadRef.current) setLoadingMessages(false);
     }
   }, [projectId, t, abortInFlight]);
 
@@ -182,18 +188,22 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
   }
 
   function startNewChat() {
+    sessionLoadRef.current += 1;
     abortInFlight();
     setChatId(undefined);
     setMessages([]);
     setInput("");
     setError("");
+    setLoadingMessages(false);
     setUserDraft(true);
   }
 
   function clearOpenChat() {
+    sessionLoadRef.current += 1;
     abortInFlight();
     setChatId(undefined);
     setMessages([]);
+    setLoadingMessages(false);
     setUserDraft(true);
   }
 
@@ -231,16 +241,18 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = ++sessionLoadRef.current;
     abortInFlight();
     setInput("");
     setError("");
     setChatId(undefined);
     setMessages([]);
+    setLoadingMessages(false);
     setPendingDeleteId(null);
     setUserDraft(false);
     (async () => {
       const chats = await refreshSessions();
-      if (cancelled) return;
+      if (cancelled || requestId !== sessionLoadRef.current) return;
       if (showArchived || chats.length === 0) {
         if (!showArchived && chats.length === 0) setUserDraft(true);
         return;
@@ -249,6 +261,7 @@ export function LoomAgentChat({ projectId, taskId, onSuggestion }: LoomAgentChat
     })();
     return () => {
       cancelled = true;
+      sessionLoadRef.current += 1;
     };
   }, [projectId, taskId, showArchived, refreshSessions, loadSession, abortInFlight]);
 
